@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::rc::Rc;
 
 use gpui::prelude::*;
@@ -38,12 +40,12 @@ pub(crate) fn render(
     if let Some(category) = scroll_target {
         if let Some(index) = main.symbol_category_row_indices.get(&category).copied() {
             let mut offset = main.symbol_scroll_handle.offset();
-            offset.y = px(-symbol_list::row_top(&rows, index));
+            offset.y = px(-symbol_list::row_top(&rows, index) * crate::ui::scale::window_scale(window));
             main.symbol_scroll_handle.set_offset(offset);
         }
     } else if main.symbol_search_query.trim().is_empty()
         && let Some(category) =
-            symbol_list::category_at_scroll(&rows, main.symbol_scroll_handle.offset().y)
+            symbol_list::category_at_scroll(&rows, main.symbol_scroll_handle.offset().y / crate::ui::scale::window_scale(window))
     {
         main.symbol_group = category;
     }
@@ -210,7 +212,7 @@ fn render_symbol_item(
     let item_id = ((row_index as u32) << 16) | item_index as u32;
     div()
         .id(("symbol-item", item_id))
-        .h(px(symbol_list::ROW_HEIGHT))
+        .h(ui_rem(symbol_list::ROW_HEIGHT))
         .w_full()
         .flex()
         .items_center()
@@ -224,14 +226,14 @@ fn render_symbol_item(
         }))
         .child(
             div()
-                .size(px(34.0))
+                .size(ui_rem(34.0))
                 .flex()
                 .items_center()
                 .justify_center()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_size(px(24.0))
-                .line_height(px(30.0))
+                .text_size(ui_rem(24.0))
+                .line_height(ui_rem(30.0))
                 .font_family("Segoe UI Symbol")
                 .child(item.glyph.clone()),
         )

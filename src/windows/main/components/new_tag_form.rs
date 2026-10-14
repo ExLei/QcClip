@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use gpui::{App, Context, Hsla, Window, div, px, rgb};
 use gpui_component::input::{Input, InputState};
@@ -122,7 +124,7 @@ impl NewTagForm {
     ) -> impl IntoElement {
         div()
             .id(("new-tag-color", index))
-            .h(px(28.0))
+            .h(ui_rem(28.0))
             .flex_1()
             .min_w_0()
             .flex()
@@ -250,7 +252,7 @@ impl Render for NewTagForm {
 
         div()
             .id("new-tag-form")
-            .w(px(320.0))
+            .w(ui_rem(320.0))
             .flex()
             .flex_col()
             .bg(theme.background)
@@ -264,12 +266,12 @@ impl Render for NewTagForm {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(12.0))
+                    .gap(ui_rem(12.0))
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap(px(5.0))
+                            .gap(ui_rem(5.0))
                             .child(field_label(
                                 translator.translate("main.form.tag.name"),
                                 theme,
@@ -284,7 +286,7 @@ impl Render for NewTagForm {
                         div()
                             .flex()
                             .flex_col()
-                            .gap(px(6.0))
+                            .gap(ui_rem(6.0))
                             .child(field_label(
                                 translator.translate("main.form.tag.color"),
                                 theme,
@@ -294,18 +296,18 @@ impl Render for NewTagForm {
                                     .flex()
                                     .w_full()
                                     .items_center()
-                                    .gap(px(7.0))
+                                    .gap(ui_rem(7.0))
                                     .children(color_swatches)
                                     .child(
                                         div()
                                             .id("new-tag-custom-color")
-                                            .h(px(28.0))
-                                            .w(px(68.0))
+                                            .h(ui_rem(28.0))
+                                            .w(ui_rem(68.0))
                                             .flex_none()
-                                            .px(px(5.0))
+                                            .px(ui_rem(5.0))
                                             .flex()
                                             .items_center()
-                                            .gap(px(4.0))
+                                            .gap(ui_rem(4.0))
                                             .rounded_md()
                                             .border_1()
                                             .border_color(if selected_color.is_none() {
@@ -320,13 +322,13 @@ impl Render for NewTagForm {
                                             }))
                                             .child(
                                                 div()
-                                                    .size(px(14.0))
+                                                    .size(ui_rem(14.0))
                                                     .rounded_full()
                                                     .bg(rgb(custom_color)),
                                             )
                                             .child(
                                                 div()
-                                                    .text_size(px(11.0))
+                                                    .text_size(ui_rem(11.0))
                                                     .text_color(theme.muted_foreground)
                                                     .child(
                                                         translator.translate(
@@ -340,7 +342,7 @@ impl Render for NewTagForm {
                     .when_some(submit_error, |this, message| {
                         this.child(
                             div()
-                                .text_size(px(11.0))
+                                .text_size(ui_rem(11.0))
                                 .text_color(theme.red)
                                 .child(message),
                         )
@@ -376,7 +378,7 @@ impl Render for NewTagForm {
 
 fn field_label(label: String, theme: gpui_component::ThemeColor) -> impl IntoElement {
     div()
-        .text_size(px(12.0))
+        .text_size(ui_rem(12.0))
         .text_color(theme.foreground)
         .child(label)
 }

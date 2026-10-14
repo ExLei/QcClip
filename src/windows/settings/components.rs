@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{cell::Cell, rc::Rc};
 
 use gpui::prelude::*;
@@ -38,7 +40,7 @@ where
     let on_select_for_click = on_select.clone();
 
     div()
-        .w(px(SETTINGS_DROPDOWN_WIDTH))
+        .w(ui_rem(SETTINGS_DROPDOWN_WIDTH))
         .on_children_prepainted(move |bounds, _, _| {
             if let Some(bounds) = bounds.first().copied() {
                 trigger_bounds_for_paint.set(Some(bounds));
@@ -51,7 +53,7 @@ where
                 .flex()
                 .items_center()
                 .justify_between()
-                .h(px(SETTINGS_DROPDOWN_HEIGHT))
+                .h(ui_rem(SETTINGS_DROPDOWN_HEIGHT))
                 .w_full()
                 .gap_2()
                 .rounded(px(6.0))
@@ -178,8 +180,8 @@ where
         .id(id)
         .flex()
         .items_center()
-        .w(px(200.0))
-        .h(px(SETTINGS_DROPDOWN_HEIGHT))
+        .w(ui_rem(200.0))
+        .h(ui_rem(SETTINGS_DROPDOWN_HEIGHT))
         .rounded(px(6.0))
         .border_1()
         .border_color(theme.input)
@@ -190,7 +192,7 @@ where
         .active(|style| style.border_color(theme.primary_active))
         .child(
             div()
-                .w(px(99.0))
+                .w(ui_rem(99.0))
                 .h_full()
                 .on_children_prepainted(move |bounds, _, _| {
                     if let Some(bounds) = bounds.first().copied() {
@@ -227,10 +229,10 @@ where
                         )),
                 ),
         )
-        .child(div().h(px(20.0)).w(px(1.0)).bg(theme.input))
+        .child(div().h(ui_rem(20.0)).w(px(1.0)).bg(theme.input))
         .child(
             div()
-                .w(px(99.0))
+                .w(ui_rem(99.0))
                 .h_full()
                 .on_children_prepainted(move |bounds, _, _| {
                     if let Some(bounds) = bounds.first().copied() {
@@ -288,7 +290,7 @@ where
     let theme = cx.theme().colors;
 
     div()
-        .w(px(32.0))
+        .w(ui_rem(32.0))
         .h_full()
         .on_children_prepainted(move |bounds, _, _| {
             if let Some(bounds) = bounds.first().copied() {
@@ -367,7 +369,7 @@ pub(in crate::windows::settings) fn settings_page_header(
 ) -> AnyElement {
     h_flex()
         .w_full()
-        .min_h(px(60.0))
+        .min_h(ui_rem(60.0))
         .flex_shrink_0()
         .items_center()
         .gap_3()
@@ -400,7 +402,7 @@ pub(in crate::windows::settings) fn setting_row(
     description: Option<SharedString>,
     control: impl IntoElement,
 ) -> AnyElement {
-    setting_row_with_min_height(theme, title, description, control, px(62.0))
+    setting_row_with_min_height(theme, title, description, control, ui_rem(62.0))
 }
 
 pub(in crate::windows::settings) fn clickable_setting_row<F>(
@@ -417,7 +419,7 @@ where
         .id(id)
         .w_full()
         .min_w_0()
-        .min_h(px(62.0))
+        .min_h(ui_rem(62.0))
         .flex_shrink_0()
         .items_center()
         .justify_between()
@@ -466,7 +468,7 @@ pub(in crate::windows::settings) fn compact_setting_row(
     title: String,
     control: impl IntoElement,
 ) -> AnyElement {
-    setting_row_with_min_height(theme, title, None, control, px(52.0))
+    setting_row_with_min_height(theme, title, None, control, ui_rem(52.0))
 }
 
 fn setting_row_with_min_height(
@@ -474,12 +476,14 @@ fn setting_row_with_min_height(
     title: String,
     description: Option<SharedString>,
     control: impl IntoElement,
-    min_height: Pixels,
+    min_height: gpui::Rems,
 ) -> AnyElement {
+    let control_id = format!("settings-control-{title}");
     h_flex()
         .w_full()
         .min_w_0()
         .min_h(min_height)
+        .flex_wrap()
         .flex_shrink_0()
         .items_center()
         .justify_between()
@@ -490,7 +494,8 @@ fn setting_row_with_min_height(
         .py_2()
         .child(
             v_flex()
-                .min_w_0()
+                .min_w(ui_rem(180.0))
+                .max_w_full()
                 .flex_1()
                 .gap_1()
                 .child(
@@ -511,7 +516,7 @@ fn setting_row_with_min_height(
                     )
                 }),
         )
-        .child(div().flex_shrink_0().child(control))
+        .child(div().id(control_id).flex_shrink_0().max_w_full().overflow_x_scroll().child(control))
         .into_any_element()
 }
 
@@ -524,7 +529,7 @@ pub(super) fn settings_placeholder_page(
         .size_full()
         .child(
             div()
-                .text_size(px(20.0))
+                .text_size(ui_rem(20.0))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(theme.foreground)
                 .child(crate::i18n::translator(cx).translate(page.title_key())),

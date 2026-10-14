@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use std::{
@@ -376,7 +378,7 @@ fn render_rows(
     let translator = i18n::translator(cx);
     let hover_allowed = window.is_window_hovered() && MenuService::hover_animation_allowed(cx);
     let list_width = window.viewport_size().width;
-    let preview_width = available_preview_width(list_width, list_item_style);
+    let preview_width = available_preview_width(list_width, list_item_style, window.rem_size());
     let layout_key = ListLayoutCacheKey {
         viewport_width: list_width,
         rem_size: window.rem_size(),
@@ -519,6 +521,7 @@ fn render_rows(
                                 available_preview_width(
                                     window.viewport_size().width,
                                     list_item_style,
+                                    window.rem_size(),
                                 ),
                                 window,
                             );
@@ -813,7 +816,7 @@ fn source_application_icon(
     let icon = image
         .map(|image| {
             img(image)
-                .size(px(16.0))
+                .size(ui_rem(16.0))
                 .object_fit(ObjectFit::Contain)
                 .into_any_element()
         })
@@ -827,7 +830,7 @@ fn source_application_icon(
 
     div()
         .id(("source-application-icon", row_id as u64))
-        .size(px(20.0))
+        .size(ui_rem(20.0))
         .flex()
         .items_center()
         .justify_center()
@@ -845,11 +848,11 @@ fn render_tag_indicators(
 ) -> AnyElement {
     div()
         .absolute()
-        .right(px(6.0))
-        .bottom(px(1.5))
+        .right(ui_rem(6.0))
+        .bottom(ui_rem(1.5))
         .flex()
         .items_end()
-        .gap(px(2.0))
+        .gap(ui_rem(2.0))
         .children(item.tag_ids.iter().filter_map(|tag_id| {
             tags.iter()
                 .find(|tag| tag.id == *tag_id)
@@ -879,17 +882,17 @@ fn render_tag_indicator(
     let mut name_label = div()
         .absolute()
         .right_0()
-        .bottom(px(20.0))
-        .max_w(px(140.0))
-        .h(px(18.0))
-        .px(px(4.0))
+        .bottom(ui_rem(20.0))
+        .max_w(ui_rem(140.0))
+        .h(ui_rem(18.0))
+        .px(ui_rem(4.0))
         .flex()
         .items_center()
         .rounded_sm()
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
-        .text_size(px(10.0))
+        .text_size(ui_rem(10.0))
         .text_color(theme.foreground)
         .whitespace_nowrap()
         .truncate()
@@ -903,8 +906,8 @@ fn render_tag_indicator(
         .id(format!("clipboard-tag-indicator-{row_id}-{}", tag.id))
         .group(group_name)
         .relative()
-        .w(px(6.0))
-        .h(px(10.0))
+        .w(ui_rem(6.0))
+        .h(ui_rem(10.0))
         .flex_none()
         .rounded_t_sm()
         .cursor_pointer()
@@ -917,7 +920,7 @@ fn render_tag_indicator(
             })
         })
         .when(hover_allowed, |this| {
-            this.hover(|style| style.w(px(10.0)).h(px(20.0)))
+            this.hover(|style| style.w(ui_rem(10.0)).h(ui_rem(20.0)))
         })
         .child(name_label)
         .into_any_element()
@@ -1132,7 +1135,7 @@ fn render_hover_actions(
         + usize::from(paste_plain_button.is_some())
         + usize::from(default_open_button.is_some())
         + usize::from(browser_button.is_some());
-    let expanded_width = px(button_count as f32 * 20.0);
+    let expanded_width = gpui_component::Theme::global(cx).font_size * (button_count as f32 * 20.0 / 16.0);
     let (width, opacity) = if selected {
         (expanded_width, 1.0)
     } else {
@@ -1180,7 +1183,7 @@ fn hover_action_button(
     div()
         .id(id)
         .group(icon_group.clone())
-        .size(px(20.0))
+        .size(ui_rem(20.0))
         .flex()
         .items_center()
         .justify_center()
@@ -1305,8 +1308,8 @@ fn render_selection_indicator(
         .top(px(0.0))
         .left(px(0.0))
         .w_auto()
-        .min_w(px(13.0))
-        .h(px(13.0))
+        .min_w(ui_rem(13.0))
+        .h(ui_rem(13.0))
         .flex()
         .items_center()
         .justify_center()
@@ -1320,8 +1323,8 @@ fn render_selection_indicator(
     }
     let marker = if let Some(number) = selection_number {
         div()
-            .min_w(px(11.0))
-            .h(px(11.0))
+            .min_w(ui_rem(11.0))
+            .h(ui_rem(11.0))
             .px(px(1.0))
             .flex()
             .items_center()
@@ -1331,7 +1334,7 @@ fn render_selection_indicator(
             .border_1()
             .border_color(theme.border)
             .bg(theme.primary)
-            .text_size(px(9.0))
+            .text_size(ui_rem(9.0))
             .text_color(theme.primary_foreground)
             .child(number.to_string())
             .into_any_element()
@@ -1341,7 +1344,7 @@ fn render_selection_indicator(
             indicator = indicator.group_hover(group_name, |style| style.visible());
         }
         div()
-            .size(px(11.0))
+            .size(ui_rem(11.0))
             .rounded_full()
             .border_1()
             .border_color(theme.muted_foreground)
@@ -1434,7 +1437,7 @@ fn render_item_surface<T>(
         .absolute()
         .top_0()
         .right_0()
-        .h(px(20.0))
+        .h(ui_rem(20.0))
         .flex()
         .items_center()
         .overflow_hidden()
@@ -1454,9 +1457,9 @@ fn render_item_surface<T>(
         .child(
             div()
                 .h_full()
-                .min_w(px(20.0))
-                .pl(px(4.0))
-                .pr(px(4.0))
+                .min_w(ui_rem(20.0))
+                .pl(ui_rem(4.0))
+                .pr(ui_rem(4.0))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -1557,7 +1560,7 @@ fn render_item_surface<T>(
         .flex_none()
         .flex()
         .items_center()
-        .gap(px(6.0))
+        .gap(ui_rem(6.0))
         .text_size(metrics.meta_row_height * 0.6)
         .line_height(metrics.meta_row_height)
         .text_color(cx.theme().muted_foreground)
@@ -1576,7 +1579,7 @@ fn render_item_surface<T>(
     } else {
         row.w_full()
     };
-    row = row.px(px(10.0)).py(metrics.vertical_padding);
+    row = row.px(ui_rem(10.0)).py(metrics.vertical_padding);
     if metrics.show_meta {
         row = row.child(meta_row);
     }
@@ -2479,7 +2482,7 @@ fn render_row(
         let hover_motion = Duration::from_millis(160).with_easing(gpui::ease_in_out);
         row = row
             .transitions(|transitions| transitions.top(hover_motion))
-            .group_hover(hover_group.clone(), |this| this.top(px(-2.0)));
+            .group_hover(hover_group.clone(), |this| this.top(ui_rem(-2.0)));
     }
 
     let mut row = div()
@@ -2596,9 +2599,9 @@ fn render_tag_item_drop_overlay(
         .flex()
         .items_center()
         .justify_center()
-        .px(px(8.0))
+        .px(ui_rem(8.0))
         .bg(gpui::ColorExt::opacity(&theme.background, 0.78))
-        .text_size(px(13.0))
+        .text_size(ui_rem(13.0))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(theme.foreground)
         .child("松开以添加标签");
@@ -2796,7 +2799,7 @@ fn render_loading_row(
         .flex_none()
         .flex()
         .items_center()
-        .px(px(10.0))
+        .px(ui_rem(10.0))
         .text_size(metrics.preview_font_size)
         .line_height(metrics.preview_line_height)
         .text_color(theme.muted_foreground)

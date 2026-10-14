@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, SettingsPage};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, ScrollAnchor};
@@ -314,7 +316,7 @@ impl SettingsWindowView {
             .child(
                 h_flex()
                     .w_full()
-                    .min_h(px(48.0))
+                    .min_h(ui_rem(48.0))
                     .flex_shrink_0()
                     .items_center()
                     .justify_between()
@@ -714,7 +716,7 @@ fn shortcut_category(
     let header = h_flex()
         .w_full()
         .min_w_0()
-        .min_h(px(48.0))
+        .min_h(ui_rem(48.0))
         .items_center()
         .gap_3()
         .px_4()
@@ -729,7 +731,7 @@ fn shortcut_category(
                 .gap_3()
                 .child(
                     div()
-                        .text_size(px(15.0))
+                        .text_size(ui_rem(15.0))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(theme.foreground)
                         .child(title),
@@ -1003,7 +1005,7 @@ fn shortcut_recorder(
         .track_focus(&focus_handle)
         .flex()
         .items_center()
-        .w(px(200.0))
+        .w(ui_rem(200.0))
         .h_8()
         .gap_1()
         .px_3()

@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, SettingsPage};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, FontWeight, RenderImage, div, px};
@@ -70,7 +72,7 @@ impl SettingsWindowView {
             .min_w_0()
             .items_center()
             .gap_2()
-            .min_h(px(48.0))
+            .min_h(ui_rem(48.0))
             .flex_shrink_0()
             .border_b_1()
             .border_color(theme.border)
@@ -330,7 +332,7 @@ fn application_list_panel(
     let rows = if applications.is_empty() {
         v_flex()
             .w_full()
-            .h(px(150.0))
+            .h(ui_rem(150.0))
             .items_center()
             .justify_center()
             .text_xs()
@@ -340,7 +342,7 @@ fn application_list_panel(
     } else {
         v_flex()
             .w_full()
-            .h(px(150.0))
+            .h(ui_rem(150.0))
             .gap_1()
             .overflow_y_scrollbar()
             .children(applications.into_iter().enumerate().map(|(index, application)| {
@@ -396,7 +398,7 @@ fn application_row(
         .icon
         .map(|image: Arc<RenderImage>| {
             gpui::img(image)
-                .size(px(22.0))
+                .size(ui_rem(22.0))
                 .object_fit(gpui::ObjectFit::Contain)
                 .into_any_element()
         })
@@ -404,7 +406,7 @@ fn application_row(
     h_flex()
         .id(("settings-application-filter-row", index))
         .w_full()
-        .h(px(32.0))
+        .h(ui_rem(32.0))
         .flex_shrink_0()
         .items_center()
         .gap_2()
@@ -429,7 +431,7 @@ fn application_row(
         })
         .child(
             div()
-                .size(px(24.0))
+                .size(ui_rem(24.0))
                 .flex_none()
                 .flex()
                 .items_center()

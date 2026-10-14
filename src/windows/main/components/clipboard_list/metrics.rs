@@ -251,13 +251,13 @@ pub(super) fn shaped_line_count(
     line_count.clamp(1, max_lines.max(1))
 }
 
-pub(super) fn available_preview_width(window_width: Pixels, style: ListItemStyle) -> Pixels {
+pub(super) fn available_preview_width(window_width: Pixels, style: ListItemStyle, rem_size: Pixels) -> Pixels {
     let card_inset = if style == ListItemStyle::Card {
         CARD_HORIZONTAL_INSET * 2.0
     } else {
         0.0
     };
-    px((f32::from(window_width) - ROW_HORIZONTAL_PADDING * 2.0 - card_inset).max(1.0))
+    px((f32::from(window_width) - ROW_HORIZONTAL_PADDING * 2.0 * f32::from(rem_size) / 16.0 - card_inset).max(1.0))
 }
 
 pub(super) fn item_preview(
@@ -340,6 +340,14 @@ impl ListItemMetrics {
 #[cfg(test)]
 mod note_tests {
     use super::*;
+
+    #[test]
+    fn scaled_text_measurement_uses_the_rendered_horizontal_padding() {
+        assert_eq!(available_preview_width(px(200.0), ListItemStyle::Card, px(16.0)), px(164.0));
+        assert_eq!(available_preview_width(px(200.0), ListItemStyle::Card, px(32.0)), px(144.0));
+        assert_eq!(available_preview_width(px(200.0), ListItemStyle::Seamless, px(32.0)), px(160.0));
+        assert_eq!(available_preview_width(px(20.0), ListItemStyle::Card, px(32.0)), px(1.0));
+    }
 
     #[test]
     fn notes_replace_content_only_for_extra_small_or_explicit_setting() {

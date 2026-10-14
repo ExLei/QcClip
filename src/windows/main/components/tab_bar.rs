@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use std::time::Duration;
 
@@ -39,7 +41,7 @@ fn tab_slot(element: impl IntoElement) -> impl IntoElement {
         .min_w_0()
         .flex()
         .items_center()
-        .px(px(TAB_SLOT_INSET))
+        .px(ui_rem(TAB_SLOT_INSET))
         .child(element)
 }
 
@@ -57,17 +59,17 @@ fn horizontal_active_indicator(
 
     let indicator = div()
         .absolute()
-        .top(px(4.0))
+        .top(ui_rem(4.0))
         .left(relative(left))
         .w(relative(width))
-        .h(px(TAB_BUTTON_HEIGHT))
+        .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex()
         .items_center()
         .child({
             let bar = div()
                 .flex_1()
                 .h_full()
-                .mx(px(inset))
+                .mx(ui_rem(inset))
                 .rounded_lg()
                 .bg(color)
                 .shadow_sm();
@@ -77,7 +79,7 @@ fn horizontal_active_indicator(
                     Animation::new(Duration::from_millis(150)).with_easing(gpui::ease_in_out),
                     move |this, progress| {
                         let expansion = (std::f32::consts::PI * progress).sin() * 0.9;
-                        this.mx(px((inset - expansion).max(0.0)))
+                        this.mx(ui_rem((inset - expansion).max(0.0)))
                     },
                 )
                 .into_any_element()
@@ -109,10 +111,10 @@ fn vertical_active_indicator(
 
     let indicator = div()
         .absolute()
-        .top(px(top))
-        .left(px(horizontal_inset))
-        .right(px(horizontal_inset))
-        .h(px(SIDEBAR_BUTTON_HEIGHT))
+        .top(ui_rem(top))
+        .left(ui_rem(horizontal_inset))
+        .right(ui_rem(horizontal_inset))
+        .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
         .child({
             let bar = div()
                 .size_full()
@@ -126,7 +128,7 @@ fn vertical_active_indicator(
                     move |this, progress| {
                         let expansion = (std::f32::consts::PI * progress).sin() * 0.9;
                         let vertical_margin = (2.0 * (1.0 - progress) - expansion).max(0.0);
-                        this.my(px(vertical_margin))
+                        this.my(ui_rem(vertical_margin))
                     },
                 )
                 .into_any_element()
@@ -136,7 +138,7 @@ fn vertical_active_indicator(
         });
     if animations_enabled {
         indicator
-            .with_spring((id, "top"), spring(px(top)), |this, value| this.top(value))
+            .with_spring((id, "top"), spring(top), |this, value| this.top(ui_rem(value)))
             .into_any_element()
     } else {
         indicator.into_any_element()
@@ -147,8 +149,8 @@ fn sidebar_button_item(element: impl IntoElement) -> impl IntoElement {
     div()
         .w_auto()
         .min_w_auto()
-        .h(px(SIDEBAR_BUTTON_HEIGHT))
-        .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+        .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+        .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
         .flex_none()
         .child(element)
 }
@@ -157,8 +159,8 @@ fn sidebar_tab_item(element: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
         .min_w_auto()
-        .h(px(SIDEBAR_BUTTON_HEIGHT))
-        .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+        .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+        .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
         .flex_none()
         .child(element)
 }
@@ -182,7 +184,7 @@ fn tab_button(
     let icon_group = format!("main-tab-{}", definition.id as u32);
     let mut button = div()
         .group(icon_group.clone())
-        .h(px(TAB_BUTTON_HEIGHT))
+        .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex_1()
         .min_w_0()
         .flex()
@@ -201,15 +203,15 @@ fn tab_button(
         button = button
             .w_full()
             .min_w_auto()
-            .h(px(SIDEBAR_BUTTON_HEIGHT))
-            .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+            .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+            .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
             .flex_none();
         if show_label {
             button = button.justify_start().gap_2().px_3().child(
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .text_color(color)
                     .child(label),
             );
@@ -253,7 +255,7 @@ fn filter_button(
     let icon_group = format!("filter-button-{}", definition.id as u32);
     let mut button = div()
         .group(icon_group.clone())
-        .h(px(TAB_BUTTON_HEIGHT))
+        .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex_1()
         .min_w_0()
         .flex()
@@ -284,10 +286,10 @@ fn filter_button(
             button = button.child(
                 div()
                     .absolute()
-                    .left(px(4.0))
-                    .right(px(4.0))
+                    .left(ui_rem(4.0))
+                    .right(ui_rem(4.0))
                     .bottom(px(0.0))
-                    .h(px(2.0))
+                    .h(ui_rem(2.0))
                     .rounded_full()
                     .bg(theme.primary),
             );
@@ -298,15 +300,15 @@ fn filter_button(
         button = button
             .w_auto()
             .min_w_auto()
-            .h(px(SIDEBAR_BUTTON_HEIGHT))
-            .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+            .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+            .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
             .flex_none();
         if show_label {
             button = button.justify_start().gap_2().px_3().child(
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .text_color(color)
                     .child(label),
             );
@@ -345,12 +347,12 @@ fn symbol_category_button(
     let icon_group = format!("symbol-category-{}", definition.id as u32);
     let category_icon = if definition.icon == "😀" {
         div()
-            .size(px(16.0))
+            .size(ui_rem(16.0))
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(14.0))
-            .line_height(px(16.0))
+            .text_size(ui_rem(14.0))
+            .line_height(ui_rem(16.0))
             .text_color(color)
             .font_family("Segoe UI Emoji")
             .child(definition.icon)
@@ -367,7 +369,7 @@ fn symbol_category_button(
 
     let mut button = div()
         .group(icon_group)
-        .h(px(TAB_BUTTON_HEIGHT))
+        .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex_1()
         .min_w_0()
         .flex()
@@ -387,15 +389,15 @@ fn symbol_category_button(
         button = button
             .w_full()
             .min_w_auto()
-            .h(px(SIDEBAR_BUTTON_HEIGHT))
-            .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+            .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+            .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
             .flex_none();
         if show_label {
             button = button.justify_start().gap_2().px_3().child(
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .text_color(color)
                     .child(label),
             );
@@ -440,8 +442,8 @@ pub fn render(
     let mut tags_button = div()
         .id("tags-toggle")
         .group("main-tags-button")
-        .w(px(60.0))
-        .h(px(TAB_BUTTON_HEIGHT))
+        .w(ui_rem(60.0))
+        .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex()
         .items_center()
         .justify_center()
@@ -491,13 +493,13 @@ pub fn render(
         tags_button = tags_button
             .w_auto()
             .min_w_auto()
-            .h(px(SIDEBAR_BUTTON_HEIGHT))
-            .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+            .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+            .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
             .flex_none();
         if sidebar_show_label {
             tags_button = tags_button.justify_start().gap_2().px_3().child(
                 div()
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .text_color(tags_button_color)
                     .child(translator.translate("main.tags.title")),
             );
@@ -507,7 +509,7 @@ pub fn render(
     } else {
         tags_button = tags_button.child(
             div()
-                .text_size(px(11.0))
+                .text_size(ui_rem(11.0))
                 .text_color(tags_button_color)
                 .child(translator.translate("main.tags.title")),
         );
@@ -534,8 +536,8 @@ pub fn render(
             .group("main-sidebar-collapse")
             .w_auto()
             .min_w_auto()
-            .h(px(SIDEBAR_BUTTON_HEIGHT))
-            .min_h(px(SIDEBAR_BUTTON_HEIGHT))
+            .h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
+            .min_h(ui_rem(SIDEBAR_BUTTON_HEIGHT))
             .flex_none()
             .flex()
             .items_center()
@@ -555,7 +557,7 @@ pub fn render(
         if sidebar_show_label {
             collapse_button = collapse_button.justify_start().gap_2().px_3().child(
                 div()
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .text_color(theme.foreground)
                     .child(collapse_label),
             );
@@ -571,7 +573,7 @@ pub fn render(
             .relative()
             .bg(theme.tab_bar);
         if main.sidebar_collapsed {
-            sidebar = sidebar.w(px(SIDEBAR_COLLAPSED_WIDTH));
+            sidebar = sidebar.w(ui_rem(SIDEBAR_COLLAPSED_WIDTH));
         } else {
             sidebar = sidebar.w_auto().min_w_auto();
         }
@@ -701,7 +703,7 @@ pub fn render(
     }
 
     let tab_bar = div()
-        .h(px(TAB_BAR_HEIGHT))
+        .h(ui_rem(TAB_BAR_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
@@ -709,11 +711,11 @@ pub fn render(
         .bg(theme.tab_bar)
         .child(
             div()
-                .h(px(TAB_BAR_HEIGHT))
+                .h(ui_rem(TAB_BAR_HEIGHT))
                 .min_w_0()
                 .flex_none()
                 .flex_basis(relative(0.35))
-                .px(px(6.0))
+                .px(ui_rem(6.0))
                 .flex()
                 .items_center()
                 .child(
@@ -742,10 +744,10 @@ pub fn render(
                         })),
                 ),
         )
-        .child(div().flex_none().w(px(0.5)).h(px(24.0)).bg(theme.border))
+        .child(div().flex_none().w(px(0.5)).h(ui_rem(24.0)).bg(theme.border))
         .child(
             div()
-                .h(px(TAB_BAR_HEIGHT))
+                .h(ui_rem(TAB_BAR_HEIGHT))
                 .flex_1()
                 .min_w_0()
                 .pl_1()
@@ -755,7 +757,7 @@ pub fn render(
                 .gap_1()
                 .child(if main.active_tab == TabId::Emoji {
                     div()
-                        .h(px(TAB_BAR_HEIGHT))
+                        .h(ui_rem(TAB_BAR_HEIGHT))
                         .flex_1()
                         .min_w_0()
                         .flex()
@@ -781,7 +783,7 @@ pub fn render(
                         .into_any_element()
                 } else {
                     div()
-                        .h(px(TAB_BAR_HEIGHT))
+                        .h(ui_rem(TAB_BAR_HEIGHT))
                         .flex_1()
                         .min_w_0()
                         .flex()

@@ -16,7 +16,6 @@ use gpui_component::{ActiveTheme as _, ThemeColor};
 use crate::{
     config::{ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, ListItemHeight},
     i18n::{self, Translator},
-    ui::icon,
 };
 
 const FILE_ICON_SIZE: u16 = 32;
@@ -319,12 +318,11 @@ impl FileListView {
             } else {
                 "file-description"
             };
-            icon(
-                icon_name,
-                f32::from(presentation.icon_size),
-                theme.foreground,
-            )
-            .into_any_element()
+            gpui_component::Icon::empty()
+                .path(format!("assets/icons/{icon_name}.svg"))
+                .size(presentation.icon_size)
+                .text_color(theme.foreground)
+                .into_any_element()
         };
         let text = if presentation.show_path {
             let name_row = div()

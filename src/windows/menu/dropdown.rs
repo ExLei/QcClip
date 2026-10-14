@@ -191,11 +191,11 @@ impl DropdownMenuView {
     fn render_item(&self, index: usize, item: &DropdownItem, cx: &mut Context<Self>) -> AnyElement {
         if item.separator {
             return div()
-                .h(px(DROPDOWN_SEPARATOR_HEIGHT))
-                .px(px(3.0))
+                .h(gpui::rems(DROPDOWN_SEPARATOR_HEIGHT / 13.0))
+                .px(gpui::rems(3.0 / 13.0))
                 .flex()
                 .items_center()
-                .child(div().h(px(1.0)).w_full().bg(cx.theme().border))
+                .child(div().h(gpui::rems(1.0 / 13.0)).w_full().bg(cx.theme().border))
                 .into_any_element();
         }
 
@@ -212,12 +212,12 @@ impl DropdownMenuView {
         div()
             .id(("qcclip-dropdown-item", index as u64))
             .w_full()
-            .h(px(DROPDOWN_ITEM_HEIGHT))
+            .h(gpui::rems(DROPDOWN_ITEM_HEIGHT / 13.0))
             .flex()
             .min_w_0()
             .overflow_hidden()
-            .px(px(DROPDOWN_ITEM_PADDING_X))
-            .py(px(DROPDOWN_ITEM_PADDING_Y))
+            .px(gpui::rems(DROPDOWN_ITEM_PADDING_X / 13.0))
+            .py(gpui::rems(DROPDOWN_ITEM_PADDING_Y / 13.0))
             .child(
                 div()
                     .id(("qcclip-dropdown-item-row", index as u64))
@@ -228,7 +228,7 @@ impl DropdownMenuView {
                     .items_center()
                     .overflow_hidden()
                     .rounded(px(4.0))
-                    .px(px(9.0))
+                    .px(gpui::rems(9.0 / 13.0))
                     .text_color(foreground)
                     .when(selected, |this| this.bg(colors.accent))
                     .when(enabled, |this| this.hover(|style| style.bg(colors.accent)))
@@ -248,7 +248,7 @@ impl DropdownMenuView {
 
 impl Render for DropdownMenuView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_rem_size(px(13.0));
+        window.set_rem_size(crate::ui::scale::standalone_rem_size(13.0, cx));
         let measured_size = self.measure_content_size(window, cx);
         let placement = self.place_window(measured_size, window, cx);
         let scale_factor = self.display_scale_factor(window);
@@ -317,8 +317,8 @@ fn dropdown_shell(
                 .id("qcclip-dropdown-surface")
                 .min_w(px(min_width))
                 .max_h(px(max_height))
-                .py(px(DROPDOWN_SHELL_PADDING_Y))
-                .text_size(px(13.0))
+                .py(gpui::rems(DROPDOWN_SHELL_PADDING_Y / 13.0))
+                .text_size(gpui::rems(13.0 / 13.0))
                 .overflow_y_scroll()
                 .track_scroll(scroll_handle)
                 .children(items),
@@ -329,20 +329,20 @@ fn dropdown_shell(
 fn dropdown_measurement_item(item: &DropdownItem) -> AnyElement {
     if item.separator {
         return div()
-            .h(px(DROPDOWN_SEPARATOR_HEIGHT))
-            .px(px(3.0))
+            .h(gpui::rems(DROPDOWN_SEPARATOR_HEIGHT / 13.0))
+            .px(gpui::rems(3.0 / 13.0))
             .flex()
             .items_center()
-            .child(div().h(px(1.0)).w_full())
+            .child(div().h(gpui::rems(1.0 / 13.0)).w_full())
             .into_any_element();
     }
 
     div()
-        .h(px(DROPDOWN_ITEM_HEIGHT))
-        .px(px(DROPDOWN_ITEM_PADDING_X))
-        .py(px(DROPDOWN_ITEM_PADDING_Y))
+        .h(gpui::rems(DROPDOWN_ITEM_HEIGHT / 13.0))
+        .px(gpui::rems(DROPDOWN_ITEM_PADDING_X / 13.0))
+        .py(gpui::rems(DROPDOWN_ITEM_PADDING_Y / 13.0))
         .child(
-            div().h_full().flex().items_center().px(px(9.0)).child(
+            div().h_full().flex().items_center().px(gpui::rems(9.0 / 13.0)).child(
                 div()
                     .flex_none()
                     .whitespace_nowrap()

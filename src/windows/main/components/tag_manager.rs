@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::collections::{HashMap, HashSet};
 
 use chrono::{Local, TimeZone};
@@ -576,7 +578,7 @@ impl TagManager {
                 div()
                     .id("tag-manager-search-clear-button")
                     .group("tag-manager-search-clear-button")
-                    .size(px(20.0))
+                    .size(ui_rem(20.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -609,8 +611,8 @@ impl TagManager {
         div()
             .flex_1()
             .min_w_0()
-            .max_w(px(280.0))
-            .mx(px(12.0))
+            .max_w(ui_rem(280.0))
+            .mx(ui_rem(12.0))
             .child(search_input)
             .into_any_element()
     }
@@ -660,10 +662,10 @@ impl TagManager {
             .child(self.render_search_input(theme))
             .child(
                 h_flex()
-                    .gap(px(8.0))
+                    .gap(ui_rem(8.0))
                     .child(
                         div()
-                            .text_size(px(11.0))
+                            .text_size(ui_rem(11.0))
                             .text_color(theme.muted_foreground)
                             .child(translator.translate_with_args(
                                 "main.tags.manager.selected_count",
@@ -691,7 +693,7 @@ impl TagManager {
         let manager = cx.entity();
         let header = div()
             .w_full()
-            .h(px(36.0))
+            .h(ui_rem(36.0))
             .flex()
             .items_center()
             .flex_none()
@@ -812,7 +814,7 @@ impl TagManager {
         let mut row = div()
             .id(("tag-manager-row", tag_id as u64))
             .w_full()
-            .h(px(46.0))
+            .h(ui_rem(46.0))
             .flex()
             .items_center()
             .flex_none()
@@ -863,7 +865,7 @@ impl TagManager {
                     div()
                         .id(("tag-manager-delete", tag_id as u64))
                         .group(format!("tag-manager-delete-{tag_id}"))
-                        .size(px(28.0))
+                        .size(ui_rem(28.0))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -925,7 +927,7 @@ impl TagManager {
                     .h_full()
                     .flex()
                     .items_center()
-                    .gap(px(4.0))
+                    .gap(ui_rem(4.0))
                     .px_3()
                     .on_key_down(cx.listener(move |manager, event: &KeyDownEvent, _, cx| {
                         if event.keystroke.key == "escape" {
@@ -995,7 +997,7 @@ impl TagManager {
                     .min_w_0()
                     .truncate()
                     .text_color(theme.foreground)
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .font_weight(FontWeight::MEDIUM)
                     .child(tag.name.clone()),
             )
@@ -1023,7 +1025,7 @@ impl TagManager {
             .h_full()
             .flex()
             .items_center()
-            .gap(px(7.0))
+            .gap(ui_rem(7.0))
             .px_3()
             .cursor_pointer()
             .when(saving, |this| this.opacity(0.55))
@@ -1033,10 +1035,10 @@ impl TagManager {
                     manager.open_tag_color_picker(tag_id, window, cx)
                 });
             })
-            .child(div().size(px(16.0)).rounded_full().bg(rgb(color)))
+            .child(div().size(ui_rem(16.0)).rounded_full().bg(rgb(color)))
             .child(
                 div()
-                    .text_size(px(11.0))
+                    .text_size(ui_rem(11.0))
                     .text_color(theme.muted_foreground)
                     .child(format!("#{color:06X}")),
             )
@@ -1057,7 +1059,7 @@ impl TagManager {
         let mut row = div()
             .id("tag-manager-new-row")
             .w_full()
-            .h(px(52.0))
+            .h(ui_rem(52.0))
             .flex()
             .items_center()
             .flex_none()
@@ -1082,7 +1084,7 @@ impl TagManager {
                 .h_full()
                 .flex()
                 .items_center()
-                .gap(px(4.0))
+                .gap(ui_rem(4.0))
                 .px_3()
                 .on_key_down(cx.listener(move |manager, event: &KeyDownEvent, _, cx| {
                     if event.keystroke.key == "escape" {
@@ -1138,7 +1140,7 @@ impl TagManager {
                 .h_full()
                 .flex()
                 .items_center()
-                .gap(px(7.0))
+                .gap(ui_rem(7.0))
                 .px_3()
                 .cursor_pointer()
                 .hover(|this| this.bg(theme.table_hover))
@@ -1146,10 +1148,10 @@ impl TagManager {
                     manager_for_color
                         .update(cx, |manager, cx| manager.open_new_color_picker(window, cx));
                 })
-                .child(div().size(px(16.0)).rounded_full().bg(rgb(color)))
+                .child(div().size(ui_rem(16.0)).rounded_full().bg(rgb(color)))
                 .child(
                     div()
-                        .text_size(px(11.0))
+                        .text_size(ui_rem(11.0))
                         .text_color(theme.muted_foreground)
                         .child(format!("#{color:06X}")),
                 ),
@@ -1190,12 +1192,12 @@ impl Render for TagManager {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
+                    .gap(ui_rem(10.0))
                     .child(self.render_toolbar(theme, cx))
                     .when_some(error_message, |this, message| {
                         this.child(
                             div()
-                                .text_size(px(11.0))
+                                .text_size(ui_rem(11.0))
                                 .text_color(theme.danger)
                                 .child(message),
                         )
@@ -1218,7 +1220,7 @@ fn inline_action(
     div()
         .id(id)
         .group(group.clone())
-        .size(px(24.0))
+        .size(ui_rem(24.0))
         .flex()
         .items_center()
         .justify_center()
@@ -1240,7 +1242,7 @@ fn table_header_cell(
         .flex()
         .items_center()
         .px_3()
-        .text_size(px(11.0))
+        .text_size(ui_rem(11.0))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme.table_head_foreground)
         .child(label);
@@ -1263,7 +1265,7 @@ fn table_date_cell(
         .items_center()
         .px_3()
         .flex_none()
-        .text_size(px(11.0))
+        .text_size(ui_rem(11.0))
         .text_color(theme.muted_foreground)
         .child(value)
 }
@@ -1271,11 +1273,11 @@ fn table_date_cell(
 fn manager_status(message: String, theme: gpui_component::ThemeColor) -> AnyElement {
     div()
         .w_full()
-        .h(px(76.0))
+        .h(ui_rem(76.0))
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(11.0))
+        .text_size(ui_rem(11.0))
         .text_color(theme.muted_foreground)
         .child(message)
         .into_any_element()

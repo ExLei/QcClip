@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, SettingsPage};
 use gpui::prelude::*;
 use gpui::{
@@ -72,10 +74,10 @@ impl SettingsWindowView {
                 .w_full()
                 .min_w_0()
                 .items_start()
-                .gap(px(20.0))
+                .gap(ui_rem(20.0))
                 .border_t_1()
                 .border_color(theme.border)
-                .pt(px(20.0))
+                .pt(ui_rem(20.0))
                 .pb_2()
                 .child(updates)
                 .child(donation))
@@ -113,10 +115,10 @@ impl SettingsWindowView {
             .items_center()
             .gap_3()
             .py_4()
-            .child(img("assets/icon1024.png").size(px(72.0)).object_fit(ObjectFit::Contain))
-            .child(div().text_size(px(24.0)).font_weight(FontWeight::SEMIBOLD).child("QcClip"))
+            .child(img("assets/icon1024.png").size(ui_rem(72.0)).object_fit(ObjectFit::Contain))
+            .child(div().text_size(ui_rem(24.0)).font_weight(FontWeight::SEMIBOLD).child("QcClip"))
             .child(version)
-            .child(div().w_full().max_w(px(440.0)).text_sm().text_center()
+            .child(div().w_full().max_w(ui_rem(440.0)).text_sm().text_center()
                 .text_color(theme.muted_foreground)
                 .child(translator.translate("settings.about.description")))
             .into_any_element()
@@ -272,20 +274,20 @@ impl SettingsWindowView {
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         v_flex()
-            .w(px(164.0)).flex_shrink_0().items_center()
+            .w(ui_rem(164.0)).flex_shrink_0().items_center()
             .gap_3().border_l_1().border_color(theme.border).pl_4().pt_1()
             .child(h_flex().gap_2()
                 .child(icon("brand-wechat", 18.0, gpui::rgb_to_hsla(gpui::rgb(0x07C160))))
                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD)
                     .child(translator.translate("settings.about.donation"))))
-            .child(img("assets/wxzsm.png").size(px(144.0)).object_fit(ObjectFit::Contain))
+            .child(img("assets/wxzsm.png").size(ui_rem(144.0)).object_fit(ObjectFit::Contain))
             .into_any_element()
     }
 }
 
 fn about_update_row(title: String, control: impl IntoElement, cx: &App) -> AnyElement {
     h_flex()
-        .w_full().min_w_0().min_h(px(48.0)).flex_shrink_0()
+        .w_full().min_w_0().min_h(ui_rem(48.0)).flex_shrink_0()
         .justify_between().gap_3().py_2()
         .border_b_1().border_color(cx.theme().border)
         .child(div().flex_1().min_w_0().text_sm().child(title))
@@ -422,7 +424,7 @@ struct CommunityDialog {
 
 impl Render for CommunityDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_rem_size(px(13.0));
+        window.set_rem_size(crate::ui::scale::standalone_rem_size(16.0, cx));
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let community = &COMMUNITIES[self.selected];
@@ -445,13 +447,13 @@ impl Render for CommunityDialog {
                     .w_full()
                     .max_w(px(COMMUNITY_WINDOW_WIDTH - 24.0))
                     .items_start()
-                    .gap(px(12.0))
-                    .child(v_flex().w(px(224.0)).flex_none().gap(px(8.0))
+                    .gap(ui_rem(12.0))
+                    .child(v_flex().w(ui_rem(224.0)).flex_none().gap(ui_rem(8.0))
                         .children(COMMUNITIES.iter().enumerate().map(|(index, entry)| {
                             let selected = self.selected == index;
                             v_flex()
                                 .id(format!("community-entry-{index}"))
-                                .w_full().h(px(84.0)).justify_center().gap(px(6.0))
+                                .w_full().h(ui_rem(84.0)).justify_center().gap(ui_rem(6.0))
                                 .p(px(10.0)).rounded(px(6.0)).border_1()
                                 .border_color(if selected { theme.primary } else { theme.border })
                                 .bg(if selected { theme.accent } else { theme.background })
@@ -461,7 +463,7 @@ impl Render for CommunityDialog {
                                     this.selected = index;
                                     cx.notify();
                                 }))
-                                .child(div().text_size(px(14.0)).font_weight(FontWeight::SEMIBOLD)
+                                .child(div().text_size(ui_rem(14.0)).font_weight(FontWeight::SEMIBOLD)
                                     .child(translator.translate(entry.title_key)))
                                 .child(h_flex().gap_2()
                                     .child(div().flex_1().min_w_0().text_sm()
@@ -474,13 +476,13 @@ impl Render for CommunityDialog {
                                             copy_text(entry.number, window, cx);
                                         })))
                         })))
-                    .child(v_flex().flex_1().min_w_0().items_center().gap(px(8.0))
-                        .child(img(community.image).size(px(168.0)).object_fit(ObjectFit::Contain))
-                        .child(div().text_size(px(14.0)).font_weight(FontWeight::SEMIBOLD)
+                    .child(v_flex().flex_1().min_w_0().items_center().gap(ui_rem(8.0))
+                        .child(img(community.image).size(ui_rem(168.0)).object_fit(ObjectFit::Contain))
+                        .child(div().text_size(ui_rem(14.0)).font_weight(FontWeight::SEMIBOLD)
                             .text_center().child(translator.translate(community.title_key)))
-                        .child(div().w_full().min_h(px(32.0)).flex().items_center().justify_center()
+                        .child(div().w_full().min_h(ui_rem(32.0)).flex().items_center().justify_center()
                             .px_2().rounded(px(6.0)).bg(theme.muted)
-                            .text_size(px(12.0)).text_color(theme.muted_foreground).child(community.url))
+                            .text_size(ui_rem(12.0)).text_color(theme.muted_foreground).child(community.url))
                         .child(h_flex().w_full().gap_2()
                             .child(Button::new("community-join").primary().small().flex_1()
                                 .icon(icon("external-link", 16.0, theme.primary_foreground))

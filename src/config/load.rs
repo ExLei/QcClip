@@ -219,6 +219,9 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
     };
     AppearanceConfig {
         mode: read_field(object, "mode", "appearance.mode", default.mode, warnings),
+        ui_scale_percent: read_field(
+            object, "uiScalePercent", "appearance.uiScalePercent", default.ui_scale_percent, warnings,
+        ),
         light_theme: read_field(
             object,
             "lightTheme",
@@ -819,6 +822,24 @@ mod tests {
             loaded.config.appearance.titlebar_position,
             TitlebarPosition::Right
         );
+    }
+
+    #[test]
+    fn ui_scale_defaults_loads_and_normalizes_without_affecting_other_fields() {
+        let default = from_str(r#"{"appearance":{"mode":"dark"}}"#).expect("无法加载旧配置");
+        assert_eq!(default.config.appearance.ui_scale_percent, 100);
+        for (input, expected) in [(0, 80), (125, 125), (65535, 200)] {
+            let loaded = from_str(&format!(r#"{{"appearance":{{"uiScalePercent":{input}}}}}"#))
+                .expect("无法加载缩放配置");
+            assert_eq!(loaded.config.appearance.ui_scale_percent, expected);
+        }
+        let invalid = from_str(r#"{"appearance":{"uiScalePercent":"大","onlyShowNotes":true}}"#)
+            .expect("无法加载字段级容错配置");
+        assert_eq!(invalid.config.appearance.ui_scale_percent, 100);
+        assert!(invalid.config.appearance.only_show_notes);
+        assert_eq!(invalid.warnings.len(), 1);
+        let json = serde_json::to_string(&default.config).expect("无法序列化缩放配置");
+        assert_eq!(from_str(&json).expect("无法重新加载缩放配置").config, default.config);
     }
 
     #[test]

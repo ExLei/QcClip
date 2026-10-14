@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::{
     AnimationExt, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
     SpringAnimation, SpringConfig, StatefulInteractiveElement, Styled, div, px,
@@ -57,7 +59,8 @@ pub fn render(
     );
     let translator = i18n::translator(cx);
     let show_scroll_top = scroll_handle.offset().y < px(-SCROLL_TOP_THRESHOLD);
-    let toolbar_height = toolbar_height(show_scroll_top, show_new_favorite);
+    let ui_scale = crate::ui::scale::theme_scale(cx);
+    let toolbar_height = toolbar_height(show_scroll_top, show_new_favorite) * ui_scale;
     // 没有任何功能按钮需要显示时整体隐藏（含拖拽手柄）。
     if !show_scroll_top && !show_new_favorite {
         return div().into_any_element();
@@ -68,7 +71,7 @@ pub fn render(
     let scroll_top_button = div()
         .id("floating-toolbar-scroll-top")
         .group("floating-toolbar-scroll-top")
-        .size(px(24.0))
+        .size(ui_rem(24.0))
         .flex()
         .items_center()
         .justify_center()
@@ -96,7 +99,7 @@ pub fn render(
     let new_favorite_button = div()
         .id("floating-toolbar-new-favorite")
         .group("floating-toolbar-new-favorite")
-        .size(px(24.0))
+        .size(ui_rem(24.0))
         .flex()
         .items_center()
         .justify_center()
@@ -123,7 +126,7 @@ pub fn render(
         .id("floating-toolbar-drag-handle")
         .group("floating-toolbar-drag-handle")
         .w_full()
-        .h(px(10.0))
+        .h(ui_rem(10.0))
         .flex()
         .items_center()
         .justify_center()
@@ -153,7 +156,7 @@ pub fn render(
     // 工具栏容器：绝对定位于右下角，bottom 可拖拽调整
     let toolbar = div()
         .absolute()
-        .right(px(RIGHT_INSET))
+        .right(ui_rem(RIGHT_INSET))
         .bottom(bottom)
         .flex()
         .flex_col()
@@ -230,14 +233,14 @@ pub fn render(
             }
             if show_scroll_top {
                 let scroll_top_container = div()
-                    .h(px(BUTTON_HEIGHT))
+                    .h(ui_rem(BUTTON_HEIGHT))
                     .overflow_hidden()
                     .child(scroll_top_button);
                 let scroll_top_container = if animations_enabled {
                     scroll_top_container
                         .with_spring(
                             "floating-toolbar-scroll-top-height",
-                            spring(px(BUTTON_HEIGHT)).from(px(0.0)),
+                            spring(px(BUTTON_HEIGHT * ui_scale)).from(px(0.0)),
                             |this, height| this.h(height),
                         )
                         .into_any_element()

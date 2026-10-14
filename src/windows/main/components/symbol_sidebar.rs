@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -55,10 +57,10 @@ pub(crate) fn active_indicator_at(
 
     let indicator = div()
         .absolute()
-        .left(px(4.0))
-        .top(px(top))
-        .w(px(TAB_BUTTON_HEIGHT))
-        .h(px(TAB_BUTTON_HEIGHT))
+        .left(ui_rem(4.0))
+        .top(ui_rem(top))
+        .w(ui_rem(TAB_BUTTON_HEIGHT))
+        .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex()
         .items_center()
         .justify_center()
@@ -75,7 +77,7 @@ pub(crate) fn active_indicator_at(
                     |this, progress| {
                         let expansion = (std::f32::consts::PI * progress).sin() * 0.9;
                         let inset = (2.0 * (1.0 - progress) - expansion).max(0.0);
-                        this.mx(px(inset)).my(px(inset))
+                        this.mx(ui_rem(inset)).my(ui_rem(inset))
                     },
                 )
                 .into_any_element()
@@ -85,7 +87,7 @@ pub(crate) fn active_indicator_at(
         });
     if animations_enabled {
         indicator
-            .with_spring((id, "top"), spring(px(top)), |this, value| this.top(value))
+            .with_spring((id, "top"), spring(top), |this, value| this.top(ui_rem(value)))
             .into_any_element()
     } else {
         indicator.into_any_element()
@@ -105,8 +107,8 @@ pub(crate) fn render(
     );
     let active_index = items.iter().position(|item| item.id == active_id);
     let content = div()
-        .w(px(TAB_BAR_HEIGHT))
-        .min_w(px(TAB_BAR_HEIGHT))
+        .w(ui_rem(TAB_BAR_HEIGHT))
+        .min_w(ui_rem(TAB_BAR_HEIGHT))
         .h_full()
         .flex()
         .flex_col()
@@ -139,7 +141,7 @@ pub(crate) fn render(
             let mut button = div()
                 .id(("symbol-sidebar", item_id))
                 .group(group.clone())
-                .size(px(TAB_BUTTON_HEIGHT))
+                .size(ui_rem(TAB_BUTTON_HEIGHT))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -166,8 +168,8 @@ pub(crate) fn render(
         .into_any_element();
 
     div()
-        .w(px(TAB_BAR_HEIGHT))
-        .min_w(px(TAB_BAR_HEIGHT))
+        .w(ui_rem(TAB_BAR_HEIGHT))
+        .min_w(ui_rem(TAB_BAR_HEIGHT))
         .h_full()
         .flex_none()
         .child(content)

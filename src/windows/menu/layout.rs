@@ -98,7 +98,7 @@ pub(super) fn fit_submenu_bounds(
     scroll_offset_y: f32,
     preferred_direction: MenuDirection,
 ) -> (MenuRect, MenuDirection) {
-    let scale_factor = scale_factor.max(1.0);
+    let scale_factor = scale_factor.max(f32::EPSILON);
     let item_bounds = submenu_item_bounds(
         parent,
         parent_menu,
@@ -145,7 +145,7 @@ pub(super) fn submenu_item_bounds(
     scale_factor: f32,
     scroll_offset_y: f32,
 ) -> MenuRect {
-    let scale_factor = scale_factor.max(1.0);
+    let scale_factor = scale_factor.max(f32::EPSILON);
     MenuRect::new(
         parent.x,
         parent.y
@@ -292,6 +292,29 @@ mod tests {
 
         assert_eq!(bounds.y, 57.5);
         assert_eq!(bounds.x, 330.75);
+    }
+
+    #[test]
+    fn submenu_rows_follow_interface_scale_and_keep_scroll_offset_in_pixels() {
+        let menu = MenuModel::new(vec![
+            MenuItem::action(MenuActionId::new("first"), "第一项"),
+            MenuItem::separator(),
+            MenuItem::action(MenuActionId::new("second"), "第二项"),
+        ]);
+        let parent = MenuRect::new(100.0, 200.0, 160.0, 180.0);
+        for ui_scale in [0.8, 1.0, 1.5, 2.0] {
+            let dpi = 1.5;
+            let scroll_offset = -12.0;
+            let bounds = submenu_item_bounds(
+                parent, &menu, 2, dpi * ui_scale, scroll_offset / ui_scale,
+            );
+            let expected = parent.y + (MENU_ITEM_HEIGHT + MENU_SEPARATOR_HEIGHT) * dpi * ui_scale
+                + scroll_offset * dpi;
+            assert!((bounds.y - expected).abs() < 0.001);
+            assert!((bounds.height - MENU_ITEM_HEIGHT * dpi * ui_scale).abs() < 0.001);
+        }
+        let shrunk = submenu_item_bounds(parent, &menu, 0, 0.8, 0.0);
+        assert!((shrunk.height - MENU_ITEM_HEIGHT * 0.8).abs() < 0.001);
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use gpui::{
     ClickEvent, Context, Focusable, InteractiveElement, IntoElement, LineFragment, MouseButton,
@@ -76,7 +78,7 @@ pub fn render(
                 div()
                     .id("titlebar-search-clear-button")
                     .group("titlebar-search-clear-button")
-                    .size(px(20.0))
+                    .size(ui_rem(20.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -152,7 +154,7 @@ pub fn render(
             }))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         if is_vertical {
-            search_input_element = search_input_element.h_full().pl(px(6.0)).pr_0();
+            search_input_element = search_input_element.h_full().pl(ui_rem(6.0)).pr_0();
             let mut search_input_area = div()
                 .w_full()
                 .flex_1()
@@ -179,7 +181,7 @@ pub fn render(
                 search_input_element = search_input_element.suffix(clear_button);
             }
             search_box = search_box
-                .h(px(28.0))
+                .h(ui_rem(28.0))
                 .flex_1()
                 .min_w_0()
                 .child(search_input_element);
@@ -191,7 +193,7 @@ pub fn render(
         div()
             .id("titlebar-search-button")
             .group("titlebar-search-button")
-            .size(px(28.0))
+            .size(ui_rem(28.0))
             .flex_none()
             .flex()
             .items_center()
@@ -269,21 +271,21 @@ pub fn render(
         .child(
             div()
                 .id("main-update-icon")
-                .size(px(24.0))
+                .size(ui_rem(24.0))
                 .flex_shrink_0()
                 .relative()
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(img("assets/icon64.png").size(px(20.0)))
+                .child(img("assets/icon64.png").size(ui_rem(20.0)))
                 .when(crate::services::updates::UpdateService::available(cx).is_some(), |view| {
                     let tooltip = i18n::translator(cx).translate("updates.open_release");
                     view.cursor_pointer()
                         .tooltip(move |_, cx| cx.new(|_| gpui_component::tooltip::Tooltip::new(tooltip.clone())).into())
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(|_, _, cx| crate::services::updates::UpdateService::open_release(cx))
-                        .child(div().absolute().right(px(-2.0)).bottom(px(-2.0))
-                            .size(px(13.0)).rounded_full().bg(theme.success)
+                        .child(div().absolute().right(ui_rem(-2.0)).bottom(ui_rem(-2.0))
+                            .size(ui_rem(13.0)).rounded_full().bg(theme.success)
                             .flex().items_center().justify_center()
                             .child(crate::ui::icon("arrow-bar-to-up", 10.0, theme.background)))
                 }),
@@ -291,12 +293,12 @@ pub fn render(
         .child(actions);
     if is_vertical {
         titlebar = titlebar
-            .w(px(TITLEBAR_SIDE_WIDTH))
+            .w(ui_rem(TITLEBAR_SIDE_WIDTH))
             .h_full()
             .p_1()
             .flex_col();
     } else {
-        titlebar = titlebar.w_full().h(px(TITLEBAR_HEIGHT)).px_2();
+        titlebar = titlebar.w_full().h(ui_rem(TITLEBAR_HEIGHT)).px_2();
     }
 
     let border = match position {
@@ -351,7 +353,7 @@ fn wrap_vertical_search_text(text: &str, window: &Window) -> String {
         let mut start = 0;
         let mut segments = Vec::new();
         for boundary in
-            line_wrapper.wrap_line(&[LineFragment::text(line)], VERTICAL_SEARCH_TEXT_WIDTH)
+            line_wrapper.wrap_line(&[LineFragment::text(line)], VERTICAL_SEARCH_TEXT_WIDTH * crate::ui::scale::window_scale(window))
         {
             if boundary.ix > start {
                 segments.push(line[start..boundary.ix].to_owned());

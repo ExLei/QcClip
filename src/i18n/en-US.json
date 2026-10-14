@@ -1,4 +1,6 @@
 {
+  "settings.personalization.ui_scale": "Interface scale",
+  "settings.personalization.ui_scale_description": "Resize text, icons, and controls together. Changes apply immediately.",
   "common.retry": "Retry",
   "main.note.add": "Add note",
   "main.note.edit": "Edit note",

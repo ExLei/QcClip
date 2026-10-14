@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, Focusable, IntoElement, MouseButton, MouseDownEvent, Window, div, px,
@@ -42,7 +44,7 @@ pub(crate) fn render(
             div()
                 .id("symbol-search-clear")
                 .group("symbol-search-clear")
-                .size(px(20.0))
+                .size(ui_rem(20.0))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -102,7 +104,7 @@ pub(crate) fn render(
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     div()
-                        .size(px(20.0))
+                        .size(ui_rem(20.0))
                         .flex_none()
                         .flex()
                         .items_center()

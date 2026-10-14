@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -40,10 +42,10 @@ fn navigation_active_indicator(
     let id = id.into();
     let indicator = div()
         .absolute()
-        .top(px(top))
-        .left(px(SETTINGS_NAV_PADDING))
-        .right(px(SETTINGS_NAV_PADDING))
-        .h(px(SETTINGS_NAV_BUTTON_HEIGHT))
+        .top(ui_rem(top))
+        .left(ui_rem(SETTINGS_NAV_PADDING))
+        .right(ui_rem(SETTINGS_NAV_PADDING))
+        .h(ui_rem(SETTINGS_NAV_BUTTON_HEIGHT))
         .child({
             let bar = div()
                 .size_full()
@@ -57,7 +59,7 @@ fn navigation_active_indicator(
                     |this, progress| {
                         let expansion = (std::f32::consts::PI * progress).sin() * 0.9;
                         let vertical_margin = (2.0 * (1.0 - progress) - expansion).max(0.0);
-                        this.my(px(vertical_margin))
+                        this.my(ui_rem(vertical_margin))
                     },
                 )
                 .into_any_element()
@@ -67,7 +69,7 @@ fn navigation_active_indicator(
         });
     if animations_enabled {
         indicator
-            .with_spring((id, "top"), spring(px(top)), |this, value| this.top(value))
+            .with_spring((id, "top"), spring(top), |this, value| this.top(ui_rem(value)))
             .into_any_element()
     } else {
         indicator.into_any_element()
@@ -93,7 +95,7 @@ impl SettingsWindowView {
         div()
             .id(page.id())
             .group(format!("settings-page-{}", page.id()))
-            .h(px(SETTINGS_NAV_BUTTON_HEIGHT))
+            .h(ui_rem(SETTINGS_NAV_BUTTON_HEIGHT))
             .w_full()
             .flex()
             .flex_shrink_0()
@@ -148,11 +150,10 @@ impl SettingsWindowView {
         let search_view = cx.entity().clone();
         let search_box = h_flex()
             .id("settings-title-search-box")
-            .w(px(320.0))
-            .min_w(px(320.0))
-            .max_w(px(320.0))
-            .flex_shrink_0()
-            .h(px(30.0))
+            .w_full()
+            .min_w_0()
+            .max_w(ui_rem(320.0))
+            .h(ui_rem(30.0))
             .items_center()
             // 阻止标题栏下方的 Drag 命中框覆盖输入框的原生窗口命中测试。
             .occlude()
@@ -168,7 +169,7 @@ impl SettingsWindowView {
                 Input::new(&self.settings_search_input)
                     .small()
                     .w_full()
-                    .min_w(px(320.0))
+                    .min_w_0()
                     .cleanable(true)
                     .aria_label(translator.translate("settings.search.placeholder"))
                     .prefix(hover_icon_path(
@@ -190,6 +191,7 @@ impl SettingsWindowView {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .mx(ui_rem(150.0))
                     .child(search_box),
             )
     }
@@ -216,7 +218,7 @@ impl SettingsWindowView {
             v_flex()
                 .id("settings-search-results-scroll")
                 .w_full()
-                .max_h(px(360.0))
+                .max_h(ui_rem(360.0))
                 .min_h_0()
                 .track_scroll(&self.search_results_scroll_handle)
                 .overflow_y_scroll()
@@ -231,7 +233,7 @@ impl SettingsWindowView {
                             target.title
                         ))
                         .w_full()
-                        .min_h(px(54.0))
+                        .min_h(ui_rem(54.0))
                         .items_center()
                         .gap_2()
                         .px_3()
@@ -273,8 +275,8 @@ impl SettingsWindowView {
         let view_for_outside = view.clone();
         let panel = div()
             .relative()
-            .w(px(320.0))
-            .max_h(px(360.0))
+            .w(ui_rem(320.0))
+            .max_h(ui_rem(360.0))
             .rounded(px(6.0))
             .border_1()
             .border_color(theme.border)
@@ -296,7 +298,7 @@ impl SettingsWindowView {
         deferred(
             div()
                 .absolute()
-                .top(px(SETTINGS_TITLE_BAR_HEIGHT))
+                .top(ui_rem(SETTINGS_TITLE_BAR_HEIGHT))
                 .left(px(0.0))
                 .w_full()
                 .flex()
@@ -317,8 +319,10 @@ impl SettingsWindowView {
             .into_iter()
             .position(|page| page == self.active_page);
         v_flex()
+            .id("settings-sidebar")
             .h_full()
             .flex_none()
+            .overflow_y_scroll()
             .gap_1()
             .border_r_1()
             .border_color(theme.sidebar_border)
@@ -350,7 +354,7 @@ impl SettingsWindowView {
                     .pt_3()
                     .child(
                         img("assets/icon1024.png")
-                            .size(px(SETTINGS_APP_INFO_ICON_SIZE)),
+                            .size(ui_rem(SETTINGS_APP_INFO_ICON_SIZE)),
                     )
                     .child(
                         v_flex()

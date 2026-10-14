@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use std::collections::HashSet;
 
@@ -247,7 +249,7 @@ impl CustomTextEditor {
                 .id(("custom-text-editor-tag", tag_id as u64))
                 .flex_none()
                 .max_w_full()
-                .h(px(30.0))
+                .h(ui_rem(30.0))
                 .flex()
                 .items_center()
                 .gap(px(6.0))
@@ -256,7 +258,7 @@ impl CustomTextEditor {
                 .border_1()
                 .border_color(editor_border)
                 .cursor_pointer()
-                .text_size(px(11.0))
+                .text_size(ui_rem(11.0))
                 .text_color(foreground)
                 .bg(if selected {
                     material_surface(theme.primary, material_enabled, 0.88)
@@ -270,7 +272,7 @@ impl CustomTextEditor {
                         this.bg(theme.secondary_hover)
                     }
                 })
-                .child(div().size(px(8.0)).flex_none().rounded_full().bg(tag_color))
+                .child(div().size(ui_rem(8.0)).flex_none().rounded_full().bg(tag_color))
                 .child(
                     div()
                         .max_w(px(180.0))
@@ -289,12 +291,12 @@ impl CustomTextEditor {
         });
         let tag_list = if visible_tags.is_empty() {
             div()
-                .h(px(42.0))
+                .h(ui_rem(42.0))
                 .w_full()
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(11.0))
+                .text_size(ui_rem(11.0))
                 .text_color(theme.muted_foreground)
                 .child(if self.tags.is_empty() {
                     translator.translate("main.editor.tags_empty_available")
@@ -332,7 +334,7 @@ impl CustomTextEditor {
             .id("custom-text-editor-tags-toggle")
             .group("custom-text-editor-tags-toggle")
             .w_full()
-            .h(px(34.0))
+            .h(ui_rem(34.0))
             .flex()
             .items_center()
             .gap_2()
@@ -352,7 +354,7 @@ impl CustomTextEditor {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(12.0))
+                    .text_size(ui_rem(12.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.foreground)
                     .child(translator.translate("main.editor.tags")),
@@ -362,7 +364,7 @@ impl CustomTextEditor {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .text_size(px(11.0))
+                    .text_size(ui_rem(11.0))
                     .text_color(theme.muted_foreground)
                     .child(selected_summary),
             )
@@ -391,7 +393,7 @@ impl CustomTextEditor {
                     .bg(editor_surface)
                     .child(
                         div()
-                            .h(px(30.0))
+                            .h(ui_rem(30.0))
                             .w_full()
                             .flex()
                             .items_center()
@@ -555,7 +557,7 @@ fn editor_title_bar(
 
     div()
         .w_full()
-        .h(px(EDITOR_TITLE_BAR_HEIGHT))
+        .h(ui_rem(EDITOR_TITLE_BAR_HEIGHT))
         .flex_shrink_0()
         .flex()
         .items_center()
@@ -574,7 +576,7 @@ fn editor_title_bar(
                 .on_double_click(|_, window, _| window.zoom_window())
                 .child(
                     div()
-                        .text_size(px(15.0))
+                        .text_size(ui_rem(15.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.foreground)
                         .child(title.to_owned()),
@@ -683,7 +685,7 @@ fn editor_window_control_button(
     div()
         .id(id)
         .flex()
-        .w(px(EDITOR_WINDOW_CONTROL_WIDTH))
+        .w(ui_rem(EDITOR_WINDOW_CONTROL_WIDTH))
         .h_full()
         .flex_shrink_0()
         .items_center()

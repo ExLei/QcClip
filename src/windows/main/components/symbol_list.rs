@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{ops::Range, rc::Rc};
 
 use gpui::prelude::*;
@@ -93,7 +95,7 @@ where
 {
     let item_sizes = Rc::new(
         rows.iter()
-            .map(|row| size(px(0.0), px(row_height(row))))
+            .map(|row| size(px(0.0), px(row_height(row) * crate::ui::scale::theme_scale(cx))))
             .collect::<Vec<_>>(),
     );
     render_sized_virtual_list(
@@ -186,12 +188,12 @@ where
     F: Fn(usize, usize, &T, &mut Context<MainWindow>) -> AnyElement,
 {
     div()
-        .h(px(ROW_HEIGHT))
+        .h(ui_rem(ROW_HEIGHT))
         .w_full()
         .grid()
         .grid_cols(columns)
-        .gap(px(GRID_GAP))
-        .px(px(GRID_PADDING))
+        .gap(ui_rem(GRID_GAP))
+        .px(ui_rem(GRID_PADDING))
         .children(item_indices.iter().filter_map(|item_index| {
             items
                 .get(*item_index)
@@ -202,13 +204,13 @@ where
 
 fn render_header(label: &str, cx: &mut Context<MainWindow>) -> AnyElement {
     div()
-        .h(px(HEADER_HEIGHT))
+        .h(ui_rem(HEADER_HEIGHT))
         .w_full()
         .flex()
         .items_center()
         .px_2()
         .bg(cx.theme().colors.tab_bar)
-        .text_size(px(12.0))
+        .text_size(ui_rem(12.0))
         .font_weight(FontWeight::MEDIUM)
         .text_color(cx.theme().colors.muted_foreground)
         .child(label.to_owned())
@@ -217,7 +219,7 @@ fn render_header(label: &str, cx: &mut Context<MainWindow>) -> AnyElement {
 
 fn render_empty(label: &str, cx: &mut Context<MainWindow>) -> AnyElement {
     div()
-        .h(px(ROW_HEIGHT))
+        .h(ui_rem(ROW_HEIGHT))
         .w_full()
         .flex()
         .items_center()

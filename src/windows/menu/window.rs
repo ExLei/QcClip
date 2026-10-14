@@ -262,8 +262,8 @@ impl MenuWindowView {
                     *item_index,
                     size,
                     screen,
-                    scale_factor,
-                    *scroll_offset_y,
+                    scale_factor * crate::config_runtime::appearance_config(cx).ui_scale(),
+                    *scroll_offset_y / crate::config_runtime::appearance_config(cx).ui_scale(),
                     *preferred_direction,
                 );
                 self.resolved_direction.set(Some(direction));
@@ -293,8 +293,8 @@ impl MenuWindowView {
                     *parent_bounds,
                     parent_menu,
                     *item_index,
-                    *scale_factor,
-                    *scroll_offset_y,
+                    *scale_factor * crate::config_runtime::appearance_config(cx).ui_scale(),
+                    *scroll_offset_y / crate::config_runtime::appearance_config(cx).ui_scale(),
                 );
                 submenu_content_bounds(content_bounds, item_bounds, entrance_direction, 0.0)
             }
@@ -322,11 +322,11 @@ impl MenuWindowView {
     fn render_item(&self, index: usize, item: &MenuItem, cx: &mut Context<Self>) -> AnyElement {
         if item.kind == MenuItemKind::Separator {
             return div()
-                .h(px(MENU_SEPARATOR_HEIGHT))
-                .px(px(3.0))
+                .h(gpui::rems(MENU_SEPARATOR_HEIGHT / 13.0))
+                .px(gpui::rems(3.0 / 13.0))
                 .flex()
                 .items_center()
-                .child(div().h(px(1.0)).w_full().bg(cx.theme().border))
+                .child(div().h(gpui::rems(1.0 / 13.0)).w_full().bg(cx.theme().border))
                 .into_any_element();
         }
 
@@ -349,7 +349,7 @@ impl MenuWindowView {
             .id(("qcclip-menu-item", self.level as u64 * 1000 + index as u64))
             .group(icon_group.clone())
             .w_full()
-            .h(px(MENU_ITEM_HEIGHT))
+            .h(gpui::rems(MENU_ITEM_HEIGHT / 13.0))
             .rounded(px(4.0))
             .flex()
             .items_center()
@@ -369,13 +369,13 @@ impl MenuWindowView {
             )
             .when(!item.centered, |view| view.child(
                 div()
-                    .w(px(28.0))
+                    .w(gpui::rems(28.0 / 13.0))
                     .h_full()
                     .flex()
                     .items_center()
                     .justify_center()
                     .when_some(icon_color, |view, color| {
-                        view.child(div().size(px(8.0)).rounded_full().bg(rgb(color)))
+                        view.child(div().size(gpui::rems(8.0 / 13.0)).rounded_full().bg(rgb(color)))
                     })
                     .when(icon_color.is_none(), |view| {
                         view.when_some(icon_path, |view, path| {
@@ -383,7 +383,7 @@ impl MenuWindowView {
                             let icon_element: gpui::AnyElement =
                                 if std::path::Path::new(path.as_ref()).is_absolute() {
                                     gpui::img(std::path::PathBuf::from(path.as_ref()))
-                                        .size(px(12.0))
+                                        .size(gpui::rems(12.0 / 13.0))
                                         .object_fit(gpui::ObjectFit::Contain)
                                         .into_any_element()
                                 } else {
@@ -402,12 +402,12 @@ impl MenuWindowView {
             .child(div().whitespace_nowrap().when(item.centered, |view| {
                 view.flex_1().text_center().px_2()
             }).when(!item.centered, |view| view.flex_none()).child(label))
-            .when(!item.centered, |view| view.child(div().flex_1().min_w(px(12.0))))
+            .when(!item.centered, |view| view.child(div().flex_1().min_w(gpui::rems(12.0 / 13.0))))
             .when(checked, |view| {
                 view.child(
                     div()
                         .flex_none()
-                        .w(px(22.0))
+                        .w(gpui::rems(22.0 / 13.0))
                         .h_full()
                         .flex()
                         .items_center()
@@ -426,7 +426,7 @@ impl MenuWindowView {
                 view.child(
                     div()
                         .flex_none()
-                        .w(px(22.0))
+                        .w(gpui::rems(22.0 / 13.0))
                         .h_full()
                         .flex()
                         .items_center()
@@ -441,14 +441,14 @@ impl MenuWindowView {
                         ),
                 )
             })
-            .when(!has_children && !checked && !item.centered, |view| view.pr(px(8.0)))
+            .when(!has_children && !checked && !item.centered, |view| view.pr(gpui::rems(8.0 / 13.0)))
             .into_any_element()
     }
 }
 
 impl Render for MenuWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_rem_size(px(13.0));
+        window.set_rem_size(crate::ui::scale::standalone_rem_size(13.0, cx));
         let measured_size = self.measure_content_size(window, cx);
         self.place_window(measured_size, window, cx);
         let scale_factor = self.display_scale_factor(window);
@@ -507,11 +507,11 @@ fn menu_shell(
         .child(
             menu_surface(colors)
                 .id(("qcclip-menu-surface", level as u64))
-                .min_w(px(MENU_MIN_WIDTH))
+                .min_w(gpui::rems(MENU_MIN_WIDTH / 13.0))
                 .max_h(px(max_height))
-                .px(px(5.0))
-                .py(px(MENU_PADDING_Y))
-                .text_size(px(13.0))
+                .px(gpui::rems(5.0 / 13.0))
+                .py(gpui::rems(MENU_PADDING_Y / 13.0))
+                .text_size(gpui::rems(13.0 / 13.0))
                 .text_color(colors.popover_foreground)
                 .overflow_y_scroll()
                 .track_scroll(scroll_handle)

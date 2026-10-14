@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::Bounds;
@@ -183,7 +185,7 @@ fn action_button(
     let mut button = div()
         .id(("tags-panel-action", action_id))
         .group(icon_group.clone())
-        .size(px(24.0))
+        .size(ui_rem(24.0))
         .flex()
         .items_center()
         .justify_center()
@@ -261,7 +263,7 @@ fn tag_status(message: &str, theme: gpui_component::ThemeColor) -> AnyElement {
     div()
         .px_2()
         .py_1()
-        .text_size(px(11.0))
+        .text_size(ui_rem(11.0))
         .text_color(theme.muted_foreground)
         .child(message.to_owned())
         .into_any_element()
@@ -269,7 +271,7 @@ fn tag_status(message: &str, theme: gpui_component::ThemeColor) -> AnyElement {
 
 fn truncate_tag_name(tag_name: &str, max_width: Pixels, window: &Window) -> SharedString {
     let mut text_style = window.text_style();
-    text_style.font_size = px(11.0).into();
+    text_style.font_size = ui_rem(11.0).into();
     text_style.font_weight = FontWeight::MEDIUM;
     let font_size = text_style.font_size.to_pixels(window.rem_size());
     let mut wrapper = window
@@ -312,10 +314,10 @@ fn tag_chip(
         .h_full()
         .flex()
         .items_center()
-        .gap(px(6.0))
-        .pl(px(9.0))
-        .pr(px(11.0))
-        .child(div().size(px(8.0)).flex_none().rounded_full().bg(color))
+        .gap(ui_rem(6.0))
+        .pl(ui_rem(9.0))
+        .pr(ui_rem(11.0))
+        .child(div().size(ui_rem(8.0)).flex_none().rounded_full().bg(color))
         .child(div().w_full().min_w_0().truncate().child(display_name));
 
     let preview_size = Rc::new(Cell::new(None));
@@ -332,14 +334,14 @@ fn tag_chip(
         .w_auto()
         .min_w_0()
         .max_w_full()
-        .h(px(30.0))
+        .h(ui_rem(30.0))
         .relative()
         .flex()
         .flex_row()
         .items_center()
         .rounded_lg()
         .cursor_pointer()
-        .text_size(px(11.0))
+        .text_size(ui_rem(11.0))
         .font_weight(FontWeight::MEDIUM)
         .text_color(foreground)
         .border_1()
@@ -510,20 +512,20 @@ fn render_tag_drag_preview(
     } else {
         theme.foreground
     };
-    let max_text_width = (width - px(38.0)).max(px(1.0));
+    let max_text_width = (width - px(38.0 * crate::ui::scale::window_scale(window))).max(px(1.0));
     let display_name = truncate_tag_name(&tag.name, max_text_width, window);
     div()
-        .h(px(30.0))
+        .h(ui_rem(30.0))
         .w(width)
         .flex_none()
         .flex()
         .items_center()
-        .gap(px(6.0))
+        .gap(ui_rem(6.0))
         .rounded_lg()
         .border_1()
         .border_color(theme.border)
         .overflow_hidden()
-        .text_size(px(11.0))
+        .text_size(ui_rem(11.0))
         .font_weight(FontWeight::MEDIUM)
         .text_color(foreground)
         .bg(gpui::ColorExt::opacity(
@@ -534,9 +536,9 @@ fn render_tag_drag_preview(
             },
             TAG_DRAG_PREVIEW_BACKGROUND_OPACITY,
         ))
-        .pl(px(9.0))
-        .pr(px(11.0))
-        .child(div().size(px(8.0)).flex_none().rounded_full().bg(color))
+        .pl(ui_rem(9.0))
+        .pr(ui_rem(11.0))
+        .child(div().size(ui_rem(8.0)).flex_none().rounded_full().bg(color))
         .child(div().w_full().min_w_0().truncate().child(display_name))
         .into_any_element()
 }
@@ -586,12 +588,12 @@ pub fn render(
     let material_enabled = appearance.window_material != WindowMaterial::Disabled;
     let translator = i18n::translator(cx);
     let panel_width = if sidebar_layout {
-        px(SIDEBAR_PANEL_WIDTH)
+        px(SIDEBAR_PANEL_WIDTH * crate::ui::scale::window_scale(window))
     } else {
         window.viewport_size().width * 0.65 + px(1.0)
     };
-    let content_width = panel_width - px(24.0);
-    let max_text_width = content_width - px(38.0);
+    let content_width = panel_width - px(24.0 * crate::ui::scale::window_scale(window));
+    let max_text_width = content_width - px(38.0 * crate::ui::scale::window_scale(window));
     let tags_search_query = main.tags_search_query.trim().to_lowercase();
     let visible_tags = main
         .tags
@@ -630,7 +632,7 @@ pub fn render(
             div()
                 .id("tags-search-clear-button")
                 .group("tags-panel-search-clear")
-                .size(px(20.0))
+                .size(ui_rem(20.0))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -666,7 +668,7 @@ pub fn render(
         tags_search_input_element = tags_search_input_element.suffix(clear_button);
     }
     let tags_search_box = div()
-        .h(px(26.0))
+        .h(ui_rem(26.0))
         .flex_1()
         .min_w_0()
         .flex()
@@ -744,7 +746,7 @@ pub fn render(
         )
         .child(
             div()
-                .h(px(34.0))
+                .h(ui_rem(34.0))
                 .w_full()
                 .flex_none()
                 .flex()
@@ -755,7 +757,7 @@ pub fn render(
                 .border_color(theme.border)
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(ui_rem(12.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.foreground)
                         .child(translator.translate("main.tags.title")),
@@ -764,7 +766,7 @@ pub fn render(
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(2.0))
+                        .gap(ui_rem(2.0))
                         .child(action_button(
                             "plus",
                             translator.translate("main.tags.new"),
@@ -801,7 +803,7 @@ pub fn render(
         )
         .child(
             div()
-                .h(px(32.0))
+                .h(ui_rem(32.0))
                 .w_full()
                 .flex_none()
                 .flex()
@@ -828,10 +830,10 @@ pub fn render(
                         .flex_wrap()
                         .items_start()
                         .content_start()
-                        .gap(px(6.0))
-                        .px(px(12.0))
-                        .pt(px(4.0))
-                        .pb(px(10.0))
+                        .gap(ui_rem(6.0))
+                        .px(ui_rem(12.0))
+                        .pt(ui_rem(4.0))
+                        .pb(ui_rem(10.0))
                         .children(visible_tags.iter().copied().map(|tag| {
                             with_tag_reorder_animation(
                                 tag_chip(
@@ -860,7 +862,7 @@ pub fn render(
 
     if sidebar_layout {
         panel = panel
-            .w(px(SIDEBAR_PANEL_WIDTH))
+            .w(px(SIDEBAR_PANEL_WIDTH * crate::ui::scale::window_scale(window)))
             .h_full()
             .flex_none()
             .border_r(px(0.5));
@@ -868,13 +870,13 @@ pub fn render(
         panel = panel
             .absolute()
             .top(if titlebar_position.is_vertical() {
-                px(34.5)
+                px(34.5 * crate::ui::scale::window_scale(window))
             } else {
-                px(70.5)
+                px(70.5 * crate::ui::scale::window_scale(window))
             })
             .left(relative(0.35))
             .right(if matches!(titlebar_position, TitlebarPosition::Right) {
-                px(36.0)
+                px(36.0 * crate::ui::scale::window_scale(window))
             } else {
                 px(-1.0)
             })

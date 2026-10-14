@@ -1,5 +1,7 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
-use gpui::{App, Context, IntoElement, Window, div, px};
+use gpui::{App, Context, IntoElement, Window, div};
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme as _, Disableable as _};
 
@@ -75,7 +77,7 @@ impl Render for RenameGalleryImageForm {
         let is_submitting = self.is_submitting;
         div()
             .id("rename-gallery-image-form")
-            .w(px(320.0))
+            .w(ui_rem(320.0))
             .flex()
             .flex_col()
             .bg(theme.background)
@@ -89,10 +91,10 @@ impl Render for RenameGalleryImageForm {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(8.0))
+                    .gap(ui_rem(8.0))
                     .child(Input::new(&self.name_input).w_full().disabled(is_submitting))
                     .when_some(submit_error, |this, message| {
-                        this.child(div().text_size(px(11.0)).text_color(theme.red).child(message))
+                        this.child(div().text_size(ui_rem(11.0)).text_color(theme.red).child(message))
                     })
                     .child(dialog_footer(
                         vec![

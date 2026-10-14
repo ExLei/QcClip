@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{collections::HashMap, fs, ops::Range, path::PathBuf, sync::Arc, time::Duration};
 
 use file_icon_provider::Icon;
@@ -717,7 +719,7 @@ impl PreviewWindow {
         self.text_line_ranges = Arc::new(ranges);
         self.text_list_state.reset_with_uniform_height(
             self.text_line_ranges.len(),
-            px(TEXT_LINE_HEIGHT),
+            ui_rem(TEXT_LINE_HEIGHT).to_pixels(window.rem_size()),
         );
         self.text_wrap_width = Some(wrap_width);
         self.content_size = None;
@@ -1010,7 +1012,7 @@ impl PreviewWindow {
         max_width: f32,
         max_height: f32,
         image_size: Option<Size<f32>>,
-        _window: &Window,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = crate::window_material::excluded_window_theme(cx);
@@ -1081,7 +1083,7 @@ impl PreviewWindow {
                     .border_color(gpui::ColorExt::opacity(&theme.border, 0.6))
                     .bg(gpui::ColorExt::opacity(&theme.background, 0.42))
                     .px_3()
-                    .text_size(px(11.0))
+                    .text_size(ui_rem(11.0))
                     .text_color(theme.muted_foreground)
                     .child(format!("项目 {file_count}"))
                     .child(format!(
@@ -1128,7 +1130,7 @@ impl PreviewWindow {
                         };
                         let icon_element = if let Some(image) = entry.icon.clone() {
                             img(image)
-                                .size(px(32.0))
+                                .size(ui_rem(32.0))
                                 .object_fit(ObjectFit::Contain)
                                 .into_any_element()
                         } else {
@@ -1169,7 +1171,7 @@ impl PreviewWindow {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(13.0))
+                            .text_size(ui_rem(13.0))
                             .text_color(file_name_color)
                             .child(entry.name.clone());
                         let size_label =
@@ -1178,7 +1180,7 @@ impl PreviewWindow {
                             .id(("preview-file-row", index as u64))
                             .flex_none()
                             .w_full()
-                            .min_h(px(54.0))
+                            .min_h(ui_rem(54.0))
                             .flex()
                             .items_center()
                             .gap_2()
@@ -1193,7 +1195,7 @@ impl PreviewWindow {
                             ))
                             .child(
                                 div()
-                                    .size(px(32.0))
+                                    .size(ui_rem(32.0))
                                     .flex_none()
                                     .flex()
                                     .items_center()
@@ -1212,32 +1214,32 @@ impl PreviewWindow {
                                         div()
                                             .w_full()
                                             .truncate()
-                                            .text_size(px(11.0))
+                                            .text_size(ui_rem(11.0))
                                             .text_color(theme.muted_foreground)
                                             .child(entry.path.to_string_lossy().into_owned()),
                                     ),
                             )
                             .child(
                                 div()
-                                    .w(px(82.0))
+                                    .w(ui_rem(82.0))
                                     .flex_none()
                                     .flex()
                                     .flex_col()
                                     .items_end()
                                     .gap_1()
-                                    .text_size(px(11.0))
+                                    .text_size(ui_rem(11.0))
                                     .text_color(theme.muted_foreground)
                                     .child(size_label)
                                     .child(
                                         div()
-                                            .max_w(px(82.0))
+                                            .max_w(ui_rem(82.0))
                                             .truncate()
                                             .rounded_full()
                                             .border_1()
                                             .border_color(status_border)
                                             .bg(status_background)
                                             .px_1p5()
-                                            .text_size(px(10.0))
+                                            .text_size(ui_rem(10.0))
                                             .text_color(status_color)
                                             .child(if !missing {
                                                 entry.type_label()
@@ -1281,14 +1283,14 @@ impl PreviewWindow {
                     .child(
                         div()
                             .flex_none()
-                            .max_h(px((max_height - TEXT_VERTICAL_PADDING).max(1.0)))
+                            .max_h(px((max_height - TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).max(1.0)))
                             .id("preview-html-scroll-content")
                             .overflow_y_scroll()
                             .track_scroll(&self.html_scroll)
                             .child(div().child(html_preview::render_with_images_and_max_lines(
                                 html,
-                                px(14.0),
-                                px(21.0),
+                                ui_rem(14.0).to_pixels(window.rem_size()),
+                                ui_rem(21.0).to_pixels(window.rem_size()),
                                 preview.text.clone(),
                                 &self.html_images,
                                 10_000,
@@ -1304,7 +1306,7 @@ impl PreviewWindow {
                 .overflow_hidden()
                 .px_2()
                 .py_2()
-                .child(self.render_text_list(theme.foreground, max_width, max_height))
+                .child(self.render_text_list(theme.foreground, max_width, max_height, window))
                 .into_any_element(),
         }
     }
@@ -1314,7 +1316,9 @@ impl PreviewWindow {
         text_color: gpui::Hsla,
         max_width: f32,
         max_height: f32,
+        window: &Window,
     ) -> impl IntoElement {
+        let ui_scale = crate::ui::scale::window_scale(window);
         let text_content = self.text_content.clone();
         let text_line_ranges = self.text_line_ranges.clone();
         list(self.text_list_state.clone(), move |index, _, _| {
@@ -1325,15 +1329,15 @@ impl PreviewWindow {
                 .to_owned();
             div()
                 .w_full()
-                .text_size(px(14.0))
-                .line_height(px(TEXT_LINE_HEIGHT))
+                .text_size(ui_rem(14.0))
+                .line_height(ui_rem(TEXT_LINE_HEIGHT))
                 .text_color(text_color)
                 .child(line)
                 .into_any_element()
         })
         .with_sizing_behavior(ListSizingBehavior::Infer)
-        .max_w(px((max_width - TEXT_HORIZONTAL_PADDING).max(1.0)))
-        .max_h(px((max_height - TEXT_VERTICAL_PADDING).max(1.0)))
+        .max_w(px((max_width - TEXT_HORIZONTAL_PADDING * ui_scale).max(1.0)))
+        .max_h(px((max_height - TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).max(1.0)))
     }
 
     fn image_display_size(
@@ -1462,7 +1466,7 @@ impl PreviewWindow {
                         &theme.background,
                         if index == 0 { 0.92 } else { 0.74 },
                     ))
-                    .text_size(px(11.0))
+                    .text_size(ui_rem(11.0))
                     .text_color(theme.foreground)
                     .child(hint)
                     .into_any_element()
@@ -1481,7 +1485,13 @@ impl Drop for PreviewWindow {
 
 impl Render for PreviewWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_rem_size(px(16.0));
+        let rem_size = crate::ui::scale::standalone_rem_size(16.0, cx);
+        if window.rem_size() != rem_size {
+            self.text_wrap_width = None;
+            self.content_size = None;
+            self.surface_bounds = None;
+        }
+        window.set_rem_size(rem_size);
         let Some(anchor) = self.anchor else {
             return div().size_full().into_any_element();
         };
@@ -1538,21 +1548,21 @@ impl Render for PreviewWindow {
         } else {
             let runs = [window.text_style().to_run(note_text.len())];
             let layout = window.text_system().shape_text(
-                note_text.clone(), px(14.0), &runs,
-                Some(px((max_width - TEXT_HORIZONTAL_PADDING - surface_border_width * 2.0).max(1.0))), None,
+                note_text.clone(), ui_rem(14.0).to_pixels(window.rem_size()), &runs,
+                Some(px((max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window) - surface_border_width * 2.0).max(1.0))), None,
             );
             let (width, lines) = layout.map(|lines| (
                 lines.iter().map(|line| f32::from(line.width())).fold(0.0, f32::max),
                 lines.iter().map(|line| line.wrap_boundaries().len() + 1).sum::<usize>(),
             )).unwrap_or((0.0, 1));
             (
-                (width.ceil() + TEXT_HORIZONTAL_PADDING + surface_border_width * 2.0)
+                (width.ceil() + TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window) + surface_border_width * 2.0)
                     .max(TEXT_MIN_WIDTH).min(max_width),
-                (lines.clamp(1, 6) as f32 * 20.0 + TEXT_VERTICAL_PADDING).min(max_height * 0.3),
+                ((lines.clamp(1, 6) as f32 * 20.0 + TEXT_VERTICAL_PADDING) * crate::ui::scale::window_scale(window)).min(max_height * 0.3),
             )
         };
         let content_max_height = (max_height - note_height).max(1.0);
-        self.ensure_text_layout(max_width - TEXT_HORIZONTAL_PADDING, window);
+        self.ensure_text_layout(max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window), window);
         let image_size = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
             .flatten()
@@ -1678,7 +1688,7 @@ impl Render for PreviewWindow {
                     .border_color(theme.border).bg(theme.secondary)
                     .child(div().id("preview-note-scroll").size_full().overflow_y_scroll()
                         .track_scroll(&self.note_scroll)
-                        .child(div().px_3().py_2().text_size(px(14.0)).line_height(px(20.0))
+                        .child(div().px_3().py_2().text_size(ui_rem(14.0)).line_height(ui_rem(20.0))
                             .text_color(theme.foreground).child(note_text))),
             ))
             .child(self.render_content(max_width, content_max_height, image_size, window, cx))
@@ -2303,7 +2313,7 @@ fn wrapped_text_line_ranges(text: &str, wrap_width: Pixels, window: &Window) -> 
     let text_style = window.text_style();
     let mut line_wrapper = window
         .text_system()
-        .line_wrapper(text_style.font(), px(14.0));
+        .line_wrapper(text_style.font(), ui_rem(14.0).to_pixels(window.rem_size()));
     let mut ranges = Vec::new();
 
     for line_range in text_line_ranges(text) {

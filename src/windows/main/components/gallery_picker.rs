@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{cell::Cell, ops::Range, path::PathBuf, rc::Rc, sync::Arc};
 
 use gpui::prelude::*;
@@ -181,34 +183,34 @@ pub(crate) fn render_gallery_import_overlay(
         .bg(gpui::ColorExt::opacity(&theme.background, 0.58))
         .child(
             div()
-                .w(px(320.0))
-                .px(px(36.0))
-                .py(px(28.0))
+                .w(ui_rem(320.0))
+                .px(ui_rem(36.0))
+                .py(ui_rem(28.0))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(18.0))
+                .gap(ui_rem(18.0))
                 .rounded_xl()
                 .bg(theme.background)
                 .shadow_lg()
                 .child(icon("refresh", 44.0, theme.primary))
                 .child(
                     div()
-                        .text_size(px(18.0))
+                        .text_size(ui_rem(18.0))
                         .text_color(theme.foreground)
                         .child(title),
                 )
                 .child(
                     div()
-                        .h(px(8.0))
-                        .w(px(240.0))
+                        .h(ui_rem(8.0))
+                        .w(ui_rem(240.0))
                         .rounded_full()
                         .bg(theme.border)
                         .overflow_hidden()
                         .child(
                             div()
                                 .h_full()
-                                .w(px(progress_width))
+                                .w(ui_rem(progress_width))
                                 .rounded_full()
                                 .bg(theme.primary),
                         ),
@@ -218,7 +220,7 @@ pub(crate) fn render_gallery_import_overlay(
 }
 
 fn gallery_grid_columns(main: &MainWindow, window: &Window) -> u16 {
-    let viewport_width = f32::from(window.viewport_size().width);
+    let viewport_width = f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
     let main_sidebar_width = if crate::windows::main::uses_sidebar_layout(viewport_width) {
         if main.sidebar_collapsed {
             56.0
@@ -236,11 +238,11 @@ fn gallery_grid_columns(main: &MainWindow, window: &Window) -> u16 {
     let columns_for_max_size = ((content_width + GALLERY_GRID_GAP)
         / (GALLERY_CELL_MAX_WIDTH + GALLERY_GRID_GAP))
         .ceil();
-    (columns_for_max_size as u16).clamp(4, GALLERY_MAX_COLUMNS)
+    (columns_for_max_size as u16).clamp(1, GALLERY_MAX_COLUMNS)
 }
 
 fn gallery_cell_size(main: &MainWindow, window: &Window, columns: u16) -> f32 {
-    let viewport_width = f32::from(window.viewport_size().width);
+    let viewport_width = f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
     let main_sidebar_width = if crate::windows::main::uses_sidebar_layout(viewport_width) {
         if main.sidebar_collapsed {
             56.0
@@ -256,7 +258,7 @@ fn gallery_cell_size(main: &MainWindow, window: &Window, columns: u16) -> f32 {
         - GALLERY_GRID_HORIZONTAL_PADDING * 2.0)
         .max(0.0);
     let gaps = GALLERY_GRID_GAP * f32::from(columns.saturating_sub(1));
-    ((content_width - gaps) / f32::from(columns)).max(1.0)
+    ((content_width - gaps) / f32::from(columns)).max(1.0) * crate::ui::scale::window_scale(window)
 }
 
 fn render_add_images_button(
@@ -269,7 +271,7 @@ fn render_add_images_button(
     let label = translator.translate("main.gallery.add_images");
     div()
         .id("gallery-add-images")
-        .size(px(symbol_sidebar::TAB_BUTTON_HEIGHT))
+        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
@@ -316,8 +318,8 @@ fn render_sidebar(
                 .position(|group| &group.id == active_id)
         });
     div()
-        .w(px(symbol_sidebar::TAB_BAR_HEIGHT))
-        .min_w(px(symbol_sidebar::TAB_BAR_HEIGHT))
+        .w(ui_rem(symbol_sidebar::TAB_BAR_HEIGHT))
+        .min_w(ui_rem(symbol_sidebar::TAB_BAR_HEIGHT))
         .h_full()
         .flex_none()
         .flex()
@@ -414,7 +416,7 @@ fn render_group_button(
         .cloned();
     let group_button = div()
         .id(format!("gallery-group-{}", group.id))
-        .size(px(symbol_sidebar::TAB_BUTTON_HEIGHT))
+        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
@@ -433,7 +435,7 @@ fn render_group_button(
         }));
     let icon = match icon_image {
         Some(image) => div()
-            .size(px(symbol_sidebar::TAB_BUTTON_HEIGHT - 4.0))
+            .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT - 4.0))
             .flex_none()
             .aspect_square()
             .rounded_lg()
@@ -521,7 +523,7 @@ fn render_edit_group_button(
     let label = translator.translate("main.gallery.edit_current_group");
     div()
         .id("gallery-edit-group")
-        .size(px(symbol_sidebar::TAB_BUTTON_HEIGHT))
+        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
@@ -559,7 +561,7 @@ fn render_add_group_button(
     let main_window = main_window.clone();
     div()
         .id("gallery-add-group")
-        .size(px(symbol_sidebar::TAB_BUTTON_HEIGHT))
+        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
@@ -753,15 +755,15 @@ fn render_gallery_drop_target(
                 .bg(gpui::ColorExt::opacity(&theme.primary, 0.1))
                 .child(
                     div()
-                        .px(px(28.0))
-                        .py(px(16.0))
+                        .px(ui_rem(28.0))
+                        .py(ui_rem(16.0))
                         .rounded_xl()
                         .bg(theme.background)
                         .shadow_lg()
                         .flex()
                         .items_center()
-                        .gap(px(10.0))
-                        .text_size(px(18.0))
+                        .gap(ui_rem(10.0))
+                        .text_size(ui_rem(18.0))
                         .text_color(theme.foreground)
                         .child(hover_icon(
                             "gallery-drop-overlay-icon",
@@ -786,7 +788,7 @@ fn render_gallery_grid(
 ) -> AnyElement {
     let columns = usize::from(columns.max(1));
     let rows = images.len().div_ceil(columns);
-    let row_height = cell_size + GALLERY_GRID_VERTICAL_PADDING * 2.0;
+    let row_height = cell_size + GALLERY_GRID_VERTICAL_PADDING * 2.0 * crate::ui::scale::window_scale(window);
     let total_height = row_height * rows as f32;
     let max_offset = f32::from(main.gallery_scroll_handle.max_offset().y);
     let viewport_height = if max_offset > 0.0 && max_offset < total_height {
@@ -854,9 +856,9 @@ fn render_gallery_row(
         .w_full()
         .grid()
         .grid_cols(columns as u16)
-        .gap(px(GALLERY_GRID_GAP))
-        .px(px(GALLERY_GRID_HORIZONTAL_PADDING))
-        .py(px(GALLERY_GRID_VERTICAL_PADDING))
+        .gap(ui_rem(GALLERY_GRID_GAP))
+        .px(ui_rem(GALLERY_GRID_HORIZONTAL_PADDING))
+        .py(ui_rem(GALLERY_GRID_VERTICAL_PADDING))
         .children(images.iter().map(|image| render_gallery_image(image, main, cx)))
         .into_any_element()
 }
@@ -1118,7 +1120,7 @@ fn render_gallery_sort_button(
     let sort_label = label.clone();
     div()
         .id("gallery-sort")
-        .size(px(symbol_sidebar::TAB_BUTTON_HEIGHT))
+        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
@@ -1195,12 +1197,12 @@ fn empty_state(
         let translator_for_click = translator.clone();
         div()
             .id("gallery-empty-choose-images")
-            .mt(px(12.0))
-            .px(px(12.0))
-            .py(px(7.0))
+            .mt(ui_rem(12.0))
+            .px(ui_rem(12.0))
+            .py(ui_rem(7.0))
             .rounded_md()
             .cursor_pointer()
-            .text_size(px(12.0))
+            .text_size(ui_rem(12.0))
             .text_color(theme.primary_foreground)
             .bg(theme.primary)
             .hover(|this| this.bg(theme.primary_hover))
@@ -1228,10 +1230,10 @@ fn empty_state(
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap(px(8.0))
+                .gap(ui_rem(8.0))
                 .child(
                     div()
-                        .size(px(120.0))
+                        .size(ui_rem(120.0))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1248,14 +1250,14 @@ fn empty_state(
                 )
                 .child(
                     div()
-                        .text_size(px(16.0))
+                        .text_size(ui_rem(16.0))
                         .text_color(theme.foreground)
                         .child(title),
                 )
                 .when(!detail.is_empty(), |this| {
                     this.child(
                         div()
-                            .text_size(px(13.0))
+                            .text_size(ui_rem(13.0))
                             .text_color(theme.muted_foreground)
                             .child(detail),
                     )

@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Div, ElementId, FontWeight, IntoElement, SharedString, Stateful,
@@ -17,7 +19,7 @@ pub fn window_title_bar(
     let theme = cx.theme().colors;
     h_flex()
         .w_full()
-        .h(px(36.0))
+        .h(ui_rem(36.0))
         .relative()
         .flex_shrink_0()
         .border_b_1()
@@ -34,9 +36,9 @@ pub fn window_title_bar(
                 .window_control_area(WindowControlArea::Drag)
                 .on_double_click(|_, window, _| window.zoom_window())
                 .child(
-                    div().flex_shrink_0().size(px(24.0))
+                    div().flex_shrink_0().size(ui_rem(24.0))
                         .flex().items_center().justify_center()
-                        .child(img("assets/icon64.png").size(px(20.0))),
+                        .child(img("assets/icon64.png").size(ui_rem(20.0))),
                 )
                 .child(div().min_w_0().truncate().font_weight(FontWeight::SEMIBOLD)
                     .child(title.into())),
@@ -106,7 +108,7 @@ fn window_control_button(
         .id(id)
         .group(group.clone())
         .flex()
-        .w(px(42.0))
+        .w(ui_rem(42.0))
         .h_full()
         .flex_shrink_0()
         .items_center()
@@ -130,7 +132,7 @@ fn window_control_button(
 }
 
 pub fn divider(theme: ThemeColor) -> impl IntoElement {
-    div().flex_none().w(px(0.5)).h(px(24.0)).bg(theme.border)
+    div().flex_none().w(px(0.5)).h(ui_rem(24.0)).bg(theme.border)
 }
 
 pub fn titlebar_button(
@@ -149,7 +151,7 @@ pub fn titlebar_button(
     let mut button = div()
         .id(name.to_owned())
         .group(group.clone())
-        .size(px(28.0))
+        .size(ui_rem(28.0))
         .flex()
         .items_center()
         .justify_center()

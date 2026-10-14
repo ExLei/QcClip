@@ -523,7 +523,8 @@ fn appearance_requires_global_refresh(
     previous: &AppearanceConfig,
     current: &AppearanceConfig,
 ) -> bool {
-    previous.mode != current.mode
+    previous.ui_scale_percent != current.ui_scale_percent
+        || previous.mode != current.mode
         || previous.light_theme != current.light_theme
         || previous.dark_theme != current.dark_theme
         || previous.window_material != current.window_material
@@ -789,7 +790,7 @@ fn merge_config_fields(
 mod tests {
     use tempfile::tempdir;
 
-    use super::{background_image_needs_refresh, load_config, persist_config};
+    use super::{appearance_requires_global_refresh, background_image_needs_refresh, load_config, persist_config};
     use crate::config::{AppConfig, InterfaceLanguage, WindowMaterial};
 
     #[test]
@@ -848,6 +849,16 @@ mod tests {
         std::fs::write(&path, "{invalid").expect("无法写入无效配置");
         assert!(persist_config(&path, &AppConfig::default()).is_err());
         assert_eq!(std::fs::read_to_string(&path).expect("无法核验配置"), "{invalid");
+    }
+
+    #[test]
+    fn ui_scale_changes_refresh_all_windows_without_reloading_background_images() {
+        let current = AppConfig::default().appearance;
+        let mut next = current.clone();
+        next.ui_scale_percent = 150;
+        assert!(appearance_requires_global_refresh(&current, &next));
+        assert!(!background_image_needs_refresh(&current, &next));
+        assert!(!appearance_requires_global_refresh(&next, &next));
     }
 
     #[test]

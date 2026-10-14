@@ -1,4 +1,5 @@
 use super::super::{notify_settings_error, SettingsPage};
+use crate::ui::scale::ui_rem;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Entity, PromptButton, PromptLevel, Window};
 
@@ -127,7 +128,7 @@ impl SettingsWindowView {
         let trigger_bounds_for_paint = trigger_bounds.clone();
         let trigger_bounds_for_click = trigger_bounds.clone();
         let selector = div()
-            .w(px(SETTINGS_DROPDOWN_WIDTH))
+            .w(ui_rem(SETTINGS_DROPDOWN_WIDTH))
             .on_children_prepainted(move |bounds, _, _| {
                 if let Some(bounds) = bounds.first().copied() {
                     trigger_bounds_for_paint.set(Some(bounds));
@@ -140,7 +141,7 @@ impl SettingsWindowView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .h(px(SETTINGS_DROPDOWN_HEIGHT))
+                    .h(ui_rem(SETTINGS_DROPDOWN_HEIGHT))
                     .w_full()
                     .gap_2()
                     .rounded(px(6.0))

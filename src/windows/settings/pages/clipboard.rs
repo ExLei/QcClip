@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, SettingsPage};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, ColorExt as _, Context, Entity, div, img, px};
@@ -678,8 +680,8 @@ impl SettingsWindowView {
             })
             .child(
                 div()
-                    .w(px(32.0))
-                    .h(px(32.0))
+                    .w(ui_rem(32.0))
+                    .h(ui_rem(32.0))
                     .flex_shrink_0()
                     .flex()
                     .items_center()
@@ -759,7 +761,7 @@ impl SettingsWindowView {
             .border_color(theme.border)
             .child(
                 div()
-                    .w(px(140.0))
+                    .w(ui_rem(140.0))
                     .flex_shrink_0()
                     .child(Input::new(&self.search_engine_name_input).small().w_full()),
             )
@@ -776,8 +778,8 @@ impl SettingsWindowView {
                 |row, icon_path| {
                     row.child(
                         div()
-                            .w(px(20.0))
-                            .h(px(20.0))
+                            .w(ui_rem(20.0))
+                            .h(ui_rem(20.0))
                             .flex_shrink_0()
                             .flex()
                             .items_center()
@@ -788,8 +790,8 @@ impl SettingsWindowView {
                             .border_color(theme.border)
                             .child(
                                 img(std::path::PathBuf::from(icon_path))
-                                    .w(px(14.0))
-                                    .h(px(14.0))
+                                    .w(ui_rem(14.0))
+                                    .h(ui_rem(14.0))
                                     .flex_none()
                                     .object_fit(gpui::ObjectFit::Contain),
                             ),
@@ -874,7 +876,7 @@ fn search_engine_icon(
     // 图标优先级：用户上传图标（本地文件）> 内置品牌图标 > 通用 search 图标。
     if let Some(path) = engine.icon_path.as_ref().filter(|p| !p.is_empty()) {
         return img(std::path::PathBuf::from(path))
-            .size(px(14.0))
+            .size(ui_rem(14.0))
             .object_fit(gpui::ObjectFit::Contain)
             .into_any_element();
     }

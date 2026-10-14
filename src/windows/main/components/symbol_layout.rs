@@ -31,7 +31,7 @@ pub(crate) fn render(
 }
 
 pub(crate) fn grid_columns(main: &MainWindow, window: &Window, cell_min_width: f32) -> u16 {
-    let viewport_width = f32::from(window.viewport_size().width);
+    let viewport_width = f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
     let main_sidebar_width = if uses_sidebar_layout(viewport_width) {
         if main.sidebar_collapsed { 56.0 } else { 132.0 }
     } else {
@@ -41,8 +41,8 @@ pub(crate) fn grid_columns(main: &MainWindow, window: &Window, cell_min_width: f
     let grid_gap = 2.0;
     let available_width =
         (viewport_width - main_sidebar_width - TAB_BAR_HEIGHT - grid_padding * 2.0)
-            .max(cell_min_width * 4.0);
+            .max(cell_min_width);
     ((available_width + grid_gap) / (cell_min_width + grid_gap))
         .floor()
-        .clamp(4.0, 12.0) as u16
+        .clamp(1.0, 12.0) as u16
 }

@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
@@ -419,8 +421,8 @@ impl NotificationWindow {
                 let body = div()
                     .min_w_0()
                     .w_full()
-                    .text_size(px(14.0))
-                    .line_height(px(19.0))
+                    .text_size(ui_rem(14.0))
+                    .line_height(ui_rem(19.0))
                     .text_color(theme.muted_foreground);
                 match self.request.max_lines.filter(|lines| *lines > 0) {
                     Some(lines) => body
@@ -457,8 +459,8 @@ impl NotificationWindow {
             }
             NotificationContent::FileCount(count) => div()
                 .w_full()
-                .text_size(px(14.0))
-                .line_height(px(19.0))
+                .text_size(ui_rem(14.0))
+                .line_height(ui_rem(19.0))
                 .text_color(theme.muted_foreground)
                 .child(translator.translate_with_args(
                     "main.preview.file_list",
@@ -494,7 +496,7 @@ impl NotificationWindow {
                 .gap_2()
                 .child(
                     div()
-                        .size(px(20.0))
+                        .size(ui_rem(20.0))
                         .flex_shrink_0()
                         .flex()
                         .items_center()
@@ -515,7 +517,7 @@ impl NotificationWindow {
                     div()
                         .id("global-notification-close")
                         .group("global-notification-close")
-                        .size(px(24.0))
+                        .size(ui_rem(24.0))
                         .flex_shrink_0()
                         .flex()
                         .items_center()
@@ -552,7 +554,7 @@ impl NotificationWindow {
                 .py_2()
                 .child(
                     div()
-                        .size(px(20.0))
+                        .size(ui_rem(20.0))
                         .flex_shrink_0()
                         .flex()
                         .items_center()
@@ -564,7 +566,7 @@ impl NotificationWindow {
                     div()
                         .id("global-notification-close")
                         .group("global-notification-close")
-                        .size(px(24.0))
+                        .size(ui_rem(24.0))
                         .flex_shrink_0()
                         .flex()
                         .items_center()
@@ -688,7 +690,11 @@ impl NotificationWindow {
 
 impl Render for NotificationWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_rem_size(px(13.0));
+        let rem_size = crate::ui::scale::standalone_rem_size(16.0, cx);
+        if window.rem_size() != rem_size {
+            self.target_bounds = None;
+        }
+        window.set_rem_size(rem_size);
         // 尺寸测量必须在布局阶段执行，下一帧回调只负责动画。
         if self.target_bounds.is_none() {
             let measured = self.measure_content(window, cx);
@@ -702,7 +708,7 @@ impl Render for NotificationWindow {
         self.schedule_next_frame(window, cx);
         let background = crate::window_material::background_element(window, cx);
         let card = self.render_card(cx);
-        div().relative().size_full().child(background).child(card)
+        div().relative().size_full().text_size(ui_rem(13.0)).child(background).child(card)
     }
 }
 

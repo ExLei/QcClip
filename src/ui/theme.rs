@@ -329,6 +329,15 @@ const THEME_TRANSITION_DURATION: Duration = Duration::from_millis(240);
 const THEME_TRANSITION_FRAME: Duration = Duration::from_millis(16);
 const QC_CLIP_TITLE_BAR_HEIGHT: gpui::Pixels = px(36.0);
 
+fn apply_ui_scale(theme: &mut Theme, scale: f32) {
+    let config = if theme.mode.is_dark() { &theme.dark_theme } else { &theme.light_theme };
+    let default = Theme::default();
+    // 未声明字号的主题不会覆盖旧值，必须从配置或默认字号重新计算。
+    theme.font_size = config.font_size.map(px).unwrap_or(default.font_size) * scale;
+    theme.mono_font_size = config.mono_font_size.map(px).unwrap_or(default.mono_font_size) * scale;
+    theme.sheet.margin_top = QC_CLIP_TITLE_BAR_HEIGHT * (f32::from(theme.font_size) / 16.0);
+}
+
 pub fn install(cx: &mut App) {
     let mode = ThemeMode::from(cx.window_appearance());
     cx.set_global(QcClipThemeRuntime {
@@ -420,7 +429,8 @@ fn apply_system_theme(window: Option<&mut Window>, cx: &mut App) {
         theme.dark_theme = dark.config;
     }
     Theme::change(mode, window, cx);
-    Theme::global_mut(cx).sheet.margin_top = QC_CLIP_TITLE_BAR_HEIGHT;
+    apply_ui_scale(Theme::global_mut(cx), appearance.ui_scale());
+    Theme::sync_base(cx);
     crate::window_material::capture_base_colors(cx);
     crate::window_material::apply_from_config(cx);
 
@@ -709,6 +719,33 @@ mod tests {
             interpolate_theme_colors(from, to, 1.0),
             to
         ));
+    }
+
+    #[test]
+    fn ui_scale_does_not_accumulate_and_respects_custom_theme_fonts() {
+        let mut theme = gpui_component::Theme::default();
+        theme.light_theme = std::rc::Rc::new(gpui_component::ThemeConfig::default());
+        theme.mode = ThemeMode::Light;
+        let base_font_size = theme.font_size;
+        let base_mono_size = theme.mono_font_size;
+        for scale in [1.25, 1.5, 1.5, 0.8, 2.0, 1.0] {
+            super::apply_ui_scale(&mut theme, scale);
+            assert_eq!(theme.font_size, base_font_size * scale);
+            assert_eq!(theme.mono_font_size, base_mono_size * scale);
+        }
+
+        theme.dark_theme = std::rc::Rc::new(gpui_component::ThemeConfig {
+            font_size: Some(20.0),
+            mono_font_size: Some(15.0),
+            ..Default::default()
+        });
+        theme.mode = ThemeMode::Dark;
+        super::apply_ui_scale(&mut theme, 1.5);
+        assert_eq!(theme.font_size, gpui::px(30.0));
+        assert_eq!(theme.mono_font_size, gpui::px(22.5));
+        theme.mode = ThemeMode::Light;
+        super::apply_ui_scale(&mut theme, 1.0);
+        assert_eq!(theme.font_size, base_font_size);
     }
 
     #[test]

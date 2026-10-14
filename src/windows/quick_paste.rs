@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -513,6 +515,7 @@ struct QuickPasteWindowView {
     loading_image_indices: HashSet<usize>,
     width: f32,
     image_max_size: (u32, u32),
+    tab_height: f32,
     row_height: Pixels,
     content_height: Pixels,
     preview_font_size: Pixels,
@@ -576,6 +579,7 @@ impl QuickPasteWindowView {
             loading_image_indices: HashSet::new(),
             width: configured_width,
             image_max_size: (64, 64),
+            tab_height: QUICK_PASTE_TAB_HEIGHT,
             row_height: px(0.0),
             content_height: px(0.0),
             preview_font_size: px(0.0),
@@ -593,6 +597,8 @@ impl QuickPasteWindowView {
         popup: BorderlessPopup,
         cx: &mut Context<Self>,
     ) {
+        window.set_rem_size(gpui_component::Theme::global(cx).font_size);
+        self.tab_height = QUICK_PASTE_TAB_HEIGHT * crate::ui::scale::window_scale(window);
         let (row_height, content_height, preview_font_size, preview_height) =
             crate::windows::main::components::clipboard_list::quick_paste_row_metrics(window, cx);
         self.row_height = row_height;
@@ -615,7 +621,7 @@ impl QuickPasteWindowView {
             let bounds = window.bounds();
             self.width = self.configured_width;
             self.visible_rows = desired_row_count;
-            let logical_height = QUICK_PASTE_TAB_HEIGHT
+            let logical_height = self.tab_height
                 + f32::from(row_height) * desired_row_count as f32;
             self.reveal_center = point(px(self.width / 2.0), px(logical_height / 2.0));
             if !popup.resize_to_physical_bounds(
@@ -783,7 +789,7 @@ impl QuickPasteWindowView {
             return None;
         }
 
-        let total_height = QUICK_PASTE_TAB_HEIGHT
+        let total_height = self.tab_height
             + f32::from(self.row_height) * self.visible_row_count().max(1) as f32;
         let center_x = f32::from(self.reveal_center.x);
         let center_y = f32::from(self.reveal_center.y);
@@ -907,7 +913,7 @@ impl QuickPasteWindowView {
             .unwrap_or_else(|| window.scale_factor())
             .max(1.0);
         let physical_height =
-            (QUICK_PASTE_TAB_HEIGHT + f32::from(self.row_height) * row_count as f32) * scale;
+            (self.tab_height + f32::from(self.row_height) * row_count as f32) * scale;
         let physical_width = self.width * scale;
         let bounds = self.display.map(|display| display.bounds);
         let margin = 8.0 * scale;
@@ -1275,7 +1281,7 @@ impl QuickPasteWindowView {
             .top_0()
             .bottom_0()
             .left_0()
-            .w(px(18.0))
+            .w(ui_rem(18.0))
             .flex()
             .flex_col()
             .items_center()
@@ -1289,7 +1295,7 @@ impl QuickPasteWindowView {
         if is_pinned {
             status_indicator = status_indicator.child(
                 div()
-                    .size(px(14.0))
+                    .size(ui_rem(14.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1303,7 +1309,7 @@ impl QuickPasteWindowView {
         if has_been_pasted {
             status_indicator = status_indicator.child(
                 div()
-                    .size(px(14.0))
+                    .size(ui_rem(14.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1351,7 +1357,7 @@ impl QuickPasteWindowView {
                         |row, image| {
                             row.child(
                                 img(image)
-                                    .size(px(30.0))
+                                    .size(ui_rem(30.0))
                                     .flex_shrink_0()
                                     .object_fit(ObjectFit::Contain),
                             )
@@ -1432,14 +1438,14 @@ impl QuickPasteWindowView {
 
         div()
             .w(px(self.width))
-            .h(px(QUICK_PASTE_TAB_HEIGHT))
+            .h(px(self.tab_height))
             .flex()
             .items_center()
             .px(px(12.0))
             .child(
                 div()
                     .w_full()
-                    .h(px(28.0))
+                    .h(ui_rem(28.0))
                     .flex()
                     .rounded(px(7.0))
                     .border(px(1.0))
@@ -1466,7 +1472,7 @@ impl QuickPasteWindowView {
                             } else {
                                 theme.foreground
                             })
-                            .text_size(px(12.0))
+                            .text_size(ui_rem(12.0))
                             .child(clipboard_label)
                             .on_click(cx.listener(|view, _, window, cx| {
                                 view.select_source(PersistedQuickPasteTab::Clipboard, window, cx);
@@ -1492,7 +1498,7 @@ impl QuickPasteWindowView {
                             } else {
                                 theme.foreground
                             })
-                            .text_size(px(12.0))
+                            .text_size(ui_rem(12.0))
                             .child(favorites_label)
                             .on_click(cx.listener(|view, _, window, cx| {
                                 view.select_source(PersistedQuickPasteTab::Favorites, window, cx);
@@ -1537,10 +1543,15 @@ impl IconNamed for QuickPasteStatusIcon {
 }
 
 impl Render for QuickPasteWindowView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let rem_size = gpui_component::Theme::global(cx).font_size;
+        if window.rem_size() != rem_size && !self.closing {
+            window.set_rem_size(rem_size);
+            self.place_window(window, self.popup, cx);
+        }
         let start = self.visible_start();
         let list_height = f32::from(self.row_height) * self.visible_row_count().max(1) as f32;
-        let total_height = QUICK_PASTE_TAB_HEIGHT + list_height;
+        let total_height = self.tab_height + list_height;
         let list_content = if self.list_ids.is_empty() {
             let translator = crate::i18n::translator(cx);
             let theme = crate::window_material::excluded_window_theme(cx);

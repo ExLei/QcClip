@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{
     f32::consts::TAU,
     sync::Arc,
@@ -534,7 +536,7 @@ fn field(
         .gap(px(4.0))
         .child(
             div()
-                .text_size(px(11.0))
+                .text_size(ui_rem(11.0))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(theme.muted_foreground)
                 .child(label.into()),
@@ -554,7 +556,7 @@ fn rgb_input_column(
         .flex_1()
         .child(
             div()
-                .text_size(px(11.0))
+                .text_size(ui_rem(11.0))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(theme.muted_foreground)
                 .child(label.into()),

@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::prelude::*;
@@ -124,7 +126,7 @@ where
             .and_then(|bounds| bounds_for_indicator(bounds, selected_index))
     });
     let mut selector = div()
-        .h(px(32.0 * row_count as f32))
+        .h(ui_rem(32.0 * row_count as f32))
         .flex()
         .flex_shrink_0()
         .overflow_hidden()
@@ -201,7 +203,7 @@ where
             for row_index in 0..row_count {
                 let row_start = row_index * columns;
                 let row_len = (option_count.saturating_sub(row_start)).min(columns);
-                let mut row = div().h(px(32.0)).flex();
+                let mut row = div().h(ui_rem(32.0)).flex();
                 for column_index in 0..row_len {
                     let Some((index, option)) = options.next() else {
                         break;

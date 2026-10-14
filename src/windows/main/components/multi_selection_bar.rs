@@ -1,6 +1,8 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
-    Styled, div, px,
+    Styled, div,
 };
 use gpui_component::{ActiveTheme as _, tooltip::Tooltip};
 
@@ -41,7 +43,7 @@ pub fn render(
         let button = div()
             .id(id)
             .group(id)
-            .size(px(28.0))
+            .size(ui_rem(28.0))
             .flex()
             .items_center()
             .justify_center()
@@ -69,7 +71,7 @@ pub fn render(
     };
 
     div()
-        .h(px(36.0))
+        .h(ui_rem(36.0))
         .w_full()
         .flex_none()
         .flex()
@@ -88,14 +90,14 @@ pub fn render(
                 .child(
                     div()
                         .text_sm()
-                        .line_height(px(17.0))
+                        .line_height(ui_rem(17.0))
                         .text_color(theme.foreground)
                         .child(selected_label),
                 )
                 .child(
                     div()
                         .text_xs()
-                        .line_height(px(14.0))
+                        .line_height(ui_rem(14.0))
                         .text_color(theme.muted_foreground)
                         .child(shortcut_hint),
                 ),

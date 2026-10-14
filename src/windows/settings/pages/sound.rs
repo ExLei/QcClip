@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, SettingsPage};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context};
@@ -320,12 +322,12 @@ pub(in crate::windows::settings) fn sound_volume_control(
     theme: gpui_component::ThemeColor,
 ) -> AnyElement {
     h_flex()
-        .w(px(SETTINGS_SOUND_SLIDER_WIDTH))
+        .w(ui_rem(SETTINGS_SOUND_SLIDER_WIDTH))
         .gap_3()
         .child(Slider::new(slider).flex_1())
         .child(
             div()
-                .w(px(38.0))
+                .w(ui_rem(38.0))
                 .text_sm()
                 .text_center()
                 .text_color(theme.foreground)

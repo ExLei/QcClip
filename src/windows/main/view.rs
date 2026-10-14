@@ -17,7 +17,7 @@ use super::{
 };
 
 fn is_sidebar_layout(window: &Window) -> bool {
-    uses_sidebar_layout(f32::from(window.viewport_size().width))
+    uses_sidebar_layout(f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window))
 }
 
 impl Render for MainWindow {

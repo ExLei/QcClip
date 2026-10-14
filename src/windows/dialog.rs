@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AvailableSpace, Bounds, Context, DisplayId, ElementId,
@@ -101,7 +103,7 @@ pub(crate) fn dialog_header(title: impl Into<SharedString>, theme: ThemeColor) -
         })
         .child(
             div()
-                .text_size(px(15.0))
+                .text_size(ui_rem(15.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.foreground)
                 .child(title.into()),
@@ -345,7 +347,7 @@ where
     V: 'static + Render,
 {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        window.set_rem_size(px(13.0));
+        window.set_rem_size(crate::ui::scale::standalone_rem_size(16.0, cx));
         let measured_size = self.measure_content_size(window, cx);
         self.place_window(measured_size, window, cx);
         div().size_full().child(self.content.clone())

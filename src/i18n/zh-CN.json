@@ -1,4 +1,6 @@
 {
+  "settings.personalization.ui_scale": "界面缩放",
+  "settings.personalization.ui_scale_description": "统一调整文字、图标和控件大小，修改后立即生效。",
   "common.retry": "重试",
   "main.note.add": "添加备注",
   "main.note.edit": "编辑备注",

@@ -4,12 +4,14 @@ use gpui::{
     App, DurationWithEasing, Hsla, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     SharedString, Styled, Window, div, px, svg,
 };
-use gpui_component::{ButtonAnimationConfig, Icon, Sizable};
+use gpui_component::{ButtonAnimationConfig, Icon};
+
+use crate::ui::scale::ui_rem;
 
 pub fn icon(name: &str, size: f32, color: Hsla) -> Icon {
     Icon::empty()
         .path(format!("assets/icons/{name}.svg"))
-        .with_size(px(size))
+        .size(ui_rem(size))
         .text_color(color)
 }
 
@@ -54,7 +56,7 @@ struct HoverIcon {
 impl RenderOnce for HoverIcon {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let config = ButtonAnimationConfig::current(cx);
-        let icon_size = px(self.size);
+        let icon_size = px(self.size * crate::ui::scale::theme_scale(cx));
         let icon = svg()
             .path(self.path)
             .text_color(self.color)
@@ -76,7 +78,7 @@ impl RenderOnce for HoverIcon {
             icon.id(format!("{}-icon", self.group))
                 .transitions(|transitions| transitions.size(motion))
                 .group_hover(self.group, |style| {
-                    style.size(px(self.size * config.icon_hover_scale))
+                    style.size(icon_size * config.icon_hover_scale)
                 })
                 .into_any_element()
         } else {

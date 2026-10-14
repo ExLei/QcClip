@@ -1,6 +1,7 @@
 pub mod common;
 pub mod html;
 pub mod icon;
+pub mod scale;
 pub mod single_select;
 pub mod smooth_scroll;
 pub mod theme;

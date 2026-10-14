@@ -1,7 +1,9 @@
+use crate::ui::scale::ui_rem;
+
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{App, Context, IntoElement, PromptButton, PromptLevel, Window, div, px};
+use gpui::{App, Context, IntoElement, PromptButton, PromptLevel, Window, div};
 use gpui_component::button::ButtonVariants as _;
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme as _, Disableable as _};
@@ -306,7 +308,7 @@ impl Render for NewGalleryGroupForm {
 
         div()
             .id("new-gallery-group-form")
-            .w(px(320.0))
+            .w(ui_rem(320.0))
             .flex()
             .flex_col()
             .bg(theme.background)
@@ -320,12 +322,12 @@ impl Render for NewGalleryGroupForm {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(12.0))
+                    .gap(ui_rem(12.0))
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap(px(5.0))
+                            .gap(ui_rem(5.0))
                             .child(field_label(
                                 translator.translate("main.form.gallery_group.name"),
                                 theme,
@@ -336,7 +338,7 @@ impl Render for NewGalleryGroupForm {
                         div()
                             .flex()
                             .flex_col()
-                            .gap(px(6.0))
+                            .gap(ui_rem(6.0))
                             .child(field_label(
                                 translator.translate("main.form.gallery_group.icon"),
                                 theme,
@@ -344,12 +346,12 @@ impl Render for NewGalleryGroupForm {
                             .child(
                                 div()
                                     .id("gallery-group-choose-icon")
-                                    .h(px(34.0))
+                                    .h(ui_rem(34.0))
                                     .w_full()
                                     .flex()
                                     .items_center()
-                                    .gap(px(7.0))
-                                    .px(px(9.0))
+                                    .gap(ui_rem(7.0))
+                                    .px(ui_rem(9.0))
                                     .rounded_md()
                                     .border_1()
                                     .border_color(theme.border)
@@ -369,7 +371,7 @@ impl Render for NewGalleryGroupForm {
                                             .min_w_0()
                                             .overflow_hidden()
                                             .text_ellipsis()
-                                            .text_size(px(12.0))
+                                            .text_size(ui_rem(12.0))
                                             .text_color(theme.muted_foreground)
                                             .child(icon_label),
                                     ),
@@ -378,7 +380,7 @@ impl Render for NewGalleryGroupForm {
                     .when_some(submit_error, |this, message| {
                         this.child(
                             div()
-                                .text_size(px(11.0))
+                                .text_size(ui_rem(11.0))
                                 .text_color(theme.red)
                                 .child(message),
                         )
@@ -390,7 +392,7 @@ impl Render for NewGalleryGroupForm {
 
 fn field_label(label: String, theme: gpui_component::ThemeColor) -> impl IntoElement {
     div()
-        .text_size(px(12.0))
+        .text_size(ui_rem(12.0))
         .text_color(theme.foreground)
         .child(label)
 }

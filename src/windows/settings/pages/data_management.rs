@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, notify_settings_status, open_settings_directory, SettingsPage};
 use crate::windows::notification::NotificationLevel;
 use gpui::prelude::*;
@@ -98,8 +100,8 @@ impl SettingsWindowView {
             }, cx,
         );
         let retention_control = h_flex()
-            .h(px(34.0))
-            .w(px(160.0))
+            .h(ui_rem(34.0))
+            .w(ui_rem(160.0))
             .overflow_hidden()
             .rounded(px(6.0))
             .border_1()
@@ -173,8 +175,8 @@ impl SettingsWindowView {
             }, cx,
         );
         let max_items_control = h_flex()
-            .h(px(34.0))
-            .w(px(160.0))
+            .h(ui_rem(34.0))
+            .w(ui_rem(160.0))
             .overflow_hidden()
             .rounded(px(6.0))
             .border_1()
@@ -255,14 +257,14 @@ impl SettingsWindowView {
         let data_root_text = data_root.to_string_lossy().into_owned();
         let data_location_tooltip = data_root_text.clone();
         let data_location_control = v_flex()
-            .w(px(390.0))
+            .w(ui_rem(390.0))
             .max_w_full()
             .gap_2()
             .child(
                 div()
                     .id("settings-data-location-path")
                     .w_full()
-                    .h(px(34.0))
+                    .h(ui_rem(34.0))
                     .min_w_0()
                     .flex()
                     .items_center()
@@ -317,7 +319,7 @@ impl SettingsWindowView {
                     ),
             )
             .child(
-                v_flex().w(px(390.0)).max_w_full().flex_shrink_0().gap_2()
+                v_flex().w(ui_rem(390.0)).max_w_full().flex_shrink_0().gap_2()
                     .child(h_flex().w_full().gap_2()
                         .child(cleanup_button.flex_grow(2.0))
                         .child(export_button.flex_1())
@@ -449,7 +451,7 @@ fn render_statistics_dashboard(
                         .rounded(px(999.0))
                         .bg(status_color.opacity(0.12))
                         .px_2()
-                        .py(px(3.0))
+                        .py(ui_rem(3.0))
                         .text_xs()
                         .text_color(status_color)
                         .child(status),
@@ -518,7 +520,7 @@ fn render_history_summary_panel(
         _ => 0.0,
     };
     let mut distribution_bar = h_flex()
-        .h(px(8.0))
+        .h(ui_rem(8.0))
         .w_full()
         .overflow_hidden()
         .rounded(px(4.0))
@@ -544,7 +546,7 @@ fn render_history_summary_panel(
         .w_full()
         .min_w_0()
         .col_span(2)
-        .h(px(116.0))
+        .h(ui_rem(116.0))
         .gap_2()
         .rounded(px(10.0))
         .border_1()
@@ -564,7 +566,7 @@ fn render_history_summary_panel(
                         .child(
                             div()
                                 .flex_none()
-                                .size(px(30.0))
+                                .size(ui_rem(30.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -649,7 +651,7 @@ fn render_relation_summary(
 
     v_flex()
         .w_full()
-        .h(px(116.0))
+        .h(ui_rem(116.0))
         .rounded(px(10.0))
         .border_1()
         .border_color(theme.border)
@@ -695,7 +697,7 @@ fn relation_stat_row(
         .child(
             div()
                 .flex_none()
-                .size(px(28.0))
+                .size(ui_rem(28.0))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -741,7 +743,7 @@ fn history_summary_item(
                 .min_w_0()
                 .items_center()
                 .gap_1()
-                .child(div().size(px(6.0)).rounded(px(3.0)).bg(accent))
+                .child(div().size(ui_rem(6.0)).rounded(px(3.0)).bg(accent))
                 .child(
                     div()
                         .min_w_0()
@@ -889,7 +891,7 @@ fn render_retention_panel(
         )
         .child(
             div()
-                .h(px(8.0))
+                .h(ui_rem(8.0))
                 .w_full()
                 .rounded(px(4.0))
                 .bg(theme.muted)
@@ -1144,9 +1146,9 @@ fn render_source_distribution(
         );
     }
     let rows = rows
-        .h(px(132.0))
+        .h(ui_rem(132.0))
         .min_h_0()
-        .pr(px(16.0))
+        .pr(ui_rem(16.0))
         .overflow_y_scrollbar();
     render_distribution_panel(
         theme,
@@ -1170,7 +1172,7 @@ fn source_distribution_row(
     let app_icon = icon_path
         .map(|path| {
             img(path)
-                .size(px(16.0))
+                .size(ui_rem(16.0))
                 .object_fit(gpui::ObjectFit::Contain)
                 .into_any_element()
         })
@@ -1181,14 +1183,14 @@ fn source_distribution_row(
         value as f32 / max_count as f32
     };
     h_flex()
-        .h(px(22.0))
+        .h(ui_rem(22.0))
         .w_full()
         .items_center()
         .gap_2()
         .child(
             div()
                 .id(("settings-source-icon", index))
-                .size(px(22.0))
+                .size(ui_rem(22.0))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -1198,7 +1200,7 @@ fn source_distribution_row(
         )
         .child(
             div()
-                .h(px(6.0))
+                .h(ui_rem(6.0))
                 .flex_1()
                 .rounded(px(3.0))
                 .bg(theme.muted)
@@ -1212,7 +1214,7 @@ fn source_distribution_row(
         )
         .child(
             div()
-                .w(px(52.0))
+                .w(ui_rem(52.0))
                 .flex_none()
                 .text_right()
                 .text_xs()
@@ -1259,7 +1261,7 @@ fn render_distribution_panel(
     }
     let mut panel = v_flex()
         .w_full()
-        .h(px(184.0))
+        .h(ui_rem(184.0))
         .min_w_0()
         .min_h_0()
         .gap_2()
@@ -1292,13 +1294,13 @@ fn distribution_row(
         _ => 0.0,
     };
     h_flex()
-        .h(px(22.0))
+        .h(ui_rem(22.0))
         .w_full()
         .items_center()
         .gap_2()
         .child(
             div()
-                .w(px(40.0))
+                .w(ui_rem(40.0))
                 .flex_none()
                 .text_xs()
                 .text_color(theme.muted_foreground)
@@ -1306,7 +1308,7 @@ fn distribution_row(
         )
         .child(
             div()
-                .h(px(6.0))
+                .h(ui_rem(6.0))
                 .flex_1()
                 .rounded(px(3.0))
                 .bg(theme.muted)
@@ -1314,7 +1316,7 @@ fn distribution_row(
         )
         .child(
             div()
-                .w(px(52.0))
+                .w(ui_rem(52.0))
                 .flex_none()
                 .text_right()
                 .text_xs()
@@ -1336,16 +1338,16 @@ fn storage_row(
         .w_full()
         .items_center()
         .gap_2()
-        .child(div().w(px(58.0)).flex_none().text_xs().text_color(theme.muted_foreground).child(label))
+        .child(div().w(ui_rem(58.0)).flex_none().text_xs().text_color(theme.muted_foreground).child(label))
         .child(
             div()
-                .h(px(6.0))
+                .h(ui_rem(6.0))
                 .flex_1()
                 .rounded(px(3.0))
                 .bg(theme.muted)
                 .child(div().h_full().rounded(px(3.0)).bg(color).w(relative(ratio))),
         )
-        .child(div().w(px(62.0)).flex_none().text_right().text_xs().text_color(theme.foreground).child(format_bytes(bytes)))
+        .child(div().w(ui_rem(62.0)).flex_none().text_right().text_xs().text_color(theme.foreground).child(format_bytes(bytes)))
         .into_any_element()
 }
 

@@ -1,3 +1,5 @@
+use crate::ui::scale::ui_rem;
+
 use super::super::{notify_settings_error, SettingsPage};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context};
@@ -59,6 +61,34 @@ impl SettingsWindowView {
                     cx.notify();
                 });
             });
+
+        let mut scale_presets = crate::config::UI_SCALE_PRESETS.to_vec();
+        if !scale_presets.contains(&appearance.ui_scale_percent) {
+            scale_presets.push(appearance.ui_scale_percent);
+            scale_presets.sort_unstable();
+        }
+        let scale_items = scale_presets.into_iter().map(|percent| {
+            DropdownItem::option(DropdownItemId::new(percent.to_string()), format!("{percent}%"))
+                .selected(percent == appearance.ui_scale_percent)
+        }).collect();
+        let scale_selector = settings_dropdown(
+            "settings-ui-scale-select",
+            appearance.ui_scale_percent.to_string(),
+            scale_items,
+            {
+                let view = view.clone();
+                let save_error = translator.translate("settings.personalization.save_error");
+                move |id, cx| {
+                    let Ok(percent) = id.as_str().parse::<u16>() else { return; };
+                    persist_appearance_change(
+                        view.clone(), "界面缩放",
+                        move |appearance| appearance.ui_scale_percent = percent,
+                        save_error.clone(), cx,
+                    );
+                }
+            },
+            cx,
+        );
 
         let mode_items = AppearanceMode::ALL
             .into_iter()
@@ -159,7 +189,7 @@ impl SettingsWindowView {
             .child(Slider::new(&self.window_material_opacity_slider).flex_1())
             .child(
                 div()
-                    .w(px(52.0))
+                    .w(ui_rem(52.0))
                     .text_sm()
                     .text_center()
                     .text_color(theme.foreground)
@@ -174,7 +204,7 @@ impl SettingsWindowView {
             .child(Slider::new(&self.window_material_brightness_slider).flex_1())
             .child(
                 div()
-                    .w(px(52.0))
+                    .w(ui_rem(52.0))
                     .text_sm()
                     .text_center()
                     .text_color(theme.foreground)
@@ -189,7 +219,7 @@ impl SettingsWindowView {
             .child(Slider::new(&self.background_image_blur_slider).flex_1())
             .child(
                 div()
-                    .w(px(52.0))
+                    .w(ui_rem(52.0))
                     .text_sm()
                     .text_center()
                     .text_color(theme.foreground)
@@ -197,7 +227,7 @@ impl SettingsWindowView {
             );
         let background_image_selector = Button::new("settings-background-image-choose")
             .small()
-            .max_w(px(220.0))
+            .max_w(ui_rem(220.0))
             .label(
                 appearance
                     .background_image_path
@@ -228,7 +258,7 @@ impl SettingsWindowView {
                 .items_center()
                 .child(
                     div()
-                        .w(px(96.0))
+                        .w(ui_rem(96.0))
                         .flex_shrink_0()
                         .text_xs()
                         .text_color(theme.muted_foreground)
@@ -245,7 +275,7 @@ impl SettingsWindowView {
             .gap_3()
             .child(
                 div()
-                    .w(px(96.0))
+                    .w(ui_rem(96.0))
                     .flex_shrink_0()
                     .text_xs()
                     .text_color(theme.muted_foreground)
@@ -430,12 +460,12 @@ impl SettingsWindowView {
             single_select_animation,
         );
         let adaptive_max_lines_selector = h_flex()
-            .w(px(SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH))
+            .w(ui_rem(SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH))
             .gap_3()
             .child(Slider::new(&self.adaptive_max_lines_slider).flex_1())
             .child(
                 div()
-                    .w(px(36.0))
+                    .w(ui_rem(36.0))
                     .text_sm()
                     .text_center()
                     .text_color(theme.foreground)
@@ -498,6 +528,12 @@ impl SettingsWindowView {
                         .into(),
                 ),
                 dark_selector,
+            ))
+            .child(self.setting_row(
+                theme,
+                translator.translate("settings.personalization.ui_scale"),
+                Some(translator.translate("settings.personalization.ui_scale_description").into()),
+                scale_selector,
             ))
             .child(self.setting_row(
                 theme,
@@ -673,7 +709,7 @@ fn open_animations_sheet(
 
         sheet
             .title(translator.translate("settings.personalization.animations"))
-            .size(px(420.0))
+            .size(ui_rem(420.0))
             .resizable(false)
             .shadow_none()
             .bg(sheet_background)
