@@ -1,0 +1,192 @@
+name: 构建 Windows 并上传草稿发布
+
+on:
+  push:
+    tags:
+      - '**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_LTO: fat
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: '3'
+  CARGO_PROFILE_RELEASE_PANIC: abort
+  CARGO_PROFILE_RELEASE_STRIP: symbols
+  CARGO_PROFILE_RELEASE_DEBUG: 'false'
+  CARGO_PROFILE_RELEASE_INCREMENTAL: 'false'
+  CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: 'false'
+  CMAKE_GENERATOR: Ninja
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    name: 构建 Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            msvc-arch: x64
+            executable: target/release/QcClip.exe
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            msvc-arch: amd64_arm64
+            executable: target/aarch64-pc-windows-msvc/release/QcClip.exe
+    env:
+      BUILD_ARCH: ${{ matrix.arch }}
+      BUILD_TARGET: ${{ matrix.target }}
+      BUILD_EXECUTABLE: ${{ matrix.executable }}
+
+    steps:
+      - name: 检出标签对应代码
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装项目指定的 Rust 工具链
+        run: |
+          rustup show active-toolchain
+          if ($LASTEXITCODE -ne 0) { throw '安装项目 Rust 工具链失败' }
+          rustup target add $env:BUILD_TARGET
+          if ($LASTEXITCODE -ne 0) { throw "安装 Rust 目标失败：$env:BUILD_TARGET" }
+
+      - name: 校验标签与应用版本
+        run: |
+          $metadataJson = cargo metadata --no-deps --format-version 1 --locked
+          if ($LASTEXITCODE -ne 0) { throw '读取 Cargo 元数据失败' }
+          $metadata = ($metadataJson -join "`n") | ConvertFrom-Json
+          $package = $metadata.packages | Where-Object { $_.name -eq 'QcClip' }
+          if ($null -eq $package) { throw 'Cargo 元数据中找不到 QcClip 项目' }
+          $version = $package.version
+          if ($env:GITHUB_REF_NAME -ne "v$version" -and $env:GITHUB_REF_NAME -ne $version) {
+            throw "标签 $env:GITHUB_REF_NAME 与 Cargo.toml 版本 $version 不一致，请使用 v$version 或 $version"
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 初始化打包工具的 x64 编译环境
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: 缓存 Cargo 构建及打包工具
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-${{ matrix.arch }}
+
+      - name: 安装打包工具
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          if ($LASTEXITCODE -ne 0) { throw '安装 cargo-packager 失败' }
+
+      - name: 初始化目标架构的 MSVC 编译环境
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc-arch }}
+
+      - name: 构建安装包和便携 ZIP
+        env:
+          QCCLIP_RELEASE_GUI: '1'
+        run: ./scripts/package.ps1 -Arch $env:BUILD_ARCH -PackageType both
+
+      - name: 验证发布程序不显示终端
+        run: |
+          $stream = [System.IO.File]::OpenRead($env:BUILD_EXECUTABLE)
+          try {
+            $reader = [System.IO.BinaryReader]::new($stream)
+            $stream.Position = 0x3c
+            $peOffset = $reader.ReadInt32()
+            $stream.Position = $peOffset
+            if ($reader.ReadUInt32() -ne 0x4550) { throw '发布程序不是有效的 PE 文件' }
+            $stream.Position = $peOffset + 24 + 68
+            $subsystem = $reader.ReadUInt16()
+            if ($subsystem -ne 2) {
+              throw "发布程序未使用 Windows GUI 子系统，当前值：$subsystem"
+            }
+          } finally {
+            $stream.Dispose()
+          }
+          Write-Host '已确认发布程序使用 Windows GUI 子系统，不会显示终端窗口'
+
+      - name: 校验安装包和便携包完整性
+        run: |
+          $directory = "target/packages/$env:BUILD_TARGET"
+          $expected = @(
+            "QcClip_$($env:APP_VERSION)_$($env:BUILD_ARCH)-setup.exe",
+            "QcClip_$($env:APP_VERSION)_$($env:BUILD_ARCH)-portable.zip"
+          )
+          foreach ($name in $expected) {
+            $path = Join-Path $directory $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
+              throw "缺少发布产物或文件为空：$path"
+            }
+          }
+
+      - name: 保存当前架构发布产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: |
+            target/packages/${{ matrix.target }}/QcClip_*-setup.exe
+            target/packages/${{ matrix.target }}/QcClip_*-portable.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    name: 汇总产物并上传草稿 Release
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: 下载全部架构产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-*
+          merge-multiple: true
+          path: dist
+
+      - name: 创建或更新草稿发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = $env:GITHUB_REF_NAME
+          $assets = @(Get-ChildItem -LiteralPath dist -File)
+          if ($assets.Count -ne 4) { throw "发布产物数量错误，预期 4 个，实际 $($assets.Count) 个" }
+          foreach ($arch in @('x64', 'arm64')) {
+            foreach ($suffix in @('setup.exe', 'portable.zip')) {
+              $matching = @($assets | Where-Object { $_.Name -like "QcClip_*_${arch}-$suffix" })
+              if ($matching.Count -ne 1 -or $matching[0].Length -eq 0) {
+                throw "缺少或重复的发布产物：$arch / $suffix"
+              }
+            }
+          }
+
+          $viewJson = gh release view $tag --repo $repo --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = ($viewJson -join "`n") | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw "已存在正式发布 $tag，拒绝覆盖已发布内容"
+            }
+          } else {
+            gh release create $tag --repo $repo --verify-tag --draft --title "QcClip $tag" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "创建草稿发布失败，退出码：$LASTEXITCODE" }
+          }
+
+          $uploadArgs = @('release', 'upload', $tag, '--repo', $repo, '--clobber') + @($assets.FullName)
+          gh @uploadArgs
+          if ($LASTEXITCODE -ne 0) { throw "上传草稿发布产物失败，退出码：$LASTEXITCODE" }

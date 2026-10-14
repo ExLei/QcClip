@@ -168,4 +168,12 @@ cargo packager --release --target x86_64-pc-windows-msvc --formats nsis --out-di
 
 首发以 Windows 为正式使用目标。仅发布已在对应架构和干净系统上验证过的产物，检查安装、启动、便携模式、数据保留和卸载；后续版本还需验证升级流程。Windows x64 构建机交叉编译 ARM64 时必须预装 ARM64 MSVC 和 SDK，并在 ARM64 系统验证运行结果。
 
-自动构建按实际发布的系统和架构配置任务。macOS 和 Linux 完成应用适配并在对应系统验证后，再纳入正式发布流程。
+## GitHub Actions 草稿发布
+
+`.github/workflows/release.yml` 在推送标签时触发。标签必须与 `Cargo.toml` 的应用版本一致，例如版本 `0.1.0` 对应 `v0.1.0` 或 `0.1.0`；版本不一致时会停止构建。
+
+工作流使用 Windows 2022 构建机，分别构建 x64 和 ARM64（`aarch64-pc-windows-msvc`），复用 `scripts/package.ps1` 生成各架构的 NSIS 安装包和便携 ZIP。发布构建使用 fat LTO、优化等级 3、panic abort、符号裁剪，并关闭调试信息、增量编译和溢出检查。仅工作流的应用打包步骤设置 `QCCLIP_RELEASE_GUI=1`，启用 Windows GUI 子系统以隐藏终端窗口；未设置该开关的本地 debug、release 构建及普通打包均保留终端。Cargo 会跟踪该开关，切换后自动重新构建。
+
+两个架构均构建成功，并通过 GUI 子系统和产物完整性校验后，工作流将四个文件汇总上传到当前仓库的草稿 Release。重复运行只更新同标签的草稿，不覆盖已经发布的 Release。工作流使用自带的 `GITHUB_TOKEN`，无需另配私有仓库令牌；仓库或组织策略需允许该令牌写入 Contents。
+
+草稿不会自动发布。应先下载产物，在对应架构的干净 Windows 系统上完成上述发布验证，再手动发布草稿。macOS 和 Linux 完成应用适配并在对应系统验证后，再纳入正式发布流程。

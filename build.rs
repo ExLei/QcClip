@@ -1,4 +1,13 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=QCCLIP_RELEASE_GUI");
+    println!("cargo:rustc-check-cfg=cfg(qcclip_release_gui)");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("QCCLIP_RELEASE_GUI").as_deref() == Ok("1")
+    {
+        println!("cargo:rustc-cfg=qcclip_release_gui");
+    }
+
     if cfg!(debug_assertions)
         && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
