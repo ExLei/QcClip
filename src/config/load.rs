@@ -710,6 +710,9 @@ mod tests {
         };
         let encoded = serde_json::to_string(&config).unwrap();
         assert_eq!(super::from_str(&encoded).unwrap().config.updates, config.updates);
+        let never = super::from_str(r#"{"updates":{"frequency":"never"}}"#).unwrap();
+        assert_eq!(never.config.updates.frequency, UpdateFrequency::Never);
+        assert!(never.warnings.is_empty());
         let loaded = super::from_str(r#"{"updates":{"frequency":"invalid","notificationEnabled":false}}"#).unwrap();
         assert_eq!(loaded.config.updates.frequency, UpdateFrequency::Daily);
         assert!(!loaded.config.updates.notification_enabled);

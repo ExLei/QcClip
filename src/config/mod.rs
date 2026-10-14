@@ -44,16 +44,19 @@ pub enum UpdateFrequency {
     Daily,
     EveryThreeDays,
     Weekly,
+    Never,
 }
 
 impl UpdateFrequency {
-    pub const ALL: [Self; 3] = [Self::Daily, Self::EveryThreeDays, Self::Weekly];
+    pub const ALL: [Self; 4] = [Self::Daily, Self::EveryThreeDays, Self::Weekly, Self::Never];
 
-    pub const fn seconds(self) -> u64 {
+    /// 自动检查间隔，`None` 表示永不自动检查。
+    pub const fn seconds(self) -> Option<u64> {
         match self {
-            Self::Daily => 86400,
-            Self::EveryThreeDays => 3 * 86400,
-            Self::Weekly => 7 * 86400,
+            Self::Daily => Some(86400),
+            Self::EveryThreeDays => Some(3 * 86400),
+            Self::Weekly => Some(7 * 86400),
+            Self::Never => None,
         }
     }
 
@@ -62,6 +65,7 @@ impl UpdateFrequency {
             Self::Daily => "updates.frequency.daily",
             Self::EveryThreeDays => "updates.frequency.three_days",
             Self::Weekly => "updates.frequency.weekly",
+            Self::Never => "updates.frequency.never",
         }
     }
 }
