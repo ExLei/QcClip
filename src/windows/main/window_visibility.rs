@@ -680,8 +680,28 @@ pub(crate) fn set_visibility(
             crate::windows::preview::PreviewWindowService::destroy(cx);
         }
         if visible {
+            let generation = cx.read_global::<MainWindowService, _>(|service, _| {
+                service.window_state.visibility_transition_generation()
+            });
             let _ = window.update(cx, |_, window, cx| {
-                MainWindowService::handle_window_shown(window, cx);
+                if attachment.is_some() {
+                    MainWindowService::handle_window_shown(window, cx);
+                } else {
+                    // GPUI 的帧回调先于绘制执行，留出一帧派发隐藏期间积压的失焦事件，
+                    // 避免旧输入会话的失焦处理覆盖本次显示的自动聚焦。
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| {
+                            let should_handle = cx.read_global::<MainWindowService, _>(|service, _| {
+                                service.window_state.is_logically_visible()
+                                    && service.window_state.visibility_transition_generation()
+                                        == generation
+                            });
+                            if should_handle {
+                                MainWindowService::handle_window_shown(window, cx);
+                            }
+                        });
+                    });
+                }
                 Ok::<(), String>(())
             });
         }
