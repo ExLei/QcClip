@@ -165,6 +165,7 @@ jobs:
         run: |
           $repo = $env:GITHUB_REPOSITORY
           $tag = $env:GITHUB_REF_NAME
+          $prerelease = ($tag.Split('+')[0].Contains('-')).ToString().ToLowerInvariant()
           $assets = @(Get-ChildItem -LiteralPath dist -File)
           if ($assets.Count -ne 4) { throw "发布产物数量错误，预期 4 个，实际 $($assets.Count) 个" }
           foreach ($arch in @('x64', 'arm64')) {
@@ -180,10 +181,12 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             $release = ($viewJson -join "`n") | ConvertFrom-Json
             if (-not $release.isDraft) {
-              throw "已存在正式发布 $tag，拒绝覆盖已发布内容"
+              throw "已存在已发布版本 $tag，拒绝覆盖已发布内容"
             }
+            gh release edit $tag --repo $repo --prerelease=$prerelease
+            if ($LASTEXITCODE -ne 0) { throw "更新草稿预发布标记失败，退出码：$LASTEXITCODE" }
           } else {
-            gh release create $tag --repo $repo --verify-tag --draft --title "QcClip $tag" --generate-notes
+            gh release create $tag --repo $repo --verify-tag --draft --prerelease=$prerelease --title "QcClip $tag" --generate-notes
             if ($LASTEXITCODE -ne 0) { throw "创建草稿发布失败，退出码：$LASTEXITCODE" }
           }
 

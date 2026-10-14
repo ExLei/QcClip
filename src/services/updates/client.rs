@@ -277,13 +277,13 @@ mod tests {
     #[test]
     fn chooses_newest_version_including_prereleases_and_excludes_drafts() {
         let release = fetch_mock(mock_response(200, r#"[
-            {"tag_name":"v0.2.0-beta2", "prerelease":true},
+            {"tag_name":"v1.1.0-beta2", "prerelease":true},
             {"tag_name":"v99.0.0", "draft":true},
             {"tag_name":"invalid-tag"},
-            {"tag_name":"v0.1.2"},
-            {"tag_name":"v0.2.0-beta10", "prerelease":true}
+            {"tag_name":"v1.0.0"},
+            {"tag_name":"v1.1.0-beta10", "prerelease":true}
         ]"#)).unwrap().unwrap();
-        assert_eq!(release.tag_name, "v0.2.0-beta10");
+        assert_eq!(release.tag_name, "v1.1.0-beta10");
         assert!(newer_than_current(&release));
     }
 

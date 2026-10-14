@@ -29,7 +29,7 @@ def release(tag, *, draft=False, prerelease=False):
 class UpdateServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, scenario="update", version="v0.1.2", delay=0):
+    def __init__(self, address, scenario="update", version="v1.0.0-beta.2", delay=0):
         super().__init__(address, UpdateHandler)
         self.scenario = scenario
         self.version = version
@@ -63,21 +63,21 @@ class UpdateHandler(BaseHTTPRequestHandler):
         if scenario == "empty":
             payload = []
         elif scenario == "current":
-            payload = [release("v0.1.0")]
+            payload = [release("v1.0.0-beta.1", prerelease=True)]
         elif scenario == "prerelease":
-            payload = [release("v0.1.2-rc2", prerelease=True)]
+            payload = [release("v1.0.0-rc2", prerelease=True)]
         elif scenario == "mixed":
             payload = [
-                release("v0.2.0-beta2", prerelease=True),
+                release("v1.1.0-beta2", prerelease=True),
                 release("v99.0.0", draft=True),
                 release("invalid-tag"),
-                release("v0.1.2"),
-                release("v0.2.0-beta10", prerelease=True),
+                release("v1.0.0"),
+                release("v1.1.0-beta10", prerelease=True),
             ]
         elif scenario == "paginated":
             if query.get("page", ["1"])[0] == "1":
                 next_url = f"http://127.0.0.1:{self.server.server_port}/releases?page=2"
-                self.respond(200, [release("v0.1.0")], {"Link": f'<{next_url}>; rel="next"'})
+                self.respond(200, [release("v1.0.0-beta.1", prerelease=True)], {"Link": f'<{next_url}>; rel="next"'})
                 return
             payload = [release(self.server.version)]
         else:
@@ -131,13 +131,13 @@ class ServerTests(unittest.TestCase):
                     if scenario == "empty":
                         self.assertEqual(payload, [])
                     if scenario == "mixed":
-                        self.assertEqual(payload[-1]["tag_name"], "v0.2.0-beta10")
+                        self.assertEqual(payload[-1]["tag_name"], "v1.1.0-beta10")
                     if scenario == "prerelease":
                         self.assertTrue(payload[0]["prerelease"])
                     if scenario == "paginated":
                         self.assertIn('rel="next"', response.headers["Link"])
                         with urlopen(f"{self.base}/releases?page=2") as second:
-                            self.assertEqual(json.load(second)[0]["tag_name"], "v0.1.2")
+                            self.assertEqual(json.load(second)[0]["tag_name"], "v1.0.0-beta.2")
 
 
 def main():
@@ -146,7 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description="QcClip 本地更新检查测试服务，仅绑定本机地址")
     parser.add_argument("--port", type=int, default=18765, help="监听端口")
     parser.add_argument("--scenario", choices=SCENARIOS, default="update", help="测试场景")
-    parser.add_argument("--version", default="v0.1.2", help="模拟发布标签，可含测试版后缀")
+    parser.add_argument("--version", default="v1.0.0-beta.2", help="模拟发布标签，可含测试版后缀")
     parser.add_argument("--delay", type=float, default=0, help="模拟响应延迟秒数")
     parser.add_argument("--self-test", action="store_true", help="运行服务自检")
     args = parser.parse_args()

@@ -15,7 +15,7 @@ GitHub 未认证 API 的额度按网络出口 IP 计算，共用代理节点可�
 需要 Python 3。第一个 PowerShell 窗口启动服务：
 
 ```powershell
-py -3 scripts/update_test_server.py --scenario update --version v0.1.2
+py -3 scripts/update_test_server.py --scenario update --version v1.0.0-beta.2
 ```
 
 第二个 PowerShell 窗口设置临时环境变量并启动 debug 包：
@@ -34,7 +34,7 @@ Remove-Item Env:QCCLIP_UPDATE_TEST_URL
 
 ```powershell
 Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=mixed'
-Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=update&version=v0.3.0-rc2'
+Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=update&version=v1.0.0-rc2'
 ```
 
 发现更新后检查托盘底部绿色居中项、设置侧边栏“更新”标识、关于页版本对比、主窗口图标上的绿色向上箭头、全局通知中的发布页按钮。测试场景的跳转仍使用真实 GitHub 发布页，尚未发布的模拟标签可能显示 GitHub 404。
