@@ -398,6 +398,8 @@
   "migration.detect": "检测本地旧版数据",
   "migration.folder": "选择旧版目录",
   "migration.zip": "选择旧版 ZIP",
+  "migration.scope_history": "迁移历史记录",
+  "migration.scope_favorites": "迁移收藏、分组和标题",
   "migration.history": "历史记录（{count}）",
   "migration.favorites": "收藏、分组和标题（{count}）",
   "migration.summary": "可转换分组 {groups} 个，源数据重复内容 {duplicates} 条，已迁移 {imported} 条，无法恢复 {skipped} 条",

@@ -398,6 +398,8 @@
   "migration.detect": "Detect Local Data",
   "migration.folder": "Choose Legacy Folder",
   "migration.zip": "Choose Legacy ZIP",
+  "migration.scope_history": "Migrate History",
+  "migration.scope_favorites": "Migrate Favorites, Groups and Titles",
   "migration.history": "History ({count})",
   "migration.favorites": "Favorites, Groups and Titles ({count})",
   "migration.summary": "{groups} groups, {duplicates} duplicate source contents, {imported} already imported, {skipped} unrecoverable",

@@ -11,7 +11,7 @@ use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
 
 use super::super::SettingsWindowView;
-use crate::services::{data_management::DataManagementService, legacy_migration::{self, MigrationOptions}};
+use crate::services::{data_management::DataManagementService, legacy_migration};
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_legacy_migration(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -21,31 +21,34 @@ impl SettingsWindowView {
         let detect_view = view.clone();
         let folder_view = view.clone();
         let zip_view = view.clone();
+        let history_view = view.clone();
+        let favorite_view = view.clone();
+        let source_disabled = self.data_busy || !self.legacy_options.history && !self.legacy_options.favorites;
         let mut section = v_flex().w_full().min_w_0().gap_3().px_4().py_3().border_b_1().border_color(theme.border)
             .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(translator.translate("migration.title")))
+            .child(h_flex().w_full().gap_4().flex_wrap()
+                .child(Checkbox::new("legacy-history").label(translator.translate("migration.scope_history"))
+                    .checked(self.legacy_options.history).disabled(self.data_busy).on_click(move |checked, _, cx| {
+                        change_scope(history_view.clone(), true, *checked, cx);
+                    }))
+                .child(Checkbox::new("legacy-favorites").label(translator.translate("migration.scope_favorites"))
+                    .checked(self.legacy_options.favorites).disabled(self.data_busy).on_click(move |checked, _, cx| {
+                        change_scope(favorite_view.clone(), false, *checked, cx);
+                    })))
             .child(h_flex().w_full().gap_2().flex_wrap()
-                .child(Button::new("legacy-detect").secondary().small().disabled(self.data_busy)
+                .child(Button::new("legacy-detect").secondary().small().disabled(source_disabled)
                     .label(translator.translate("migration.detect")).on_click(move |_, _, cx| choose_source(detect_view.clone(), SourceChoice::Detect, cx)))
-                .child(Button::new("legacy-folder").secondary().small().disabled(self.data_busy)
+                .child(Button::new("legacy-folder").secondary().small().disabled(source_disabled)
                     .label(translator.translate("migration.folder")).on_click(move |_, _, cx| choose_source(folder_view.clone(), SourceChoice::Folder, cx)))
-                .child(Button::new("legacy-zip").secondary().small().disabled(self.data_busy)
+                .child(Button::new("legacy-zip").secondary().small().disabled(source_disabled)
                     .label(translator.translate("migration.zip")).on_click(move |_, _, cx| choose_source(zip_view.clone(), SourceChoice::Zip, cx))));
         if let Some(prepared) = &self.legacy_migration {
             let preview = &prepared.preview;
-            let history_view = view.clone();
-            let favorite_view = view.clone();
-            let options = h_flex().w_full().gap_4().flex_wrap()
-                .child(Checkbox::new("legacy-history").label(translator.translate_with_args("migration.history", &[("count", preview.history.to_string())]))
-                    .checked(self.legacy_options.history).disabled(self.data_busy).on_click(move |checked, _, cx| {
-                        history_view.update(cx, |view, cx| { view.legacy_options.history = *checked; cx.notify(); });
-                    }))
-                .child(Checkbox::new("legacy-favorites").label(translator.translate_with_args("migration.favorites", &[("count", preview.favorites.to_string())]))
-                    .checked(self.legacy_options.favorites).disabled(self.data_busy).on_click(move |checked, _, cx| {
-                        favorite_view.update(cx, |view, cx| { view.legacy_options.favorites = *checked; cx.notify(); });
-                    }));
             section = section
                 .child(div().w_full().min_w_0().truncate().text_xs().text_color(theme.muted_foreground).child(prepared.source.display().to_string()))
-                .child(options)
+                .child(h_flex().w_full().gap_4().flex_wrap()
+                    .child(translator.translate_with_args("migration.history", &[("count", preview.history.to_string())]))
+                    .child(translator.translate_with_args("migration.favorites", &[("count", preview.favorites.to_string())])))
                 .child(div().text_sm().child(translator.translate_with_args("migration.summary", &[
                     ("groups", preview.groups.to_string()), ("duplicates", preview.duplicate_contents.to_string()),
                     ("imported", preview.already_imported.to_string()), ("skipped", preview.skipped.to_string()),
@@ -65,7 +68,7 @@ impl SettingsWindowView {
                     .label(translator.translate("migration.confirm")).on_click(move |_, _, cx| start_migration(import_view.clone(), cx)))
                 .child(Button::new("legacy-dismiss").secondary().small().disabled(self.data_busy)
                     .label(translator.translate("migration.cancel")).on_click(move |_, _, cx| {
-                        cancel_view.update(cx, |view, cx| { view.legacy_migration = None; cx.notify(); });
+                        cancel_view.update(cx, |view, cx| { view.legacy_migration = None; view.legacy_source = None; cx.notify(); });
                     })));
             if let Some(progress) = &self.legacy_progress {
                 section = section.child(div().text_sm().child(translator.translate_with_args("migration.progress", &[
@@ -98,6 +101,19 @@ impl SettingsWindowView {
         }
         section.into_any_element()
     }
+}
+
+fn change_scope(view: Entity<SettingsWindowView>, history: bool, checked: bool, cx: &mut App) {
+    if view.read(cx).data_busy { return; }
+    let source = view.update(cx, |view, cx| {
+        if history { view.legacy_options.history = checked; } else { view.legacy_options.favorites = checked; }
+        view.legacy_migration = None;
+        view.legacy_report = None;
+        view.legacy_error = None;
+        cx.notify();
+        view.legacy_source.clone()
+    });
+    if let Some(source) = source { start_source_analysis(view, source, cx); }
 }
 
 fn migration_result_message(
@@ -139,10 +155,12 @@ fn choose_source(view: Entity<SettingsWindowView>, choice: SourceChoice, cx: &mu
 
 pub(in crate::windows::settings) fn start_source_analysis(view: Entity<SettingsWindowView>, source: PathBuf, cx: &mut App) {
     if view.read(cx).data_busy { return; }
+    let options = view.read(cx).legacy_options;
+    if !options.history && !options.favorites { return; }
     let root = cx.read_global::<DataManagementService, _>(|service, _| service.data_root().to_path_buf());
-    view.update(cx, |view, cx| { view.data_busy = true; view.legacy_migration = None; view.legacy_report = None; view.legacy_error = None; cx.notify(); });
+    view.update(cx, |view, cx| { view.data_busy = true; view.legacy_source = Some(source.clone()); view.legacy_migration = None; view.legacy_report = None; view.legacy_error = None; cx.notify(); });
     cx.spawn(async move |cx| {
-        let result = cx.background_executor().spawn(async move { legacy_migration::prepare(&source, &root) }).await;
+        let result = cx.background_executor().spawn(async move { legacy_migration::prepare(&source, &root, options) }).await;
         view.update(cx, |view, cx| {
             view.data_busy = false;
             match result {
@@ -164,7 +182,6 @@ pub(in crate::windows::settings) fn start_source_analysis(view: Entity<SettingsW
                     };
                     NotificationService::show_message(translator.translate("migration.title"), message, level, cx);
                     view.legacy_migration = Some(Arc::new(prepared));
-                    view.legacy_options = MigrationOptions::default();
                 }
                 Err(error) => { tracing::error!("分析旧版数据失败：{error}"); view.legacy_error = notify_settings_error(SettingsPage::DataManagement, Some(error.to_string()), cx); }
             }

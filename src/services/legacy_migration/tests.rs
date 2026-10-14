@@ -73,7 +73,7 @@ impl Fixture {
     }
 
     fn migrate(&self, options: MigrationOptions) -> MigrationReport {
-        let prepared = prepare(&self.old_root, &self.new_root).expect("分析失败");
+        let prepared = prepare(&self.old_root, &self.new_root, options).expect("分析失败");
         migrate(&prepared, options, &self.service, &AtomicUsize::new(0)).expect("迁移失败")
     }
 
@@ -90,7 +90,7 @@ fn merges_history_and_favorites_with_multiple_tags_and_titles() {
     fixture.favorite("b", "共同内容", "生活", "生活标题");
     fixture.old.execute_batch("INSERT INTO groups VALUES ('工作', 'ti ti-folder', '#dc2626', 1),
         ('生活', 'ti ti-folder', '#3b82f6', 2), ('空分组', 'ti ti-folder', '#f00', 3), ('全部', '', '', 0);").unwrap();
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert_eq!(prepared.preview.duplicate_contents, 2);
     let report = fixture.migrate(MigrationOptions { history: true, favorites: true });
     assert_eq!(report.added_contents, 1);
@@ -121,7 +121,7 @@ fn favorites_only_and_repeated_import_preserve_user_changes() {
     assert!(report.backup.is_file());
     assert_eq!(fixture.connection().query_row("SELECT note_text FROM clipboard_item_notes", [], |row| row.get::<_, String>(0)).unwrap(), "1412514");
     fixture.connection().execute_batch("UPDATE clipboard_item_notes SET note_text = '用户新备注'; UPDATE favorites SET is_pinned = 1;").unwrap();
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert_eq!(prepared.preview.already_imported, 1);
     let repeated = fixture.migrate(MigrationOptions::default());
     assert_eq!(repeated.skipped, 1);
@@ -161,11 +161,13 @@ fn image_cache_is_converted_and_missing_images_are_skipped() {
     fixture.favorite("a", &content, "全部", "");
     fixture.favorite("b", "image:missing", "全部", "");
     fixture.old.execute_batch("UPDATE favorites SET content_type = 'image', image_id = CASE id WHEN 'a' THEN 'test' ELSE 'missing' END;").unwrap();
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert_eq!(prepared.preview.skipped, 1);
-    assert_eq!(prepared.records[0].captured.formats.len(), 1);
-    assert_eq!(prepared.records[0].captured.formats[0].format_key, "registered:PNG");
-    fixture.migrate(MigrationOptions::default());
+    let record = StagedMigration::open(&prepared.staged_path).unwrap().load_record(1).unwrap();
+    assert_eq!(record.captured.formats.len(), 1);
+    assert_eq!(record.captured.formats[0].format_key, "registered:PNG");
+    fs::remove_file(image_path).unwrap();
+    migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)).unwrap();
     assert_eq!(fixture.count("favorites"), 1);
     assert_eq!(fixture.connection().query_row("SELECT content_kind FROM clipboard_items", [], |row| row.get::<_, String>(0)).unwrap(), "image");
 }
@@ -175,7 +177,7 @@ fn transaction_failure_rolls_back_records_and_new_blob_files() {
     let fixture = Fixture::new();
     fixture.favorite("a", &"很长内容".repeat(20000), "测试分组", "标题");
     fixture.connection().execute_batch("CREATE TRIGGER test_reject_favorite BEFORE INSERT ON favorites BEGIN SELECT RAISE(ABORT, '测试拒绝收藏写入'); END;").unwrap();
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert!(migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)).is_err());
     for table in ["clipboard_items", "clipboard_formats", "tags", "binary_blobs", "legacy_import_records"] { assert_eq!(fixture.count(table), 0); }
     let data_files = fs::read_dir(fixture.new_root.join("data")).unwrap().filter_map(Result::ok).filter(|entry| entry.path().is_file()).count();
@@ -204,7 +206,7 @@ fn zip_input_and_directory_input_share_import_identity() {
     zip.start_file("quickclipboard.db", zip::write::SimpleFileOptions::default()).unwrap();
     zip.write_all(&fs::read(fixture.old_root.join("quickclipboard.db")).unwrap()).unwrap();
     zip.finish().unwrap();
-    let prepared = prepare(&archive, &fixture.new_root).unwrap();
+    let prepared = prepare(&archive, &fixture.new_root, MigrationOptions::default()).unwrap();
     assert_eq!(prepared.preview.already_imported, 1);
     assert_eq!(migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)).unwrap().skipped, 1);
 }
@@ -217,7 +219,7 @@ fn unsafe_archive_paths_are_rejected() {
     zip.start_file("../escape", zip::write::SimpleFileOptions::default()).unwrap();
     zip.write_all(b"test").unwrap();
     zip.finish().unwrap();
-    assert!(prepare(&archive, &fixture.new_root).is_err());
+    assert!(prepare(&archive, &fixture.new_root, MigrationOptions::default()).is_err());
     assert!(!fixture._directory.path().join("escape").exists());
 }
 
@@ -241,7 +243,7 @@ fn snapshot_includes_wal_without_changing_source_database() {
     let source_path = fixture.old_root.join("quickclipboard.db");
     let main_before = fs::read(&source_path).unwrap();
     let wal_before = fs::read(fixture.old_root.join("quickclipboard.db-wal")).unwrap();
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert_eq!(prepared.preview.favorites, 1);
     assert_eq!(fs::read(source_path).unwrap(), main_before);
     assert_eq!(fs::read(fixture.old_root.join("quickclipboard.db-wal")).unwrap(), wal_before);
@@ -257,7 +259,7 @@ fn existing_tag_color_and_notes_are_preserved_when_merging() {
     fixture.connection().execute_batch("UPDATE tags SET color = '#112233'; UPDATE clipboard_item_notes SET note_text = '已有备注';").unwrap();
     fixture.favorite("b", "内容", "工作", "旧标题二");
     fixture.old.execute_batch("INSERT INTO groups VALUES ('工作', '', '#dc2626', 1);").unwrap();
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert!(prepared.preview.warnings.iter().any(|warning| warning.contains("#112233")));
     let report = migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)).unwrap();
     assert_eq!(report.added_tags, 0);
@@ -299,7 +301,7 @@ fn source_icons_are_migrated_and_deduplicated_from_directory_and_zip() {
             zip.finish().unwrap();
             &archive
         } else { &fixture.old_root };
-        let prepared = prepare(source, &fixture.new_root).unwrap();
+        let prepared = prepare(source, &fixture.new_root, MigrationOptions { history: true, favorites: false }).unwrap();
         assert_eq!(prepared.preview.warning_count, 0);
         let report = migrate(&prepared, MigrationOptions { history: true, favorites: false }, &fixture.service, &AtomicUsize::new(0)).unwrap();
         assert_eq!(report.imported_icons, 2);
@@ -332,7 +334,7 @@ fn repeated_import_fills_missing_icons_without_changing_records_or_statistics() 
         "SELECT capture_count, paste_count, sort_order, first_seen_at, last_seen_at, uuid FROM clipboard_history", [],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))).unwrap();
     fixture.icon(&[1]);
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert_eq!(prepared.preview.already_imported, 2);
     let report = fixture.migrate(options);
     assert_eq!(report.imported_icons, 1);
@@ -388,7 +390,7 @@ fn invalid_source_icon_caches_warn_without_losing_history() {
     image::RgbaImage::from_pixel(257, 32, image::Rgba([20, 80, 120, 255]))
         .write_to(&mut Cursor::new(&mut large_png), image::ImageFormat::Png).unwrap();
     fixture.icon_bytes(&[5], &large_png);
-    let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
     assert_eq!(prepared.preview.warning_count, 4);
     assert_eq!(prepared.preview.skipped, 0);
     let report = fixture.migrate(MigrationOptions { history: true, favorites: false });
@@ -403,8 +405,9 @@ fn transaction_failure_removes_new_icons_but_preserves_existing_files() {
         fixture.history(1, "图标历史");
         fixture.favorite("a", "稍后失败的收藏", "全部", "");
         let (_, bytes) = fixture.icon(&[1]);
-        let prepared = prepare(&fixture.old_root, &fixture.new_root).unwrap();
-        let icon = prepared.records[0].icon.as_ref().unwrap();
+        let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions { history: true, favorites: true }).unwrap();
+        let record = StagedMigration::open(&prepared.staged_path).unwrap().load_record(1).unwrap();
+        let icon = record.icon.as_ref().unwrap();
         let path = fixture.new_root.join(&icon.relative_path);
         if existing_file {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -428,4 +431,113 @@ fn older_schema_without_icon_hash_still_migrates() {
     fixture.history(1, "更早版本");
     let report = fixture.migrate(MigrationOptions { history: true, favorites: false });
     assert_eq!((report.added_history, report.imported_icons), (1, 0));
+}
+
+#[test]
+fn favorites_analysis_does_not_read_unselected_history_or_groups_for_history_only() {
+    let fixture = Fixture::new();
+    fixture.favorite("a", "可迁移收藏", "全部", "");
+    fixture.old.execute_batch("DROP TABLE clipboard; INSERT INTO groups VALUES ('空分组', '', '#f00', 1);").unwrap();
+    let options = MigrationOptions::default();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, options).unwrap();
+    assert_eq!((prepared.preview.history, prepared.preview.favorites), (0, 1));
+    assert!(migrate(&prepared, MigrationOptions { history: true, favorites: true }, &fixture.service, &AtomicUsize::new(0)).is_err());
+    migrate(&prepared, options, &fixture.service, &AtomicUsize::new(0)).unwrap();
+    assert_eq!(fixture.count("favorites"), 1);
+
+    let history_fixture = Fixture::new();
+    history_fixture.history(1, "可迁移历史");
+    history_fixture.old.execute_batch("DROP TABLE favorites; DROP TABLE groups;").unwrap();
+    let prepared = prepare(&history_fixture.old_root, &history_fixture.new_root, MigrationOptions { history: true, favorites: false }).unwrap();
+    assert_eq!((prepared.preview.history, prepared.preview.groups), (1, 0));
+}
+
+#[test]
+fn oversized_raw_formats_and_excess_format_counts_skip_only_affected_records() {
+    let fixture = Fixture::new();
+    fixture.favorite("a", "超大格式", "全部", "");
+    fixture.favorite("b", "格式过多", "全部", "");
+    fixture.favorite("c", "正常收藏", "全部", "");
+    fixture.favorite("d", &"a".repeat(33 * 1024 * 1024), "全部", "");
+    fixture.old.execute("INSERT INTO clipboard_data (target_kind, target_id, format_name, raw_data, is_primary, format_order)
+        VALUES ('favorite', 'a', 'Rich Text Format', zeroblob(?1), 1, 0)", [(MAX_FORMAT_BYTES + 1) as i64]).unwrap();
+    fixture.old.execute_batch("WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 257)
+        INSERT INTO clipboard_data (target_kind, target_id, format_name, raw_data, is_primary, format_order)
+        SELECT 'favorite', 'b', 'CF_UNICODETEXT', X'61000000', 1, n FROM numbers;").unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions::default()).unwrap();
+    assert_eq!((prepared.preview.favorites, prepared.preview.skipped), (1, 3));
+    assert!(prepared.preview.warnings.iter().any(|warning| warning.contains("64 MB")));
+    assert!(prepared.preview.warnings.iter().any(|warning| warning.contains("256")));
+    let report = migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)).unwrap();
+    assert_eq!((report.added_favorites, report.skipped), (1, 3));
+}
+
+#[test]
+fn record_reader_accepts_more_than_one_hundred_thousand_records() {
+    let fixture = Fixture::new();
+    fixture.old.execute_batch("WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 100001)
+        INSERT INTO favorites (id, title, content, content_type, created_at, updated_at)
+        SELECT CAST(n AS TEXT), '', '重复内容', 'text', 1700000000, 1700000100 FROM numbers;").unwrap();
+    let mut count = 0;
+    read_records(&fixture.old, MigrationOptions::default(), |_| { count += 1; Ok(()) }).unwrap();
+    assert_eq!(count, 100001);
+}
+
+#[test]
+fn prepared_data_can_exceed_previous_memory_limit_and_is_cleaned_on_drop() {
+    let fixture = Fixture::new();
+    let raw = vec![b'a'; 4 * 1024 * 1024];
+    fixture.old.execute_batch("BEGIN;").unwrap();
+    for index in 0..129 {
+        let id = index.to_string();
+        fixture.favorite(&id, "", "全部", "");
+        fixture.old.execute("INSERT INTO clipboard_data (target_kind, target_id, format_name, raw_data, is_primary, format_order)
+            VALUES ('favorite', ?1, 'Rich Text Format', ?2, 1, 0)", params![id, raw]).unwrap();
+    }
+    fixture.old.execute_batch("COMMIT;").unwrap();
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions::default()).unwrap();
+    assert_eq!(prepared.preview.favorites, 129);
+    let scratch_path = prepared._scratch.path().to_path_buf();
+    assert!(fs::metadata(&prepared.staged_path).unwrap().len() > 512 * 1024 * 1024);
+    let report = migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)).unwrap();
+    assert_eq!((report.added_contents, report.merged_contents), (1, 128));
+    drop(prepared);
+    assert!(!scratch_path.exists());
+}
+
+#[test]
+fn zip_skips_unrelated_gallery_settings_and_unselected_icons() {
+    let fixture = Fixture::new();
+    fixture.favorite("a", "ZIP 收藏", "全部", "");
+    let archive = fixture._directory.path().join("gallery.zip");
+    let mut zip = zip::ZipWriter::new(File::create(&archive).unwrap());
+    for (name, bytes) in [
+        ("quickclipboard.db", fs::read(fixture.old_root.join("quickclipboard.db")).unwrap()),
+        ("image_library/unused.png", "图库不会迁移".as_bytes().to_vec()),
+        ("app_icons/unused.png", b"unused icon".to_vec()),
+        ("settings.json", b"{}".to_vec()),
+    ] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(&bytes).unwrap();
+    }
+    zip.finish().unwrap();
+    let prepared = prepare(&archive, &fixture.new_root, MigrationOptions::default()).unwrap();
+    assert!(!prepared._scratch.path().join("source/image_library/unused.png").exists());
+    assert!(!prepared._scratch.path().join("source/settings.json").exists());
+    assert!(!prepared._scratch.path().join("source/app_icons/unused.png").exists());
+    assert!(prepared.preview.warnings.iter().any(|warning| warning.contains("图库")));
+    assert!(prepared.preview.warnings.iter().any(|warning| warning.contains("设置")));
+    assert_eq!(prepared.preview.favorites, 1);
+}
+
+#[test]
+fn missing_staged_format_rolls_back_without_leaving_imported_data() {
+    let fixture = Fixture::new();
+    fixture.favorite("a", "第一条", "全部", "");
+    fixture.favorite("b", "第二条", "全部", "");
+    let prepared = prepare(&fixture.old_root, &fixture.new_root, MigrationOptions::default()).unwrap();
+    Connection::open(&prepared.staged_path).unwrap().execute("DELETE FROM formats WHERE record_id = 2", []).unwrap();
+    assert!(matches!(migrate(&prepared, MigrationOptions::default(), &fixture.service, &AtomicUsize::new(0)), Err(MigrationError::RolledBack { .. })));
+    assert_eq!(fixture.count("favorites"), 0);
+    assert_eq!(fixture.count("clipboard_items"), 0);
 }

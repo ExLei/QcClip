@@ -3,7 +3,7 @@ use std::{
     fs::{self, File},
     io::{Cursor, Read},
     path::{Component, Path, PathBuf},
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -24,10 +24,12 @@ use super::{
     storage::RawBlobStore,
 };
 
-const MAX_RECORDS: usize = 100_000;
+mod staged;
+use staged::StagedMigration;
+
+const MAX_ARCHIVE_ENTRIES: usize = 1_000_000;
 const MAX_FORMAT_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_MEMORY_BYTES: usize = 512 * 1024 * 1024;
-const MAX_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_ICON_BYTES: u64 = 1024 * 1024;
 const LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS legacy_import_records (
     source_key TEXT PRIMARY KEY NOT NULL,
@@ -41,6 +43,8 @@ pub(crate) enum MigrationError {
     Invalid(String),
     #[error("迁移文件操作失败：{0}")]
     Io(#[from] std::io::Error),
+    #[error("迁移暂存数据读写失败：{0}")]
+    Json(#[from] serde_json::Error),
     #[error("迁移数据库操作失败：{0}")]
     Sql(#[from] rusqlite::Error),
     #[error("迁移压缩包读取失败：{0}")]
@@ -90,20 +94,22 @@ pub(crate) struct PreparedMigration {
     pub(crate) source: PathBuf,
     pub(crate) preview: MigrationPreview,
     groups: Vec<LegacyGroup>,
-    records: Vec<PreparedRecord>,
+    staged_path: PathBuf,
+    options: MigrationOptions,
     _scratch: TempDir,
 }
 
 impl PreparedMigration {
     pub(crate) fn selected_count(&self, options: MigrationOptions) -> usize {
-        self.records.iter().filter(|record| record.selected(options)).count()
+        usize::from(options.history) * self.preview.history + usize::from(options.favorites) * self.preview.favorites
     }
 }
 
 struct LegacyGroup { name: String, color: String }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct LegacyRecord {
-    kind: &'static str,
+    kind: String,
     id: String,
     content: String,
     html: Option<String>,
@@ -125,7 +131,7 @@ struct PreparedRecord {
     preview: ClipboardPreview,
     hashed: HashedClipboard,
     source_key: String,
-    icon: Option<Arc<LegacyIcon>>,
+    icon: Option<LegacyIcon>,
 }
 
 struct LegacyIcon {
@@ -134,12 +140,6 @@ struct LegacyIcon {
     relative_path: String,
     width: u32,
     height: u32,
-}
-
-impl PreparedRecord {
-    fn selected(&self, options: MigrationOptions) -> bool {
-        if self.legacy.kind == "clipboard" { options.history } else { options.favorites }
-    }
 }
 
 #[derive(Default, Debug)]
@@ -181,12 +181,14 @@ fn resolve_source_root(selected: &Path) -> Result<PathBuf, MigrationError> {
     Err(MigrationError::Invalid("目录中没有找到 quickclipboard.db，请选择旧版数据目录或导出的 ZIP".to_owned()))
 }
 
-pub(crate) fn prepare(source: &Path, destination: &Path) -> Result<PreparedMigration, MigrationError> {
+pub(crate) fn prepare(source: &Path, destination: &Path, options: MigrationOptions) -> Result<PreparedMigration, MigrationError> {
+    if !options.history && !options.favorites { return Err(MigrationError::Invalid("请选择需要迁移的数据范围".to_owned())); }
     let scratch = tempfile::tempdir()?;
+    let mut preview = MigrationPreview::default();
     let root = if source.is_file() {
         let extracted = scratch.path().join("source");
         fs::create_dir(&extracted)?;
-        extract_zip(source, &extracted)?;
+        extract_zip(source, &extracted, options, &mut preview)?;
         if !extracted.join("quickclipboard.db").is_file() {
             return Err(MigrationError::Invalid("ZIP 根目录中没有 quickclipboard.db".to_owned()));
         }
@@ -199,6 +201,7 @@ pub(crate) fn prepare(source: &Path, destination: &Path) -> Result<PreparedMigra
     let old = Connection::open_with_flags(&old_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     old.busy_timeout(Duration::from_secs(5))?;
     let mut snapshot = Connection::open(scratch.path().join("snapshot.sqlite3"))?;
+    snapshot.execute_batch("PRAGMA cache_size = -4096; PRAGMA temp_store = FILE;")?;
     // SQLite 在线备份同时读取主库和 WAL，不修改旧版的结构、数据或版本号。
     rusqlite::backup::Backup::new(&old, &mut snapshot)?
         .run_to_completion(128, Duration::from_millis(10), None)?;
@@ -206,74 +209,77 @@ pub(crate) fn prepare(source: &Path, destination: &Path) -> Result<PreparedMigra
     if snapshot.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))? != "ok" {
         return Err(MigrationError::Invalid("旧版数据库完整性检查未通过".to_owned()));
     }
-    let mut preview = MigrationPreview::default();
     if root.join("image_library").is_dir() {
         preview.warn("本期暂不迁移旧版图库，请保留旧版 image_library 目录".to_owned());
     }
     if root.join("settings.json").is_file() {
         preview.warn("本期暂不迁移旧版设置，当前版本的设置将继续保留".to_owned());
     }
-    let groups = read_groups(&snapshot, &mut preview)?;
+    let groups = if options.favorites { read_groups(&snapshot, &mut preview)? } else { Vec::new() };
     check_group_conflicts(&groups, destination, &mut preview)?;
-    let legacy_records = read_records(&snapshot)?;
     let has_raw = table_exists(&snapshot, "clipboard_data")?;
-    let existing = existing_import_keys(destination)?;
-    let mut records = Vec::new();
-    let mut hashes = HashSet::new();
-    let mut memory_bytes = 0_usize;
+    let destination_connection = Connection::open_with_flags(destination.join("qcclip.sqlite3"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let has_ledger = table_exists(&destination_connection, "legacy_import_records")?;
+    let staged_path = scratch.path().join("prepared.sqlite3");
+    let staged = StagedMigration::create(&staged_path)?;
     let mut icons = HashMap::new();
-    for legacy in legacy_records {
+    read_records(&snapshot, options, |legacy| {
         let label = format!("{} {}", if legacy.kind == "clipboard" { "历史" } else { "收藏" }, legacy.id);
-        let raw = if has_raw { read_raw_formats(&snapshot, &legacy)? } else { Vec::new() };
-        let captured = match convert_record(&root, &legacy, raw, &mut preview) {
+        let captured = match (|| {
+            let raw = if has_raw { read_raw_formats(&snapshot, &legacy)? } else { Vec::new() };
+            let captured = convert_record(&root, &legacy, raw, &mut preview)?;
+            if captured.formats.iter().any(|format| format.bytes.as_ref().is_some_and(|bytes| bytes.len() as u64 > MAX_FORMAT_BYTES)) {
+                return Err(MigrationError::Invalid("重建后的单个原始格式超过 64 MB".to_owned()));
+            }
+            Ok::<_, MigrationError>(captured)
+        })() {
             Ok(captured) => captured,
             Err(MigrationError::Invalid(error)) => {
                 preview.skipped += 1;
                 preview.warn(format!("{label}：{error}，已跳过"));
-                continue;
+                return Ok(());
             }
             Err(error) => return Err(error),
         };
         if captured.formats.is_empty() {
             preview.skipped += 1;
             preview.warn(format!("{label}：没有可恢复的内容，已跳过"));
-            continue;
+            return Ok(());
         }
         let hashed = hash_clipboard(&captured)?;
         let format_preview = generate_preview(&captured)?;
         if select_default_preview(&captured, &format_preview.formats).is_none() {
             preview.skipped += 1;
             preview.warn(format!("{label}：没有可显示的格式，已跳过"));
-            continue;
+            return Ok(());
         }
-        let icon = if legacy.kind == "clipboard" {
-            legacy.source_icon_hash.as_deref().filter(|hash| !hash.is_empty()).and_then(|hash| {
-                icons.entry(hash.to_owned()).or_insert_with(|| {
-                    match read_legacy_icon(&root, hash) {
-                        Ok(icon) => {
-                            memory_bytes += icon.bytes.len();
-                            Some(Arc::new(icon))
-                        }
+        let icon_id = if legacy.kind == "clipboard" {
+            if let Some(hash) = legacy.source_icon_hash.as_deref().filter(|hash| !hash.is_empty()) {
+                if let Some(id) = icons.get(hash) { *id } else {
+                    let id = match read_legacy_icon(&root, hash) {
+                        Ok(icon) => Some(staged.save_icon(&icon)?),
                         Err(error) => {
                             preview.warn(format!("{label}：来源应用图标无法恢复：{error}，将保留应用名称"));
                             None
                         }
-                    }
-                }).clone()
-            })
+                    };
+                    icons.insert(hash.to_owned(), id);
+                    id
+                }
+            } else { None }
         } else { None };
-        memory_bytes += captured.formats.iter().map(|format| format.bytes.as_ref().map_or(0, Vec::len)).sum::<usize>();
-        if memory_bytes > MAX_MEMORY_BYTES {
-            return Err(MigrationError::Invalid("本次迁移的原始数据超过 512 MB，请在旧版中缩小数据范围后导出".to_owned()));
-        }
         let source_key = record_key(&legacy, &hashed);
-        if existing.contains(&source_key) { preview.already_imported += 1; }
-        if !hashes.insert(hashed.content_hash) { preview.duplicate_contents += 1; }
+        if has_ledger && destination_connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM legacy_import_records WHERE source_key = ?1)", [&source_key], |row| row.get::<_, bool>(0))? {
+            preview.already_imported += 1;
+        }
+        if staged.save_record(&legacy, &captured, &hashed, &source_key, icon_id)? { preview.duplicate_contents += 1; }
         if legacy.kind == "clipboard" { preview.history += 1; } else { preview.favorites += 1; }
-        records.push(PreparedRecord { legacy, captured, preview: format_preview, hashed, source_key, icon });
-    }
+        Ok(())
+    })?;
+    staged.finish()?;
     preview.groups = groups.len();
-    Ok(PreparedMigration { source: source.to_path_buf(), preview, groups, records, _scratch: scratch })
+    Ok(PreparedMigration { source: source.to_path_buf(), preview, groups, staged_path, options, _scratch: scratch })
 }
 
 fn read_legacy_icon(root: &Path, hash: &str) -> Result<LegacyIcon, MigrationError> {
@@ -308,13 +314,15 @@ fn read_legacy_icon(root: &Path, hash: &str) -> Result<LegacyIcon, MigrationErro
     Ok(LegacyIcon { bytes, sha256, relative_path: format!("data/app-icons/{hex}.png"), width, height })
 }
 
-fn extract_zip(source: &Path, root: &Path) -> Result<(), MigrationError> {
+fn extract_zip(source: &Path, root: &Path, options: MigrationOptions, preview: &mut MigrationPreview) -> Result<(), MigrationError> {
     let mut archive = zip::ZipArchive::new(File::open(source)?)?;
-    if archive.len() > MAX_RECORDS {
-        return Err(MigrationError::Invalid("ZIP 文件数量超过迁移限制".to_owned()));
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
+        return Err(MigrationError::Invalid("ZIP 条目数量超过一百万个".to_owned()));
     }
     let mut paths = HashSet::new();
     let mut total = 0_u64;
+    let mut has_gallery = false;
+    let mut has_settings = false;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
         let name = entry.name().replace('\\', "/");
@@ -326,15 +334,23 @@ fn extract_zip(source: &Path, root: &Path) -> Result<(), MigrationError> {
         {
             return Err(MigrationError::Invalid(format!("ZIP 包含不安全或重复路径：{name}")));
         }
+        let normalized = name.to_lowercase();
+        has_gallery |= normalized == "image_library" || normalized.starts_with("image_library/");
+        has_settings |= normalized == "settings.json";
+        let needed = matches!(normalized.as_str(), "quickclipboard.db" | "quickclipboard.db-wal")
+            || normalized.starts_with("clipboard_images/")
+            || options.history && normalized.starts_with("app_icons/");
+        if !needed || entry.is_dir() { continue; }
         total = total.checked_add(entry.size()).ok_or_else(|| MigrationError::Invalid("ZIP 大小溢出".to_owned()))?;
-        if total > MAX_ARCHIVE_BYTES { return Err(MigrationError::Invalid("ZIP 解压数据超过 4 GB".to_owned())); }
+        if total > MAX_ARCHIVE_BYTES { return Err(MigrationError::Invalid("ZIP 所需文件的解压数据超过 16 GB".to_owned())); }
         let target = root.join(path);
-        if entry.is_dir() { fs::create_dir_all(target)?; continue; }
         if let Some(parent) = target.parent() { fs::create_dir_all(parent)?; }
         let expected = entry.size();
         let copied = std::io::copy(&mut entry.by_ref().take(expected.saturating_add(1)), &mut File::create(target)?)?;
         if copied != expected { return Err(MigrationError::Invalid(format!("ZIP 文件长度不一致：{name}"))); }
     }
+    if has_gallery { preview.warn("本期暂不迁移旧版图库，请保留旧版 image_library 目录".to_owned()); }
+    if has_settings { preview.warn("本期暂不迁移旧版设置，当前版本的设置将继续保留".to_owned()); }
     Ok(())
 }
 
@@ -382,34 +398,31 @@ fn check_group_conflicts(groups: &[LegacyGroup], destination: &Path, preview: &m
     Ok(())
 }
 
-fn read_records(connection: &Connection) -> Result<Vec<LegacyRecord>, MigrationError> {
-    let mut records = Vec::new();
+fn read_records(connection: &Connection, options: MigrationOptions, mut visit: impl FnMut(LegacyRecord) -> Result<(), MigrationError>) -> Result<(), MigrationError> {
     for (table, kind) in [("clipboard", "clipboard"), ("favorites", "favorite")] {
+        if kind == "clipboard" && !options.history || kind == "favorite" && !options.favorites { continue; }
         let fields = columns(connection, table)?;
         for field in ["id", "content", "content_type", "created_at", "updated_at"] {
             if !fields.contains(field) { return Err(MigrationError::Invalid(format!("旧版 {table} 表缺少 {field} 字段"))); }
         }
         let optional = |name: &str, fallback: &str| if fields.contains(name) { name.to_owned() } else { fallback.to_owned() };
         let sql = format!("SELECT CAST(id AS TEXT), content, {}, content_type, {}, {}, {}, {}, {}, {}, created_at, updated_at, {}
-            FROM {table} ORDER BY {}, created_at, id LIMIT {}",
+            FROM {table} ORDER BY {}, created_at, id",
             optional("html_content", "NULL"), optional("image_id", "NULL"),
             optional("group_name", "'全部'"), optional("title", "''"), optional("is_pinned", "0"),
             optional("paste_count", "0"), optional("source_app", "NULL"), optional("source_icon_hash", "NULL"),
-            optional("item_order", "id"), MAX_RECORDS + 1);
+            optional("item_order", "id"));
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map([], |row| Ok(LegacyRecord {
-            kind, id: row.get(0)?, content: row.get(1)?, html: row.get(2)?, content_type: row.get(3)?,
+            kind: kind.to_owned(), id: row.get(0)?, content: row.get(1)?, html: row.get(2)?, content_type: row.get(3)?,
             image_id: row.get(4)?, group: row.get(5)?, title: row.get(6)?, pinned: row.get::<_, i64>(7)? != 0,
             paste_count: row.get::<_, i64>(8)?.max(0), source_app: row.get(9)?,
             created_at: seconds_to_millis(row.get(10)?)?, updated_at: seconds_to_millis(row.get(11)?)?,
             source_icon_hash: row.get(12)?,
         }))?;
-        for row in rows {
-            records.push(row?);
-            if records.len() > MAX_RECORDS { return Err(MigrationError::Invalid("迁移记录超过十万条，请先缩小旧版数据范围".to_owned())); }
-        }
+        for row in rows { visit(row?)?; }
     }
-    Ok(records)
+    Ok(())
 }
 
 fn seconds_to_millis(seconds: i64) -> rusqlite::Result<i64> {
@@ -417,6 +430,9 @@ fn seconds_to_millis(seconds: i64) -> rusqlite::Result<i64> {
 }
 
 fn read_raw_formats(connection: &Connection, record: &LegacyRecord) -> Result<Vec<(String, Vec<u8>, bool)>, MigrationError> {
+    let count: i64 = connection.query_row("SELECT COUNT(*) FROM (SELECT 1 FROM clipboard_data
+        WHERE target_kind = ?1 AND target_id = ?2 LIMIT 257)", params![record.kind, record.id], |row| row.get(0))?;
+    if count > 256 { return Err(MigrationError::Invalid("单条记录的原始格式数量超过 256 个".to_owned())); }
     let too_large: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM clipboard_data WHERE target_kind = ?1 AND target_id = ?2 AND length(raw_data) > ?3)",
         params![record.kind, record.id, MAX_FORMAT_BYTES as i64], |row| row.get(0),
@@ -426,7 +442,6 @@ fn read_raw_formats(connection: &Connection, record: &LegacyRecord) -> Result<Ve
         WHERE target_kind = ?1 AND target_id = ?2 ORDER BY format_order, id LIMIT 257")?;
     let rows = statement.query_map(params![record.kind, record.id], |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)))?;
     let formats: Vec<_> = rows.collect::<Result<_, _>>()?;
-    if formats.len() > 256 { return Err(MigrationError::Invalid("单条记录的格式数量超过限制".to_owned())); }
     Ok(formats)
 }
 
@@ -486,7 +501,10 @@ fn convert_record(root: &Path, record: &LegacyRecord, raw: Vec<(String, Vec<u8>,
             Ok(path) if path.starts_with(&root_canonical) => path,
             _ => continue,
         };
-        if fs::metadata(&path)?.len() > MAX_FORMAT_BYTES { continue; }
+        if fs::metadata(&path)?.len() > MAX_FORMAT_BYTES {
+            preview.warn(format!("记录 {}：缓存图片超过 64 MB，已跳过图片", record.id));
+            continue;
+        }
         let bytes = fs::read(&path)?;
         if super::image_preview::probe_image_dimensions(&bytes, "registered:PNG").is_none() { continue; }
         formats.push(generated_format("registered:PNG", FormatKind::Image, bytes, formats.len()));
@@ -566,24 +584,20 @@ fn legacy_color(value: &str) -> String {
 
 fn record_key(record: &LegacyRecord, hashed: &HashedClipboard) -> String {
     let mut hasher = Sha256::new();
-    for part in [record.kind, record.id.as_str(), &record.created_at.to_string()] {
+    for part in [record.kind.as_str(), record.id.as_str(), &record.created_at.to_string()] {
         hasher.update((part.len() as u64).to_le_bytes()); hasher.update(part.as_bytes());
     }
     hasher.update(hashed.content_hash);
     hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn existing_import_keys(destination: &Path) -> Result<HashSet<String>, MigrationError> {
-    let connection = Connection::open_with_flags(destination.join("qcclip.sqlite3"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    if !table_exists(&connection, "legacy_import_records")? { return Ok(HashSet::new()); }
-    let mut statement = connection.prepare("SELECT source_key FROM legacy_import_records")?;
-    Ok(statement.query_map([], |row| row.get(0))?.collect::<Result<_, _>>()?)
-}
-
 pub(crate) fn migrate(
     prepared: &PreparedMigration, options: MigrationOptions, service: &DataManagementService, progress: &AtomicUsize,
 ) -> Result<MigrationReport, MigrationError> {
     if !options.history && !options.favorites { return Err(MigrationError::Invalid("请选择需要迁移的数据范围".to_owned())); }
+    if options.history && !prepared.options.history || options.favorites && !prepared.options.favorites {
+        return Err(MigrationError::Invalid("迁移范围已改变，请重新分析旧版数据".to_owned()));
+    }
     super::data_runtime::with_exclusive_operation(|| {
         let root = service.data_root();
         let database = Database::open(root.join("qcclip.sqlite3"))?;
@@ -611,21 +625,24 @@ pub(crate) fn migrate(
                     transaction.execute("INSERT INTO legacy_import_records (source_key, imported_at) VALUES (?1, ?2)", params![source_key, now])?;
                 }
             }
-            for (index, record) in prepared.records.iter().filter(|record| record.selected(options)).enumerate() {
+            let staged = StagedMigration::open(&prepared.staged_path)?;
+            let mut completed = 0;
+            staged.for_each_record(options, |record| {
+                completed += 1;
                 let imported: Option<Option<i64>> = transaction.query_row(
                     "SELECT item_id FROM legacy_import_records WHERE source_key = ?1", [&record.source_key], |row| row.get(0)).optional()?;
                 if let Some(item_id) = imported {
                     let filled = match item_id {
-                        Some(item_id) => import_history_icon(&transaction, item_id, record, root, now, &mut new_blobs, &mut report)?,
+                        Some(item_id) => import_history_icon(&transaction, item_id, &record, root, now, &mut new_blobs, &mut report)?,
                         None => false,
                     };
                     if !filled { report.skipped += 1; }
-                    progress.store(index + 1, Ordering::Relaxed); continue;
+                    progress.store(completed, Ordering::Relaxed); return Ok(());
                 }
-                let item_id = import_content(&transaction, record, &store, root, now, &mut new_blobs, &mut report)?;
+                let item_id = import_content(&transaction, &record, &store, root, now, &mut new_blobs, &mut report)?;
                 if record.legacy.kind == "clipboard" {
                     import_history(&transaction, item_id, &record.legacy, &mut report)?;
-                    import_history_icon(&transaction, item_id, record, root, now, &mut new_blobs, &mut report)?;
+                    import_history_icon(&transaction, item_id, &record, root, now, &mut new_blobs, &mut report)?;
                 }
                 else { import_favorite(&transaction, item_id, &record.legacy, &mut report)?; }
                 if record.legacy.kind == "favorite" {
@@ -641,7 +658,11 @@ pub(crate) fn migrate(
                     import_title(&transaction, item_id, &record.legacy.title, now)?;
                 }
                 transaction.execute("INSERT INTO legacy_import_records (source_key, item_id, imported_at) VALUES (?1, ?2, ?3)", params![record.source_key, item_id, now])?;
-                progress.store(index + 1, Ordering::Relaxed);
+                progress.store(completed, Ordering::Relaxed);
+                Ok(())
+            })?;
+            if completed != prepared.selected_count(options) {
+                return Err(MigrationError::Invalid("暂存记录数量与迁移预览不一致".to_owned()));
             }
             transaction.commit()?;
             Ok::<_, MigrationError>(())
