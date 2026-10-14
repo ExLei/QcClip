@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# Windows 专属，检出时保持 CRLF
+*.ps1      text eol=crlf
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.rc       text eol=crlf
+*.manifest text eol=crlf
+*.nsi      text eol=crlf
+*.nsh      text eol=crlf
