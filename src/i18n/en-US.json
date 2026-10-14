@@ -711,6 +711,7 @@
   "updates.frequency.daily": "Daily",
   "updates.frequency.three_days": "Every 3 days",
   "updates.frequency.weekly": "Weekly",
+  "updates.frequency.never": "Never",
   "updates.notification": "Update notifications",
   "updates.proxy": "Proxy settings",
   "updates.proxy.system": "System proxy",

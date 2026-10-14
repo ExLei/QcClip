@@ -711,6 +711,7 @@
   "updates.frequency.daily": "每天",
   "updates.frequency.three_days": "每3天",
   "updates.frequency.weekly": "每周",
+  "updates.frequency.never": "永不更新",
   "updates.notification": "更新通知弹出",
   "updates.proxy": "代理设置",
   "updates.proxy.system": "跟随系统",

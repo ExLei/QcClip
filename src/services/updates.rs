@@ -50,11 +50,14 @@ impl UpdateService {
             loop {
                 cx.update(|cx| {
                     let service = cx.global::<Self>();
+                    if service.checking { return; }
+                    // “永不更新”只停止自动检查
+                    let frequency = config_runtime::update_config(cx).frequency;
+                    let Some(interval) = frequency.seconds() else { return; };
                     let now = unix_time();
-                    if !service.checking && now >= service.retry_after
+                    if now >= service.retry_after
                         && (service.record.checked_at > now || service.record.checked_at == 0
-                            || now.saturating_sub(service.record.checked_at)
-                                >= config_runtime::update_config(cx).frequency.seconds())
+                            || now.saturating_sub(service.record.checked_at) >= interval)
                     {
                         Self::check(false, cx);
                     }
