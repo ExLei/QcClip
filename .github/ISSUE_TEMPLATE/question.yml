@@ -1,0 +1,60 @@
+name: 问题咨询
+description: 咨询 QcClip 的使用、设置、数据迁移或兼容性
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提问前可查看 [项目说明](https://github.com/mosheng1/QcClip#readme)、[旧版数据迁移说明](https://github.com/mosheng1/QcClip/blob/main/docs/legacy-migration.md)，并搜索现有 Issues。
+        明确的软件错误请使用“Bug 报告”，新增功能或改进建议请使用“功能请求”。
+
+  - type: dropdown
+    id: question-type
+    attributes:
+      label: 问题类型
+      options:
+        - 使用方法
+        - 配置设置
+        - 数据备份与旧版迁移
+        - 兼容性问题
+        - 自行构建与打包
+        - 其他问题
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 问题描述
+      description: 请说明具体场景、遇到的疑问和希望达到的效果。
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已尝试的方法
+      description: 可说明查看过的文档、尝试过的设置或操作，以及结果。
+
+  - type: input
+    id: version
+    attributes:
+      label: QcClip 版本
+      description: 与具体版本有关的问题，请填写“设置 → 关于”中显示的完整版本号；自行构建时可附提交编号。
+      placeholder: "例如：v1.0.0-beta.1"
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 使用环境与补充信息
+      description: 涉及兼容性或构建时，请提供系统版本、程序架构、安装方式和相关应用；涉及迁移时，请注明旧版版本及数据来源。可附截图，请遮盖私人内容。
+      placeholder: "例如：Windows 11 / ARM64 / 便携版；从 QuickClipboard v0.5.0 的 ZIP 迁移。"
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issues，并查看了与本问题相关的项目说明。
+          required: true

@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 项目说明
+    url: https://github.com/mosheng1/QcClip#readme
+    about: 查看当前功能、下载方式、使用说明和旧版迁移入口
+  - name: 旧版数据迁移说明
+    url: https://github.com/mosheng1/QcClip/blob/main/docs/legacy-migration.md
+    about: 查看从 QuickClipboard 迁移数据的支持范围与注意事项
+  - name: QcClip 频道
+    url: https://pd.qq.com/s/blp3j847c
+    about: 交流使用体验，讨论问题与建议
+  - name: QcClip 交流群
+    url: https://qm.qq.com/q/nUCO76MX9C
+    about: 加入 QQ 群交流使用与配置问题

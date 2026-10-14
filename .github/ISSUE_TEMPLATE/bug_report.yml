@@ -1,0 +1,111 @@
+name: Bug 报告
+description: 报告 QcClip 的错误、崩溃或异常行为
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索 [现有 Issues](https://github.com/mosheng1/QcClip/issues)，查看是否已有相同问题，并在标题中简要描述具体异常。
+        当前发布面向 Windows，macOS 和 Linux 支持仍在完善中。其他平台的自行构建问题也可提交，请注明环境。
+        请勿上传包含密码、令牌或私人剪贴板内容的截图、日志或数据备份。
+
+  - type: input
+    id: version
+    attributes:
+      label: QcClip 版本
+      description: 可在“设置 → 关于”中复制版本号；自行构建时请同时提供提交编号。
+      placeholder: "例如：v1.0.0-beta.1"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统版本
+      description: Windows 用户可运行 winver 查看具体版本和内部版本号。
+      placeholder: "例如：Windows 11 24H2，内部版本 26100；其他平台请注明系统版本。"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: 程序架构
+      description: 请选择实际运行的 QcClip 架构；在 ARM64 设备上运行 x64 包时请选择 x64。
+      options:
+        - x64
+        - ARM64
+        - 其他架构（请在补充信息中说明）
+        - 不确定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: 安装方式
+      options:
+        - 安装版（setup.exe）
+        - 便携版（portable.zip）
+        - 自行构建
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: 问题描述与实际行为
+      description: 描述发生了什么、出现频率，以及是否影响数据或导致程序退出。
+      placeholder: "例如：从某个应用复制图片后，历史中没有出现图片条目。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: 复现步骤
+      description: 请列出具体操作。偶发问题无法稳定复现时，可说明出现前的操作和已知条件。
+      placeholder: |
+        1. 在哪个应用中复制什么类型的内容
+        2. 在 QcClip 中进行什么操作
+        3. 出现什么异常或错误提示
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 期望行为
+      description: 正常情况下应当发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图或录屏
+      description: 可拖入截图或录屏，请遮盖私人内容。
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 在“设置 → 关于”点击“复制日志”获取最新日志文件，可作为附件上传，也可粘贴相关片段。请先检查内容；程序无法启动时可从数据目录的 log 文件夹获取日志。
+      placeholder: "附上问题发生时的日志；没有日志时请说明。不要上传整个剪贴板数据库或数据备份。"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 补充信息
+      description: 可补充来源或目标应用名称与版本、相关设置、管理员权限、最近升级，以及是否迁移了旧版数据。迁移问题请注明 QuickClipboard 版本和输入类型（目录或 ZIP）。
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issues，确认没有相同的问题，或已说明本报告的区别。
+          required: true
+        - label: 我已查看最新发布版本；若仍使用旧版本，已在补充信息中说明原因。
+          required: true
