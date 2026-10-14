@@ -1,0 +1,82 @@
+
+# raw-input
+
+**raw-input** is a lightweight, high-performance cross-platform Rust library designed to capture and simulate global input events (keyboard and mouse). It is ideal for building global hotkey managers, input monitors, automation scripts, and accessibility tools.
+
+> **Acknowledgments:** This project is inspired by [Narsil/rdev](https://github.com/Narsil/rdev) (originally by [Narsil](https://github.com/Narsil)) and its fork by [rustdesk-org/rdev](https://github.com/rustdesk-org/rdev). Standing on the shoulders of giants, `raw-input` aims to provide modern features such as status-based subscription management, alongside a more flexible and ergonomic API design for a superior developer experience.
+
+## ✨ Features
+
+* **Global Event Listening**: Capture system-wide keyboard, mouse movement, clicks, and scroll events without requiring window focus.
+* **Subscription Management**: Each listener returns a `SubscriptionHandle` that allows you to **Pause**, **Resume**, or **Unsubscribe** at runtime.
+* **Input Simulation**: Inject physical-level keyboard and mouse events, supporting both relative movement and absolute screen coordinates.
+* **Display Utilities**: Query monitor information, physical resolutions, and DPI scale factors.
+* **Thread-Safe**: Designed with `DashMap` and atomic operations for safe multi-threaded usage.
+
+## 🚀 Quick Start
+
+Install this to your `Cargo.toml`:
+
+```bash
+cargo add raw-input
+```
+
+### Basic Example: Monitoring Global Input
+
+```rust
+use std::thread;
+use std::time::Duration;
+
+use raw_input::{Core, Listen, Event};
+
+fn main() {
+    // 1. Start the core engine in a background thread 
+    // (Crucial for processing Windows message loops)
+    thread::spawn(|| {
+        Core::start().expect("Failed to start raw-input core");
+    });
+
+    // 2. Subscribe to global events
+    Listen::start();
+    let handle = Listen::subscribe(|event| {
+        match event {
+            Event::KeyDown { key } => println!("Key pressed: {:?}", key),
+            Event::MouseMove { delta } => println!("Mouse moved by: {}, {}", delta.x, delta.y),
+            _ => {},
+        }
+    });
+
+    // 3. Manage the subscription lifecycle
+    thread::sleep(Duration::from_secs(5));
+    handle.pause();    // Stop receiving events temporarily
+
+    thread::sleep(Duration::from_secs(2));
+    handle.resume();   // Start receiving events again
+
+    thread::sleep(Duration::from_secs(2));
+    handle.unsubscribe(); // Permanently remove the listener
+    Listen::stop(); // Stop Listen
+    Core::stop()
+}
+```
+
+## 🛠 Core Modules
+
+| Module | Description |
+| --- | --- |
+| **`Core`** | The underlying event loop for the platform input APIs. |
+| **`Listen`** | The primary interface for subscribing to global input events. |
+| **`Simulate`** | Provides tools to programmatically synthesize keyboard and mouse input. |
+| **`Display`** | Utilities for monitor enumeration and coordinate mapping. |
+
+## 📦 Optional Features
+
+* `serialize`: Enables `serde` support (Serialize/Deserialize) for event structures like `Event`, `Key`, and `Point`.
+
+## 🖥 Platform Support
+
+| OS | Status | Notes |
+| --- | --- | --- |
+| **Windows** | ✅ Supported | Implemented via the `Raw Input` API. |
+| **macOS** | ✅ Supported | Will be based on `CGEventTap`. |
+| **Linux** | 🚧 Planned | Will be based on `XRecord` or `evdev`. |

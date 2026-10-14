@@ -1,0 +1,184 @@
+use std::rc::Rc;
+use std::time::Duration;
+
+use gpui::prelude::*;
+use gpui::{
+    Animation, AnimationExt, AnyElement, Context, ElementId, IntoElement, SpringAnimation,
+    SpringConfig, Window, div, px,
+};
+use gpui_component::tooltip::Tooltip;
+use gpui_component::{ActiveTheme as _, scroll::ScrollableElement};
+
+use crate::{config_runtime, ui::hover_icon, windows::main::state::MainWindow};
+
+pub(crate) const TAB_BAR_HEIGHT: f32 = 36.0;
+pub(crate) const TAB_BUTTON_HEIGHT: f32 = 28.0;
+
+#[derive(Clone)]
+pub(crate) struct SymbolSidebarItem {
+    pub(crate) id: u32,
+    pub(crate) icon: &'static str,
+    pub(crate) label: String,
+}
+
+impl SymbolSidebarItem {
+    pub(crate) fn new(id: u32, icon: &'static str, label: String) -> Self {
+        Self { id, icon, label }
+    }
+}
+
+pub(crate) type SymbolSidebarSelectHandler =
+    Rc<dyn Fn(&mut MainWindow, u32, &mut Window, &mut Context<MainWindow>)>;
+
+fn spring<T: gpui::SpringTarget>(target: T) -> SpringAnimation<T> {
+    SpringAnimation::new(SpringConfig::new(420.0, 36.0, 1.0)).to(target)
+}
+
+pub(crate) fn active_indicator(
+    id: impl Into<ElementId>,
+    index: usize,
+    color: gpui::Hsla,
+    animations_enabled: bool,
+) -> impl IntoElement {
+    active_indicator_at(id, index, 4.0, color, animations_enabled)
+}
+
+pub(crate) fn active_indicator_at(
+    id: impl Into<ElementId>,
+    index: usize,
+    top_offset: f32,
+    color: gpui::Hsla,
+    animations_enabled: bool,
+) -> impl IntoElement {
+    let top = top_offset + index as f32 * (TAB_BUTTON_HEIGHT + 4.0);
+    let id = id.into();
+
+    let indicator = div()
+        .absolute()
+        .left(px(4.0))
+        .top(px(top))
+        .w(px(TAB_BUTTON_HEIGHT))
+        .h(px(TAB_BUTTON_HEIGHT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child({
+            let bar = div()
+                .size_full()
+                .rounded_lg()
+                .bg(color)
+                .shadow_sm();
+            if animations_enabled {
+                bar.with_animation(
+                    (id.clone(), format!("stretch-{index}")),
+                    Animation::new(Duration::from_millis(150)).with_easing(gpui::ease_in_out),
+                    |this, progress| {
+                        let expansion = (std::f32::consts::PI * progress).sin() * 0.9;
+                        let inset = (2.0 * (1.0 - progress) - expansion).max(0.0);
+                        this.mx(px(inset)).my(px(inset))
+                    },
+                )
+                .into_any_element()
+            } else {
+                bar.into_any_element()
+            }
+        });
+    if animations_enabled {
+        indicator
+            .with_spring((id, "top"), spring(px(top)), |this, value| this.top(value))
+            .into_any_element()
+    } else {
+        indicator.into_any_element()
+    }
+}
+
+pub(crate) fn render(
+    items: &[SymbolSidebarItem],
+    active_id: u32,
+    on_select: SymbolSidebarSelectHandler,
+    cx: &mut Context<MainWindow>,
+) -> AnyElement {
+    let theme = cx.theme().colors;
+    let animations_enabled = config_runtime::animation_enabled(
+        cx,
+        crate::config::AnimationKind::SingleSelectIndicator,
+    );
+    let active_index = items.iter().position(|item| item.id == active_id);
+    let content = div()
+        .w(px(TAB_BAR_HEIGHT))
+        .min_w(px(TAB_BAR_HEIGHT))
+        .h_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .relative()
+        .overflow_y_scrollbar()
+        .gap_1()
+        .py_1()
+        .bg(theme.tab_bar)
+        .when_some(active_index, |this, index| {
+            this.child(active_indicator(
+                "symbol-sidebar-active-indicator",
+                index,
+                theme.primary,
+                animations_enabled,
+            ))
+        });
+
+    let content = content.children(items.iter().map(|item| {
+            let active = item.id == active_id;
+            let color = if active {
+                theme.primary_foreground
+            } else {
+                theme.foreground
+            };
+            let item_id = item.id;
+            let label = item.label.clone();
+            let on_select = on_select.clone();
+            let group = format!("symbol-sidebar-{}", item.id);
+            let mut button = div()
+                .id(("symbol-sidebar", item_id))
+                .group(group.clone())
+                .size(px(TAB_BUTTON_HEIGHT))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_lg()
+                .cursor_pointer()
+                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                .child(hover_icon(
+                    group,
+                    item.icon,
+                    16.0,
+                    color,
+                ))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    on_select(this, item_id, window, cx);
+                }));
+            if !active {
+                button = button.hover(|this| this.bg(theme.secondary_hover));
+            }
+            button
+        }));
+
+    let content = content
+        .into_any_element();
+
+    div()
+        .w(px(TAB_BAR_HEIGHT))
+        .min_w(px(TAB_BAR_HEIGHT))
+        .h_full()
+        .flex_none()
+        .child(content)
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .bottom_0()
+                .w(px(0.5))
+                .bg(theme.border),
+        )
+        .into_any_element()
+}

@@ -1,0 +1,96 @@
+[package]
+name = "QcClip"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[package.metadata.packager]
+product-name = "QcClip"
+identifier = "com.mosheng1.qcclip"
+publisher = "mosheng1"
+homepage = "https://github.com/mosheng1/QcClip"
+description = "跨平台剪贴板管理工具"
+category = "Utility"
+icons = ["assets/icon.ico", "assets/icon1024.png", "assets/icon128.png", "assets/icon32.png"]
+
+[package.metadata.packager.nsis]
+installMode = "currentUser"
+languages = ["SimpChinese", "English"]
+installer-icon = "assets/icon.ico"
+compression = "lzma"
+
+[dependencies]
+async-channel = "2"
+atomic-write-file = "0.3"
+base64 = "0.22"
+gpui = { git = "https://github.com/gpui-ce/gpui-ce", rev = "8e36ac0921443f036bcc41f3f988a8285a734dc0", package = "gpui-ce" }
+gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", rev = "8e36ac0921443f036bcc41f3f988a8285a734dc0", package = "gpui_ce_platform" }
+gpui-component = { path = "vendor/gpui-component/crates/ui", package = "gpui_ce_components" }
+html5ever = "0.27.0"
+markup5ever_rcdom = "0.3.0"
+csscolorparser = "0.8.4"
+chrono = "0.4.38"
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "backup"] }
+directories = "6.0.0"
+uuid = { version = "1.25.0", features = ["v4"] }
+sha2 = "0.11.0"
+thiserror = "2.0.20"
+rodio = { version = "0.17.3", default-features = false, features = ["wav", "mp3"] }
+global-hotkey = "0.8"
+clipboard-rs = { version = "0.3.5", default-features = false, features = ["wayland"] }
+dunce = "1.0"
+unicode-segmentation = "1.12"
+image = "0.25.10"
+zstd = "0.13"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+file_icon_provider = "1.0.2"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rust-embed = { version = "8", features = ["debug-embed"] }
+tempfile = "3.27.0"
+rfd = "0.17"
+ureq = "2.12"
+semver = "1"
+
+[build-dependencies]
+embed-resource = "3.0.11"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+raw-input = { path = "vendor/raw-input" }
+winreg = "0.55"
+windows = { version = "0.62.2", features = [
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Wdk_System_SystemServices",
+] }
+windows-core = "0.62.2"
+tray-icon = "=0.24.1"
+
+[patch.crates-io]
+gpui-ce = { git = "https://github.com/gpui-ce/gpui-ce", rev = "8e36ac0921443f036bcc41f3f988a8285a734dc0", package = "gpui-ce" }
+gpui_ce_macros = { git = "https://github.com/gpui-ce/gpui-ce", rev = "8e36ac0921443f036bcc41f3f988a8285a734dc0", package = "gpui_ce_macros" }
+gpui_ce_platform = { git = "https://github.com/gpui-ce/gpui-ce", rev = "8e36ac0921443f036bcc41f3f988a8285a734dc0", package = "gpui_ce_platform" }
+
+# 扩展 Windows 原生拖放格式，支持浏览器传入的网络图片地址。
+[patch.'https://github.com/gpui-ce/gpui-ce']
+gpui_ce_windows = { path = 'vendor/gpui-windows' }

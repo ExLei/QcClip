@@ -1,0 +1,2718 @@
+use std::{collections::HashMap, fs, ops::Range, path::PathBuf, sync::Arc, time::Duration};
+
+use file_icon_provider::Icon;
+use gpui::prelude::*;
+use gpui::{
+    Anchor, Animation, AnimationExt, AnyElement, App, AppContext, Bounds, Context, Global,
+    IntoElement, LineFragment, ListAlignment, ListSizingBehavior, ListState, ObjectFit, Pixels,
+    Point, Render, RenderImage, ScrollHandle, ScrollWheelEvent, Size, StatefulInteractiveElement,
+    Task, Window, WindowHandle, anchored, canvas, deferred, div, img, list, point, px, size,
+};
+
+use crate::{
+    config::ClipboardDisplayPriority,
+    domain::{
+        capture::FormatRole,
+        clipboard::{
+            ClipboardListItem, ContentKind, FormatPreview, HistoryItemId,
+            select_user_visible_previews_with_priority,
+        },
+    },
+    i18n,
+    platform::window::{
+        BorderlessPopup, logical_to_physical_desktop, open_borderless_mouse_passthrough_popup,
+        physical_client_bounds, work_area_for_physical_point,
+    },
+    services::image_preview::ImagePreviewService,
+    ui::{html as html_preview, icon},
+};
+
+const HOVER_DELAY: Duration = Duration::from_millis(200);
+const PREVIEW_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+const PREVIEW_MAIN_GAP: f32 = 18.0;
+const PREVIEW_OFFSET: f32 = 14.0;
+const HORIZONTAL_PREVIEW_MIN_WIDTH: f32 = 400.0;
+const TEXT_SCROLL_STEP: f32 = 120.0;
+const TEXT_LINE_HEIGHT: f32 = 22.4;
+const TEXT_HORIZONTAL_PADDING: f32 = 24.0;
+const TEXT_VERTICAL_PADDING: f32 = 16.0;
+const IMAGE_SCALE_STEP: f32 = 0.1;
+const IMAGE_SCALE_MIN: f32 = 0.1;
+const IMAGE_SCALE_MAX: f32 = 5.0;
+const TEXT_MIN_WIDTH: f32 = 48.0;
+const TEXT_MIN_HEIGHT: f32 = 46.0;
+const IMAGE_PREVIEW_BASE_SIZE: f32 = 480.0;
+const PREVIEW_HINT_HEIGHT: f32 = 24.0;
+const PREVIEW_HINT_GAP: f32 = 6.0;
+const PREVIEW_MAX_HEIGHT_RATIO: f32 = 0.8;
+const PREVIEW_CORNER_RADIUS: f32 = 8.0;
+const FILE_ICON_SIZE: u16 = 32;
+const IMAGE_PREVIEW_MAX_SIZE: (u32, u32) = (4096, 4096);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PreviewRect {
+    pub(crate) left: f32,
+    pub(crate) top: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
+impl PreviewRect {
+    pub(crate) fn from_bounds(window: &Window, bounds: Bounds<Pixels>) -> Option<Self> {
+        let origin = logical_to_physical_desktop(window, bounds.origin)?;
+        let scale = window.scale_factor().max(1.0);
+        Some(Self {
+            left: origin.x,
+            top: origin.y,
+            width: f32::from(bounds.size.width) * scale,
+            height: f32::from(bounds.size.height) * scale,
+        })
+    }
+
+    pub(crate) fn from_window(window: &Window) -> Option<Self> {
+        if let Ok(bounds) = physical_client_bounds(window) {
+            return Some(Self {
+                left: bounds.left as f32,
+                top: bounds.top as f32,
+                width: (bounds.right - bounds.left).max(1) as f32,
+                height: (bounds.bottom - bounds.top).max(1) as f32,
+            });
+        }
+
+        Self::from_bounds(window, window.bounds())
+    }
+
+    fn center(self) -> Point<f32> {
+        point(self.left + self.width / 2.0, self.top + self.height / 2.0)
+    }
+
+    fn contains(self, point: Point<f32>) -> bool {
+        point.x >= self.left
+            && point.x < self.left + self.width
+            && point.y >= self.top
+            && point.y < self.top + self.height
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PreviewAnchor {
+    pub(crate) rect: PreviewRect,
+    pointer: Point<f32>,
+}
+
+impl PreviewAnchor {
+    pub(crate) fn from_bounds(window: &Window, bounds: Bounds<Pixels>) -> Option<Self> {
+        let rect = PreviewRect::from_bounds(window, bounds)?;
+        Some(Self {
+            rect,
+            pointer: logical_to_physical_desktop(window, window.mouse_position())
+                .unwrap_or_else(|| rect.center()),
+        })
+    }
+
+    fn center(self) -> Point<f32> {
+        self.rect.center()
+    }
+
+    fn pointer(self) -> Point<f32> {
+        self.pointer
+    }
+
+    pub(crate) fn with_pointer(mut self, pointer: Point<f32>) -> Self {
+        self.pointer = pointer;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PreviewSource {
+    History(HistoryItemId),
+    Favorite(i64),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PreviewMode {
+    Text,
+    Html,
+    Image,
+    File,
+}
+
+#[derive(Clone, Debug)]
+struct PreviewFileEntry {
+    path: PathBuf,
+    name: String,
+    size: Option<u64>,
+    is_directory: bool,
+    exists: bool,
+    icon: Option<Arc<RenderImage>>,
+}
+
+impl PreviewFileEntry {
+    fn from_path(path: PathBuf) -> Self {
+        let metadata = fs::metadata(&path).ok();
+        let exists = metadata.is_some();
+        let is_directory = metadata.as_ref().is_some_and(|metadata| metadata.is_dir());
+        let size = metadata
+            .as_ref()
+            .filter(|metadata| !metadata.is_dir())
+            .map(|metadata| metadata.len());
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        Self {
+            path,
+            name,
+            size,
+            is_directory,
+            exists,
+            icon: None,
+        }
+    }
+
+    fn type_label(&self) -> String {
+        if self.is_directory {
+            return "目录".to_owned();
+        }
+        self.path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| !extension.is_empty())
+            .map(|extension| extension.to_ascii_uppercase())
+            .unwrap_or_else(|| "文件".to_owned())
+    }
+}
+
+fn render_file_icon(icon: Icon) -> Option<Arc<RenderImage>> {
+    let pixels = usize::try_from(icon.width)
+        .ok()?
+        .checked_mul(usize::try_from(icon.height).ok()?)?
+        .checked_mul(4)?;
+    if icon.pixels.len() != pixels {
+        return None;
+    }
+    let mut bgra = icon.pixels;
+    for pixel in bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let image = image::RgbaImage::from_raw(icon.width, icon.height, bgra)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(image)])))
+}
+
+impl PreviewMode {
+    fn label(self, translator: &i18n::Translator) -> String {
+        translator.translate(match self {
+            Self::Text => "main.format.plain_text",
+            Self::Html => "main.preview.format_html",
+            Self::Image => "main.format.image",
+            Self::File => "main.format.file",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LogicalRect {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+impl LogicalRect {
+    fn right(self) -> f32 {
+        self.left + self.width
+    }
+
+    fn bottom(self) -> f32 {
+        self.top + self.height
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PreviewPlacementSide {
+    Right,
+    Left,
+    Bottom,
+    Top,
+    Overlay,
+    PointerRight,
+    PointerLeft,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PreviewPlacement {
+    position: Point<f32>,
+    anchor: Anchor,
+    side: PreviewPlacementSide,
+}
+
+#[derive(Default)]
+pub(crate) struct PreviewWindowService {
+    window: Option<WindowHandle<PreviewWindow>>,
+    image_preview_service: Option<ImagePreviewService>,
+    generation: u64,
+    pending_show: Option<Task<()>>,
+    idle_destroy_task: Option<Task<()>>,
+    active_source: Option<PreviewSource>,
+}
+
+impl Global for PreviewWindowService {}
+
+impl PreviewWindowService {
+    pub(crate) fn install(image_preview_service: ImagePreviewService, cx: &mut App) {
+        cx.set_global(Self {
+            image_preview_service: Some(image_preview_service),
+            ..Default::default()
+        });
+        cx.on_window_closed(|cx, window_id| {
+            cx.defer(move |cx| {
+                cx.update_global::<Self, _>(|service, _| {
+                    if service
+                        .window
+                        .is_some_and(|window| window.window_id() == window_id)
+                    {
+                        service.window = None;
+                        service.idle_destroy_task = None;
+                        service.active_source = None;
+                    }
+                });
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn show(
+        item: ClipboardListItem,
+        source: PreviewSource,
+        mut anchor: PreviewAnchor,
+        main_window: Option<PreviewRect>,
+        display_priority: ClipboardDisplayPriority,
+        cx: &mut App,
+    ) {
+        if let Some(pointer) =
+            crate::platform::input::pointer_snapshot().map(|snapshot| snapshot.position)
+        {
+            anchor = anchor.with_pointer(pointer);
+        }
+        cx.update_global::<Self, _>(|service, cx| {
+            service.idle_destroy_task = None;
+            service.generation = service.generation.wrapping_add(1);
+            let generation = service.generation;
+            service.pending_show = Some(cx.spawn(async move |cx| {
+                cx.background_executor().timer(HOVER_DELAY).await;
+                cx.update(|cx| {
+                    cx.update_global::<Self, _>(|service, cx| {
+                        if service.generation == generation {
+                            service.pending_show = None;
+                            service.show_now(
+                                item,
+                                source,
+                                anchor,
+                                main_window,
+                                display_priority,
+                                cx,
+                            );
+                        }
+                    });
+                });
+            }));
+        });
+    }
+
+    pub(crate) fn hide(cx: &mut App) {
+        cx.update_global::<Self, _>(|service, cx| {
+            service.pending_show = None;
+            service.generation = service.generation.wrapping_add(1);
+            service.active_source = None;
+            if let Some(window) = service.window {
+                let _ = window.update(cx, |preview, window, cx| preview.hide(window, cx));
+                service.schedule_idle_destroy(window, cx);
+            }
+        });
+    }
+
+    pub(crate) fn destroy(cx: &mut App) {
+        cx.update_global::<Self, _>(|service, cx| {
+            service.pending_show = None;
+            service.idle_destroy_task = None;
+            service.generation = service.generation.wrapping_add(1);
+            service.active_source = None;
+            if let Some(window) = service.window.take() {
+                let _ = window.update(cx, |preview, window, cx| preview.hide(window, cx));
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+            }
+        });
+    }
+
+    pub(crate) fn replace_image_preview_service(
+        image_preview_service: ImagePreviewService,
+        cx: &mut App,
+    ) {
+        cx.update_global::<Self, _>(|service, _| {
+            service.image_preview_service = Some(image_preview_service);
+        });
+    }
+
+    fn schedule_idle_destroy(&mut self, window: WindowHandle<PreviewWindow>, cx: &mut App) {
+        let generation = self.generation;
+        self.idle_destroy_task = Some(cx.spawn(async move |cx| {
+            cx.background_executor().timer(PREVIEW_IDLE_TIMEOUT).await;
+            cx.update(|cx| {
+                cx.update_global::<Self, _>(|service, cx| {
+                    if service.generation != generation
+                        || service.active_source.is_some()
+                        || service.window != Some(window)
+                    {
+                        return;
+                    }
+                    let _ = window.update(cx, |_, window, _| window.remove_window());
+                    service.window = None;
+                    service.idle_destroy_task = None;
+                });
+            });
+        }));
+    }
+
+    pub(crate) fn update_anchor(source: PreviewSource, anchor: PreviewAnchor, cx: &mut App) {
+        cx.update_global::<Self, _>(|service, cx| {
+            if service.active_source != Some(source) {
+                return;
+            }
+            let Some(window) = service.window else {
+                return;
+            };
+            let _ = window.update(cx, |preview, _window, cx| {
+                if !preview.visible || preview.source != Some(source) {
+                    return;
+                }
+                let Some(current) = preview.anchor else {
+                    return;
+                };
+                if current.rect != anchor.rect {
+                    preview.anchor = Some(PreviewAnchor {
+                        rect: anchor.rect,
+                        ..current
+                    });
+                    cx.notify();
+                }
+            });
+        });
+    }
+
+    pub(crate) fn handle_wheel(
+        source: PreviewSource,
+        event: &ScrollWheelEvent,
+        window: &Window,
+        cx: &mut App,
+    ) {
+        if !event.modifiers.control {
+            return;
+        }
+        cx.update_global::<Self, _>(|service, cx| {
+            let Some(window_handle) = service.window else {
+                return;
+            };
+            let _ = window_handle.update(cx, |preview, _preview_window, cx| {
+                if preview.source != Some(source) || !preview.visible {
+                    return;
+                }
+                cx.stop_propagation();
+                let delta_y = event.delta_y(window.line_height());
+                if event.modifiers.alt {
+                    preview.cycle_mode(delta_y, cx);
+                } else {
+                    preview.scroll(delta_y, cx);
+                }
+            });
+        });
+    }
+
+    fn show_now(
+        &mut self,
+        item: ClipboardListItem,
+        source: PreviewSource,
+        anchor: PreviewAnchor,
+        main_window: Option<PreviewRect>,
+        display_priority: ClipboardDisplayPriority,
+        cx: &mut App,
+    ) {
+        let Some(image_preview_service) = self.image_preview_service.clone() else {
+            return;
+        };
+        if item.note_text.is_empty() && select_user_visible_previews_with_priority(
+            &item.preview_options,
+            &display_priority_roles(display_priority),
+        )
+        .iter()
+        .all(|preview| mode_for_preview(preview).is_none())
+        {
+            return;
+        }
+        let Some(display) = work_area_for_physical_point(cx, anchor.center()) else {
+            return;
+        };
+        self.active_source = Some(source);
+        let scale = display.scale_factor.max(1.0);
+        let bounds = Bounds::new(
+            point(px(display.bounds.x / scale), px(display.bounds.y / scale)),
+            size(
+                px(display.bounds.width / scale),
+                px(display.bounds.height / scale),
+            ),
+        );
+        let window = match self.window {
+            Some(window) => window,
+            None => {
+                let result = open_borderless_mouse_passthrough_popup(
+                    cx,
+                    bounds,
+                    Some(display.display_id),
+                    move |_window, cx, popup| {
+                        cx.new(|_| PreviewWindow::new(popup, image_preview_service))
+                    },
+                );
+                let window = match result {
+                    Ok(window) => window,
+                    Err(error) => {
+                        tracing::error!("打开全屏预览窗口失败：{error}");
+                        return;
+                    }
+                };
+                self.window = Some(window);
+                window
+            }
+        };
+        if let Err(error) = window.update(cx, |preview, window, cx| {
+            preview.show(
+                item,
+                source,
+                anchor,
+                main_window,
+                display_priority,
+                window,
+                cx,
+            );
+        }) {
+            tracing::error!("更新全屏预览窗口失败：{error}");
+            self.window = None;
+            self.active_source = None;
+        }
+    }
+}
+
+struct PreviewWindow {
+    popup: BorderlessPopup,
+    image_preview_service: ImagePreviewService,
+    item: Option<ClipboardListItem>,
+    previews: Vec<FormatPreview>,
+    mode: Option<PreviewMode>,
+    source: Option<PreviewSource>,
+    anchor: Option<PreviewAnchor>,
+    main_window: Option<PreviewRect>,
+    display_priority: ClipboardDisplayPriority,
+    generation: u64,
+    reveal_generation: u64,
+    content_size: Option<(f32, f32)>,
+    surface_bounds: Option<LogicalRect>,
+    image: Option<Arc<RenderImage>>,
+    image_dimensions: Option<(u32, u32)>,
+    image_scale: f32,
+    html_images: HashMap<PathBuf, Arc<RenderImage>>,
+    file_entries: Vec<PreviewFileEntry>,
+    content_scrollable: bool,
+    loading: bool,
+    error: Option<String>,
+    visible: bool,
+    foreground_hook: Option<isize>,
+    pointer_frame_scheduled: bool,
+    text_content: Arc<str>,
+    text_line_ranges: Arc<Vec<Range<usize>>>,
+    text_wrap_width: Option<f32>,
+    text_list_state: ListState,
+    html_scroll: ScrollHandle,
+    file_scroll: ScrollHandle,
+    note_scroll: ScrollHandle,
+}
+
+impl PreviewWindow {
+    fn new(popup: BorderlessPopup, image_preview_service: ImagePreviewService) -> Self {
+        Self {
+            popup,
+            image_preview_service,
+            item: None,
+            previews: Vec::new(),
+            mode: None,
+            source: None,
+            anchor: None,
+            main_window: None,
+            display_priority: ClipboardDisplayPriority::default(),
+            generation: 0,
+            reveal_generation: 0,
+            content_size: None,
+            surface_bounds: None,
+            image: None,
+            image_dimensions: None,
+            image_scale: 1.0,
+            html_images: HashMap::new(),
+            file_entries: Vec::new(),
+            content_scrollable: false,
+            loading: false,
+            error: None,
+            visible: false,
+            foreground_hook: None,
+            pointer_frame_scheduled: false,
+            text_content: Arc::from(""),
+            text_line_ranges: Arc::new(Vec::new()),
+            text_wrap_width: None,
+            text_list_state: ListState::new(0, ListAlignment::Top, px(2048.0)),
+            html_scroll: ScrollHandle::new(),
+            file_scroll: ScrollHandle::new(),
+            note_scroll: ScrollHandle::new(),
+        }
+    }
+
+    fn show(
+        &mut self,
+        item: ClipboardListItem,
+        source: PreviewSource,
+        anchor: PreviewAnchor,
+        main_window: Option<PreviewRect>,
+        display_priority: ClipboardDisplayPriority,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.generation = self.generation.wrapping_add(1);
+        self.reveal_generation = self.reveal_generation.wrapping_add(1);
+        self.anchor = Some(anchor);
+        self.main_window = main_window;
+        self.source = Some(source);
+        self.display_priority = display_priority;
+        self.visible = true;
+        if self.foreground_hook.is_none() {
+            self.foreground_hook = crate::platform::window::install_preview_foreground_hook();
+        }
+        self.schedule_pointer_follow(window, cx);
+        self.set_item(item, cx);
+        self.popup.set_visible(window, true);
+    }
+
+    fn schedule_pointer_follow(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.pointer_frame_scheduled {
+            return;
+        }
+        self.pointer_frame_scheduled = true;
+
+        let preview = cx.entity();
+        window.on_next_frame(move |window, cx| {
+            let pointer =
+                crate::platform::input::pointer_snapshot().map(|snapshot| snapshot.position);
+            let _ = preview.update(cx, |preview, cx| {
+                preview.pointer_frame_scheduled = false;
+                if !preview.visible {
+                    return;
+                }
+
+                if let (Some(pointer), Some(main_window)) = (pointer, preview.main_window)
+                    && !main_window.contains(pointer)
+                {
+                    preview.hide(window, cx);
+                    cx.defer(|cx| PreviewWindowService::hide(cx));
+                    return;
+                }
+
+                if crate::platform::window::preview_foreground_event_pending() {
+                    preview.hide(window, cx);
+                    cx.defer(|cx| PreviewWindowService::hide(cx));
+                    return;
+                }
+
+                if let (Some(pointer), Some(anchor)) = (pointer, preview.anchor)
+                    && anchor.pointer() != pointer
+                {
+                    preview.anchor = Some(anchor.with_pointer(pointer));
+                    cx.notify();
+                }
+
+                preview.schedule_pointer_follow(window, cx);
+            });
+        });
+    }
+
+    fn set_item(&mut self, item: ClipboardListItem, cx: &mut Context<Self>) {
+        self.item = Some(item);
+        self.previews = self
+            .item
+            .as_ref()
+            .map(|item| {
+                select_user_visible_previews_with_priority(
+                    &item.preview_options,
+                    &display_priority_roles(self.display_priority),
+                )
+            })
+            .unwrap_or_default();
+        self.mode = self
+            .previews
+            .first()
+            .and_then(|preview| mode_for_preview(preview));
+        self.reset_text_list();
+        self.content_size = None;
+        self.surface_bounds = None;
+        self.image = None;
+        self.image_dimensions = self
+            .current_preview()
+            .and_then(|preview| preview.image_dimensions)
+            .map(|dimensions| (dimensions.width, dimensions.height));
+        self.image_scale = 1.0;
+        self.html_images.clear();
+        self.file_entries.clear();
+        self.content_scrollable = false;
+        self.loading = false;
+        self.error = None;
+        self.html_scroll.set_offset(Point::default());
+        self.file_scroll.set_offset(Point::default());
+        self.note_scroll.set_offset(Point::default());
+        if self.image.is_none() {
+            self.load_resource(cx);
+        }
+        cx.notify();
+    }
+
+    fn current_preview(&self) -> Option<&FormatPreview> {
+        let mode = self.mode?;
+        self.previews
+            .iter()
+            .find(|preview| mode_for_preview(preview) == Some(mode))
+    }
+
+    fn reset_text_list(&mut self) {
+        let text = self
+            .current_preview()
+            .filter(|_| self.mode == Some(PreviewMode::Text))
+            .map(|preview| preview.text.clone())
+            .unwrap_or_default();
+        let text_content: Arc<str> = Arc::from(text);
+        let text_line_ranges = Arc::new(text_line_ranges(&text_content));
+        self.text_content = text_content;
+        self.text_line_ranges = text_line_ranges.clone();
+        self.text_wrap_width = None;
+        self.text_list_state
+            .reset_with_uniform_height(text_line_ranges.len(), px(TEXT_LINE_HEIGHT));
+    }
+
+    fn ensure_text_layout(&mut self, wrap_width: f32, window: &Window) {
+        if self.mode != Some(PreviewMode::Text) {
+            return;
+        }
+        let wrap_width = wrap_width.max(1.0).round();
+        if self
+            .text_wrap_width
+            .is_some_and(|current| (current - wrap_width).abs() < 0.5)
+        {
+            return;
+        }
+
+        let ranges = wrapped_text_line_ranges(&self.text_content, px(wrap_width), window);
+        self.text_line_ranges = Arc::new(ranges);
+        self.text_list_state.reset_with_uniform_height(
+            self.text_line_ranges.len(),
+            px(TEXT_LINE_HEIGHT),
+        );
+        self.text_wrap_width = Some(wrap_width);
+        self.content_size = None;
+        self.surface_bounds = None;
+        self.reveal_generation = self.reveal_generation.wrapping_add(1);
+    }
+
+    fn load_resource(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = self.current_preview().cloned() else {
+            return;
+        };
+        let Some(mode) = self.mode else { return };
+        let generation = self.generation;
+        if mode == PreviewMode::Image
+            && let Some(source) = preview.image_source.clone()
+        {
+            self.loading = true;
+            let service = self.image_preview_service.clone();
+            let format_kind = preview.format_kind;
+            let format_key = preview.format_key.clone();
+            let dimensions_hint = preview.image_dimensions;
+            let task = cx.background_spawn(async move {
+                service.load_with_dimensions_hint(
+                    &source,
+                    format_kind,
+                    &format_key,
+                    IMAGE_PREVIEW_MAX_SIZE,
+                    dimensions_hint,
+                )
+            });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                if let Some(this) = this.upgrade() {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.generation != generation {
+                            return;
+                        }
+                        this.loading = false;
+                        match result {
+                            Ok(loaded) => {
+                                let dimensions = loaded
+                                    .dimensions
+                                    .map(|dimensions| (dimensions.width, dimensions.height));
+                                if this.image_dimensions != dimensions {
+                                    this.reveal_generation = this.reveal_generation.wrapping_add(1);
+                                }
+                                this.image_dimensions = dimensions;
+                                this.image = Some(loaded.image);
+                            }
+                            Err(error) => {
+                                tracing::warn!(format_key = %preview.format_key, %error, "加载图片预览失败");
+                                this.error = Some(error.to_string());
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+            return;
+        }
+
+        if mode == PreviewMode::Html
+            && let Some(html) = preview.html_content.clone()
+        {
+            let paths = html_preview::local_image_paths(&html);
+            if paths.is_empty() {
+                return;
+            }
+            self.loading = true;
+            let service = self.image_preview_service.clone();
+            let task = cx.background_spawn(async move {
+                let mut images = HashMap::new();
+                let mut failed_count = 0;
+                for path in paths {
+                    match service.load_local_path(&path, IMAGE_PREVIEW_MAX_SIZE) {
+                        Ok(image) => {
+                            images.insert(path, image);
+                        }
+                        Err(error) => {
+                            failed_count += 1;
+                            tracing::warn!(%error, "加载 HTML 本地图片预览失败");
+                        }
+                    }
+                }
+                (images, failed_count)
+            });
+            cx.spawn(async move |this, cx| {
+                let (images, failed_count) = task.await;
+                if let Some(this) = this.upgrade() {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.generation != generation {
+                            return;
+                        }
+                        this.loading = false;
+                        this.html_images = images;
+                        if failed_count > 0 {
+                            tracing::warn!(failed_count, "部分 HTML 本地图片预览加载失败");
+                        }
+                        this.content_size = None;
+                        this.surface_bounds = None;
+                        this.reveal_generation = this.reveal_generation.wrapping_add(1);
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+            return;
+        }
+
+        if mode == PreviewMode::File
+            && let Some(source) = preview.image_source.clone()
+        {
+            self.loading = true;
+            let service = self.image_preview_service.clone();
+            let task = cx.background_spawn(async move { service.load_file_list_paths(&source) });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                if let Some(this) = this.upgrade() {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.generation != generation {
+                            return;
+                        }
+                        this.loading = false;
+                        match result {
+                            Ok(paths) => {
+                                let icon_paths = paths.clone();
+                                let icon_task = cx.background_spawn(async move {
+                                    icon_paths
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(index, path)| {
+                                            let icon = path
+                                                .exists()
+                                                .then(|| {
+                                                    file_icon_provider::get_file_icon(
+                                                        path,
+                                                        FILE_ICON_SIZE,
+                                                    )
+                                                    .ok()
+                                                })
+                                                .flatten()
+                                                .and_then(render_file_icon);
+                                            (index, icon)
+                                        })
+                                        .collect::<Vec<_>>()
+                                });
+                                let icon_generation = generation;
+                                cx.spawn(async move |this, cx| {
+                                    let icons = icon_task.await;
+                                    if let Some(this) = this.upgrade() {
+                                        let _ = this.update(cx, |this, cx| {
+                                            if this.generation != icon_generation {
+                                                return;
+                                            }
+                                            for (index, icon) in icons {
+                                                if let Some(entry) =
+                                                    this.file_entries.get_mut(index)
+                                                {
+                                                    entry.icon = icon;
+                                                }
+                                            }
+                                            cx.notify();
+                                        });
+                                    }
+                                })
+                                .detach();
+                                this.content_size = None;
+                                this.surface_bounds = None;
+                                this.reveal_generation = this.reveal_generation.wrapping_add(1);
+                                this.file_entries =
+                                    paths.into_iter().map(PreviewFileEntry::from_path).collect();
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error, "加载文件列表预览失败");
+                                this.error = Some(error.to_string());
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        }
+    }
+
+    fn cycle_mode(&mut self, delta_y: f32, cx: &mut Context<Self>) {
+        let modes = self.previews.iter().filter_map(mode_for_preview).fold(
+            Vec::new(),
+            |mut modes, mode| {
+                if !modes.contains(&mode) {
+                    modes.push(mode);
+                }
+                modes
+            },
+        );
+        if modes.len() <= 1 {
+            return;
+        }
+        let current = self.mode.unwrap_or(modes[0]);
+        let index = modes.iter().position(|mode| *mode == current).unwrap_or(0);
+        let next = if delta_y > 0.0 {
+            modes[(index + modes.len() - 1) % modes.len()]
+        } else {
+            modes[(index + 1) % modes.len()]
+        };
+        self.mode = Some(next);
+        self.reset_text_list();
+        self.content_size = None;
+        self.reveal_generation = self.reveal_generation.wrapping_add(1);
+        self.surface_bounds = None;
+        self.image = None;
+        self.image_dimensions = None;
+        self.image_scale = 1.0;
+        self.loading = false;
+        self.error = None;
+        self.content_scrollable = false;
+        if self.image.is_none() {
+            self.load_resource(cx);
+        }
+        cx.notify();
+    }
+
+    fn scroll(&mut self, delta_y: f32, cx: &mut Context<Self>) {
+        let max_note_offset = self.note_scroll.max_offset().y;
+        if max_note_offset > px(0.0) {
+            let offset = self.note_scroll.offset();
+            let next = (offset.y + px(delta_y.signum() * TEXT_SCROLL_STEP))
+                .clamp(-max_note_offset, px(0.0));
+            if next != offset.y {
+                self.note_scroll.set_offset(point(offset.x, next));
+                cx.notify();
+                return;
+            }
+        }
+        let Some(mode) = self.mode else { return };
+        if mode == PreviewMode::Image {
+            let next = (self.image_scale + delta_y.signum() * IMAGE_SCALE_STEP)
+                .clamp(IMAGE_SCALE_MIN, IMAGE_SCALE_MAX);
+            self.image_scale = (next * 100.0).round() / 100.0;
+            cx.notify();
+            return;
+        }
+        if mode == PreviewMode::Text {
+            self.text_list_state
+                .scroll_by(px(-delta_y.signum() * TEXT_SCROLL_STEP));
+        } else {
+            let handle = match mode {
+                PreviewMode::Html => &self.html_scroll,
+                PreviewMode::File => &self.file_scroll,
+                PreviewMode::Text | PreviewMode::Image => return,
+            };
+            let mut offset = handle.offset();
+            let max_offset = handle.max_offset();
+            offset.y =
+                (offset.y + px(delta_y.signum() * TEXT_SCROLL_STEP)).clamp(-max_offset.y, px(0.0));
+            handle.set_offset(offset);
+        }
+        cx.notify();
+    }
+
+    fn hide(&mut self, window: &Window, cx: &mut Context<Self>) {
+        self.visible = false;
+        if let Some(hook) = self.foreground_hook.take() {
+            crate::platform::window::uninstall_preview_foreground_hook(hook);
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.popup.set_visible(window, false);
+        self.item = None;
+        self.previews.clear();
+        self.mode = None;
+        self.source = None;
+        self.anchor = None;
+        self.main_window = None;
+        self.content_size = None;
+        self.surface_bounds = None;
+        self.image = None;
+        self.html_images.clear();
+        self.file_entries.clear();
+        self.text_content = Arc::from("");
+        self.text_line_ranges = Arc::new(Vec::new());
+        self.text_wrap_width = None;
+        self.text_list_state.reset(0);
+        self.content_scrollable = false;
+        cx.notify();
+    }
+
+    fn render_content(
+        &self,
+        max_width: f32,
+        max_height: f32,
+        image_size: Option<Size<f32>>,
+        _window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = crate::window_material::excluded_window_theme(cx);
+        let translator = i18n::translator(cx);
+        let Some(preview) = self.current_preview() else {
+            return div().into_any_element();
+        };
+        match self.mode {
+            Some(PreviewMode::Image) => {
+                let image_content = if let Some(image) = self.image.clone() {
+                    let image = img(image).object_fit(ObjectFit::Contain);
+                    if let Some(size) = image_size {
+                        image
+                            .w(px(size.width))
+                            .h(px(size.height))
+                            .into_any_element()
+                    } else {
+                        image
+                            .max_w(px(max_width))
+                            .max_h(px(max_height))
+                            .into_any_element()
+                    }
+                } else if let Some(error) = &self.error {
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("图片不可用：{error}"))
+                        .into_any_element()
+                } else {
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(theme.muted_foreground)
+                        .child("正在加载图片…")
+                        .into_any_element()
+                };
+                div().flex_none().child(image_content).into_any_element()
+            }
+            Some(PreviewMode::File) => {
+                let file_count = self.file_entries.len();
+                let directory_count = self
+                    .file_entries
+                    .iter()
+                    .filter(|entry| entry.is_directory)
+                    .count();
+                let missing_count = self
+                    .file_entries
+                    .iter()
+                    .filter(|entry| !entry.exists)
+                    .count();
+                let total_size = self
+                    .file_entries
+                    .iter()
+                    .filter_map(|entry| entry.size)
+                    .sum::<u64>();
+                let summary = div()
+                    .h(px(34.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .border_b_1()
+                    .border_color(gpui::ColorExt::opacity(&theme.border, 0.6))
+                    .bg(gpui::ColorExt::opacity(&theme.background, 0.42))
+                    .px_3()
+                    .text_size(px(11.0))
+                    .text_color(theme.muted_foreground)
+                    .child(format!("项目 {file_count}"))
+                    .child(format!(
+                        "总计 {}",
+                        i18n::file_size(&translator, Some(total_size), false)
+                    ))
+                    .when(directory_count > 0, |this| {
+                        this.child(format!("目录 {directory_count}"))
+                    })
+                    .when(missing_count > 0, |this| {
+                        this.child(
+                            div()
+                                .text_color(theme.danger_foreground)
+                                .child(format!("缺失 {missing_count}")),
+                        )
+                    });
+                let rows = self
+                    .file_entries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, entry)| {
+                        let missing = !entry.exists;
+                        let icon_name = if entry.is_directory {
+                            "folder"
+                        } else if entry
+                            .path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| {
+                                matches!(
+                                    extension.to_ascii_lowercase().as_str(),
+                                    "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg"
+                                )
+                            })
+                        {
+                            "photo"
+                        } else {
+                            "file-description"
+                        };
+                        let icon_color = if missing {
+                            theme.danger
+                        } else {
+                            theme.foreground
+                        };
+                        let icon_element = if let Some(image) = entry.icon.clone() {
+                            img(image)
+                                .size(px(32.0))
+                                .object_fit(ObjectFit::Contain)
+                                .into_any_element()
+                        } else {
+                            icon(icon_name, 24.0, icon_color).into_any_element()
+                        };
+                        let row_background = if missing {
+                            theme.danger
+                        } else {
+                            theme.background
+                        };
+                        let row_background_opacity = if missing { 0.12 } else { 0.42 };
+                        let row_border = if missing {
+                            gpui::ColorExt::opacity(&theme.danger, 0.55)
+                        } else {
+                            gpui::ColorExt::opacity(&theme.border, 0.55)
+                        };
+                        let file_name_color = if missing {
+                            theme.danger
+                        } else {
+                            theme.foreground
+                        };
+                        let status_background = if missing {
+                            theme.danger
+                        } else {
+                            gpui::transparent_black()
+                        };
+                        let status_border = if missing {
+                            gpui::ColorExt::opacity(&theme.danger, 0.65)
+                        } else {
+                            gpui::ColorExt::opacity(&theme.border, 0.6)
+                        };
+                        let status_color = if missing {
+                            theme.danger_foreground
+                        } else {
+                            theme.muted_foreground
+                        };
+                        let file_name = div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(13.0))
+                            .text_color(file_name_color)
+                            .child(entry.name.clone());
+                        let size_label =
+                            i18n::file_size(&translator, entry.size, entry.is_directory);
+                        let row = div()
+                            .id(("preview-file-row", index as u64))
+                            .flex_none()
+                            .w_full()
+                            .min_h(px(54.0))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(row_border)
+                            .bg(gpui::ColorExt::opacity(
+                                &row_background,
+                                row_background_opacity,
+                            ))
+                            .child(
+                                div()
+                                    .size(px(32.0))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon_element),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .justify_center()
+                                    .child(file_name)
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .truncate()
+                                            .text_size(px(11.0))
+                                            .text_color(theme.muted_foreground)
+                                            .child(entry.path.to_string_lossy().into_owned()),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w(px(82.0))
+                                    .flex_none()
+                                    .flex()
+                                    .flex_col()
+                                    .items_end()
+                                    .gap_1()
+                                    .text_size(px(11.0))
+                                    .text_color(theme.muted_foreground)
+                                    .child(size_label)
+                                    .child(
+                                        div()
+                                            .max_w(px(82.0))
+                                            .truncate()
+                                            .rounded_full()
+                                            .border_1()
+                                            .border_color(status_border)
+                                            .bg(status_background)
+                                            .px_1p5()
+                                            .text_size(px(10.0))
+                                            .text_color(status_color)
+                                            .child(if !missing {
+                                                entry.type_label()
+                                            } else {
+                                                "文件不存在".to_owned()
+                                            }),
+                                    ),
+                            );
+                        row.into_any_element()
+                    })
+                    .collect::<Vec<_>>();
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .child(summary)
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .max_h(px(max_height))
+                            .p_2()
+                            .id("preview-file-content")
+                            .overflow_y_scroll()
+                            .track_scroll(&self.file_scroll)
+                            .children(rows),
+                    )
+                    .into_any_element()
+            }
+            Some(PreviewMode::Html) => {
+                let html = preview.html_content.as_deref().unwrap_or_default();
+                div()
+                    .flex_none()
+                    .max_h(px(max_height))
+                    .px_2()
+                    .py_2()
+                    .id("preview-html-content")
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_h(px((max_height - TEXT_VERTICAL_PADDING).max(1.0)))
+                            .id("preview-html-scroll-content")
+                            .overflow_y_scroll()
+                            .track_scroll(&self.html_scroll)
+                            .child(div().child(html_preview::render_with_images_and_max_lines(
+                                html,
+                                px(14.0),
+                                px(21.0),
+                                preview.text.clone(),
+                                &self.html_images,
+                                10_000,
+                            ))),
+                    )
+                    .into_any_element()
+            }
+            Some(PreviewMode::Text) | None => div()
+                .flex_none()
+                .max_w(px(max_width))
+                .max_h(px(max_height))
+                .id("preview-text-content")
+                .overflow_hidden()
+                .px_2()
+                .py_2()
+                .child(self.render_text_list(theme.foreground, max_width, max_height))
+                .into_any_element(),
+        }
+    }
+
+    fn render_text_list(
+        &self,
+        text_color: gpui::Hsla,
+        max_width: f32,
+        max_height: f32,
+    ) -> impl IntoElement {
+        let text_content = self.text_content.clone();
+        let text_line_ranges = self.text_line_ranges.clone();
+        list(self.text_list_state.clone(), move |index, _, _| {
+            let line = text_line_ranges
+                .get(index)
+                .and_then(|range| text_content.get(range.clone()))
+                .unwrap_or_default()
+                .to_owned();
+            div()
+                .w_full()
+                .text_size(px(14.0))
+                .line_height(px(TEXT_LINE_HEIGHT))
+                .text_color(text_color)
+                .child(line)
+                .into_any_element()
+        })
+        .with_sizing_behavior(ListSizingBehavior::Infer)
+        .max_w(px((max_width - TEXT_HORIZONTAL_PADDING).max(1.0)))
+        .max_h(px((max_height - TEXT_VERTICAL_PADDING).max(1.0)))
+    }
+
+    fn image_display_size(
+        &self,
+        preview: &FormatPreview,
+        max_width: f32,
+        max_height: f32,
+        scale_factor: f32,
+    ) -> Option<Size<f32>> {
+        let (width, height) = self.image_dimensions.or_else(|| {
+            preview
+                .image_dimensions
+                .map(|size| (size.width, size.height))
+        })?;
+        Self::resolve_image_display_size(
+            width,
+            height,
+            max_width,
+            max_height,
+            scale_factor,
+            self.image_scale,
+        )
+    }
+
+    fn resolve_image_display_size(
+        width: u32,
+        height: u32,
+        max_width: f32,
+        max_height: f32,
+        scale_factor: f32,
+        image_scale: f32,
+    ) -> Option<Size<f32>> {
+        let display_scale = Self::resolve_image_display_scale(
+            width,
+            height,
+            max_width,
+            max_height,
+            scale_factor,
+            image_scale,
+        )?;
+        let scale_factor = scale_factor.max(1.0);
+        let width = width as f32 / scale_factor;
+        let height = height as f32 / scale_factor;
+        Some(size(width * display_scale, height * display_scale))
+    }
+
+    fn resolve_image_display_scale(
+        width: u32,
+        height: u32,
+        max_width: f32,
+        max_height: f32,
+        scale_factor: f32,
+        image_scale: f32,
+    ) -> Option<f32> {
+        let scale_factor = scale_factor.max(1.0);
+        let width = width as f32 / scale_factor;
+        let height = height as f32 / scale_factor;
+        if width <= 0.0 || height <= 0.0 || max_width <= 0.0 || max_height <= 0.0 {
+            return None;
+        }
+        let base_width = max_width.min(IMAGE_PREVIEW_BASE_SIZE);
+        let base_height = max_height.min(IMAGE_PREVIEW_BASE_SIZE);
+        Some((base_width / width).min(base_height / height) * image_scale)
+    }
+
+    fn render_hints(
+        &self,
+        theme: gpui_component::ThemeColor,
+        image_display_percentage: Option<f32>,
+        translator: &i18n::Translator,
+    ) -> AnyElement {
+        let Some(mode) = self.mode else {
+            return div().into_any_element();
+        };
+        let mut hints = vec![translator.translate_with_args(
+            "main.preview.current_format",
+            &[("format", mode.label(translator))],
+        )];
+        let available_modes = self.previews.iter().filter_map(mode_for_preview).fold(
+            Vec::new(),
+            |mut modes, mode| {
+                if !modes.contains(&mode) {
+                    modes.push(mode);
+                }
+                modes
+            },
+        );
+        if available_modes.len() > 1 {
+            hints.push(translator.translate_with_args(
+                "main.preview.available_formats",
+                &[("formats", available_modes
+                    .iter()
+                    .map(|mode| mode.label(translator))
+                    .collect::<Vec<_>>()
+                    .join(" / "))],
+            ));
+            hints.push(translator.translate("main.preview.switch_format_hint"));
+        }
+        if mode == PreviewMode::Image {
+            hints.push(translator.translate("main.preview.zoom_hint"));
+            hints.push(
+                image_display_percentage
+                    .map(|percentage| format!("{percentage:.0}%"))
+                    .unwrap_or_else(|| translator.translate("main.preview.loading")),
+            );
+        } else if self.content_scrollable {
+            hints.push(translator.translate("main.preview.scroll_hint"));
+        }
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .children(hints.into_iter().enumerate().map(|(index, hint)| {
+                div()
+                    .id(("preview-hint", index as u64))
+                    .px_2()
+                    .py_0p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(gpui::ColorExt::opacity(
+                        &theme.border,
+                        if index == 0 { 0.75 } else { 0.5 },
+                    ))
+                    .bg(gpui::ColorExt::opacity(
+                        &theme.background,
+                        if index == 0 { 0.92 } else { 0.74 },
+                    ))
+                    .text_size(px(11.0))
+                    .text_color(theme.foreground)
+                    .child(hint)
+                    .into_any_element()
+            }))
+            .into_any_element()
+    }
+}
+
+impl Drop for PreviewWindow {
+    fn drop(&mut self) {
+        if let Some(hook) = self.foreground_hook.take() {
+            crate::platform::window::uninstall_preview_foreground_hook(hook);
+        }
+    }
+}
+
+impl Render for PreviewWindow {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        window.set_rem_size(px(16.0));
+        let Some(anchor) = self.anchor else {
+            return div().size_full().into_any_element();
+        };
+        let Some(display) = work_area_for_physical_point(cx, anchor.center()) else {
+            return div().size_full().into_any_element();
+        };
+        let scale = display.scale_factor.max(1.0);
+        let popup = self.popup;
+        window.defer(cx, move |window, cx| {
+            popup.resize_to_physical_bounds(
+                window,
+                cx,
+                display.bounds.x,
+                display.bounds.y,
+                display.bounds.width,
+                display.bounds.height,
+            );
+        });
+        let work_area = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: display.bounds.width / scale,
+            height: display.bounds.height / scale,
+        };
+        let anchor_rect = LogicalRect {
+            left: (anchor.rect.left - display.bounds.x) / scale,
+            top: (anchor.rect.top - display.bounds.y) / scale,
+            width: anchor.rect.width / scale,
+            height: anchor.rect.height / scale,
+        };
+        let main_rect = self.main_window.map(|rect| LogicalRect {
+            left: (rect.left - display.bounds.x) / scale,
+            top: (rect.top - display.bounds.y) / scale,
+            width: rect.width / scale,
+            height: rect.height / scale,
+        });
+        let connector_source_rect = main_rect
+            .map(|main| intersect_logical_rect(anchor_rect, main))
+            .unwrap_or_else(|| intersect_logical_rect(anchor_rect, work_area));
+        let pointer = point(
+            (anchor.pointer().x - display.bounds.x) / scale,
+            (anchor.pointer().y - display.bounds.y) / scale,
+        );
+        let placement_size = (self.mode != Some(PreviewMode::Image))
+            .then_some(self.content_size)
+            .flatten();
+        let placement = choose_preview_placement(pointer, work_area, main_rect, placement_size);
+        let max_width = resolve_preview_max_width(work_area, main_rect, pointer, placement.side);
+        let max_height = resolve_preview_max_height(work_area.height);
+        let surface_border_width = if self.mode == Some(PreviewMode::Image) { 0.0 } else { 1.0 };
+        let note_text = self.item.as_ref().map(|item| item.note_text.clone()).unwrap_or_default();
+        let (note_width, note_height) = if note_text.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let runs = [window.text_style().to_run(note_text.len())];
+            let layout = window.text_system().shape_text(
+                note_text.clone(), px(14.0), &runs,
+                Some(px((max_width - TEXT_HORIZONTAL_PADDING - surface_border_width * 2.0).max(1.0))), None,
+            );
+            let (width, lines) = layout.map(|lines| (
+                lines.iter().map(|line| f32::from(line.width())).fold(0.0, f32::max),
+                lines.iter().map(|line| line.wrap_boundaries().len() + 1).sum::<usize>(),
+            )).unwrap_or((0.0, 1));
+            (
+                (width.ceil() + TEXT_HORIZONTAL_PADDING + surface_border_width * 2.0)
+                    .max(TEXT_MIN_WIDTH).min(max_width),
+                (lines.clamp(1, 6) as f32 * 20.0 + TEXT_VERTICAL_PADDING).min(max_height * 0.3),
+            )
+        };
+        let content_max_height = (max_height - note_height).max(1.0);
+        self.ensure_text_layout(max_width - TEXT_HORIZONTAL_PADDING, window);
+        let image_size = (self.mode == Some(PreviewMode::Image))
+            .then(|| self.current_preview())
+            .flatten()
+            .and_then(|preview| self.image_display_size(preview, max_width, content_max_height, scale));
+        let image_display_percentage = (self.mode == Some(PreviewMode::Image))
+            .then(|| self.current_preview())
+            .flatten()
+            .and_then(|preview| {
+                let (width, height) = self.image_dimensions.or_else(|| {
+                    preview
+                        .image_dimensions
+                        .map(|size| (size.width, size.height))
+                })?;
+                Self::resolve_image_display_scale(
+                    width,
+                    height,
+                    max_width,
+                    content_max_height,
+                    scale,
+                    self.image_scale,
+                )
+                .map(|display_scale| display_scale * 100.0)
+            });
+        let preview_size = if self.mode == Some(PreviewMode::Image) {
+            image_size.map(|size| (
+                size.width.max(note_width),
+                size.height + note_height,
+            ))
+        } else {
+            self.content_size
+        };
+        let preview_top = preview_size
+            .map(|(width, height)| {
+                preview_rect_for_placement(placement, width, height, work_area).top
+            })
+            .or_else(|| self.surface_bounds.map(|bounds| bounds.top));
+        let hint_top = resolve_preview_hint_top(preview_top, work_area.top);
+        let connector_target_rect = self.surface_bounds.or_else(|| {
+            preview_size.map(|(width, height)| {
+                preview_rect_for_placement(placement, width, height, work_area)
+            })
+        });
+        let theme = crate::window_material::excluded_window_theme(cx);
+        let measured_mode = self.mode;
+        let measured_reveal_generation = self.reveal_generation;
+        let preview_entity = cx.entity();
+        let preview_entity_for_content = preview_entity.clone();
+        let text_list_state = self.text_list_state.clone();
+        let html_scroll = self.html_scroll.clone();
+        let file_scroll = self.file_scroll.clone();
+        let note_scroll = self.note_scroll.clone();
+        let content_measure = canvas(
+            move |bounds, window, cx| {
+                let measured_size = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+                let content_scrollable = f32::from(note_scroll.max_offset().y) > 0.5 || match measured_mode {
+                    Some(PreviewMode::Text) => {
+                        f32::from(text_list_state.max_offset_for_scrollbar().y) > 0.5
+                    }
+                    Some(PreviewMode::Html) => f32::from(html_scroll.max_offset().y) > 0.5,
+                    Some(PreviewMode::File) => f32::from(file_scroll.max_offset().y) > 0.5,
+                    Some(PreviewMode::Image) | None => false,
+                };
+                let preview = preview_entity_for_content.read(cx);
+                if preview.mode != measured_mode
+                    || preview.reveal_generation != measured_reveal_generation
+                    || (preview.content_size == Some(measured_size)
+                        && preview.content_scrollable == content_scrollable)
+                {
+                    return;
+                }
+                let preview_entity = preview_entity_for_content.clone();
+                window.on_next_frame(move |_, cx| {
+                    preview_entity.update(cx, |preview, cx| {
+                        if preview.mode != measured_mode
+                            || preview.reveal_generation != measured_reveal_generation
+                        {
+                            return;
+                        }
+                        if preview.content_size != Some(measured_size)
+                            || preview.content_scrollable != content_scrollable
+                        {
+                            if measured_mode != Some(PreviewMode::Image)
+                                && preview.content_size.is_none()
+                            {
+                                preview.reveal_generation =
+                                    preview.reveal_generation.wrapping_add(1);
+                            }
+                            preview.content_size = Some(measured_size);
+                            preview.content_scrollable = content_scrollable;
+                            cx.notify();
+                        }
+                    });
+                });
+            },
+            |_bounds, _state, _window, _cx| {},
+        )
+        .absolute()
+        .inset_0()
+        .size_full();
+        let reveal_size = preview_size;
+        let animations_enabled = crate::config_runtime::animation_enabled(
+            cx,
+            crate::config::AnimationKind::PreviewWindow,
+        );
+        let reveal_start_size = reveal_size.map(|(width, height)| {
+            preview_reveal_start_size(anchor_rect, placement.side, width, height)
+        });
+        let surface_content = div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .when(note_height > 0.0, |this| this.min_w(px(note_width)).max_w(px(max_width)))
+            .when_some(reveal_size, |this, (width, height)| {
+                this.w(px(width)).h(px(height))
+            })
+            .when(note_height > 0.0, |this| this.child(
+                div().id("preview-note").w_full().min_w_0().h(px(note_height)).flex_none()
+                    .max_w(px(max_width)).overflow_hidden().border_b_1()
+                    .when_some(reveal_size, |this, (width, _)| {
+                        this.max_w(px((width - surface_border_width * 2.0).max(1.0)))
+                    })
+                    .rounded_t(px(PREVIEW_CORNER_RADIUS - surface_border_width))
+                    .border_color(theme.border).bg(theme.secondary)
+                    .child(div().id("preview-note-scroll").size_full().overflow_y_scroll()
+                        .track_scroll(&self.note_scroll)
+                        .child(div().px_3().py_2().text_size(px(14.0)).line_height(px(20.0))
+                            .text_color(theme.foreground).child(note_text))),
+            ))
+            .child(self.render_content(max_width, content_max_height, image_size, window, cx))
+            .child(content_measure);
+        let surface_bounds_measure = canvas(
+            move |bounds, window, cx| {
+                let measured_bounds = LogicalRect {
+                    left: f32::from(bounds.origin.x),
+                    top: f32::from(bounds.origin.y),
+                    width: f32::from(bounds.size.width),
+                    height: f32::from(bounds.size.height),
+                };
+                let preview = preview_entity.read(cx);
+                if preview.reveal_generation != measured_reveal_generation
+                    || preview.surface_bounds == Some(measured_bounds)
+                {
+                    return;
+                }
+                let preview_entity = preview_entity.clone();
+                window.on_next_frame(move |_, cx| {
+                    preview_entity.update(cx, |preview, cx| {
+                        if preview.reveal_generation == measured_reveal_generation
+                            && preview.surface_bounds != Some(measured_bounds)
+                        {
+                            preview.surface_bounds = Some(measured_bounds);
+                            cx.notify();
+                        }
+                    });
+                });
+            },
+            |_bounds, _state, _window, _cx| {},
+        )
+        .absolute()
+        .inset_0()
+        .size_full();
+        let surface = div()
+            .flex_none()
+            .max_w(px(max_width))
+            .when(self.mode != Some(PreviewMode::Image), |this| {
+                this.max_h(px(max_height))
+            })
+            .overflow_hidden()
+            .rounded(px(PREVIEW_CORNER_RADIUS))
+            .when(self.mode != Some(PreviewMode::Image), |this| {
+                this.border_1().border_color(theme.border)
+            })
+            .when(self.mode != Some(PreviewMode::Image), |this| {
+                this.bg(gpui::ColorExt::opacity(&theme.background, 0.90))
+            })
+            .child(surface_content)
+            .child(surface_bounds_measure);
+        let surface = if animations_enabled {
+            surface
+                .with_animation(
+                    ("preview-surface-size", self.reveal_generation),
+                    Animation::new(Duration::from_millis(190))
+                        .with_easing(gpui::ease_out_quint()),
+                    move |this, progress| {
+                        let Some((target_width, target_height)) = reveal_size else {
+                            return this;
+                        };
+                        let (start_width, start_height) =
+                            reveal_start_size.expect("预览尺寸存在时必须有展开动画起始尺寸");
+                        this.w(px(interpolate_reveal_size(
+                            start_width,
+                            target_width,
+                            progress,
+                        )))
+                        .h(px(interpolate_reveal_size(
+                            start_height,
+                            target_height,
+                            progress,
+                        )))
+                    },
+                )
+                .into_any_element()
+        } else {
+            surface.into_any_element()
+        };
+        let surface = div().flex_none().child(surface);
+        let surface = if animations_enabled {
+            surface
+                .with_animation(
+                    ("preview-surface-opacity", self.generation),
+                    Animation::new(Duration::from_millis(190))
+                        .with_easing(gpui::ease_out_quint()),
+                    |this, progress| this.opacity(progress),
+                )
+                .into_any_element()
+        } else {
+            surface.into_any_element()
+        };
+        let overlay = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .when(
+                matches!(
+                    placement.side,
+                    PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
+                ),
+                |this| this.items_end(),
+            )
+            .when(
+                !matches!(
+                    placement.side,
+                    PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
+                ),
+                |this| this.items_start(),
+            )
+            .max_w(px(max_width))
+            .child(surface)
+            .child(
+                div()
+                    .absolute()
+                    .top(px(hint_top))
+                    .left_0()
+                    .right_0()
+                    .h(px(PREVIEW_HINT_HEIGHT))
+                    .flex()
+                    .when(
+                        matches!(
+                            placement.side,
+                            PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
+                        ),
+                        |this| this.justify_end(),
+                    )
+                    .when(
+                        !matches!(
+                            placement.side,
+                            PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
+                        ),
+                        |this| this.justify_start(),
+                    )
+                    .child(self.render_hints(theme, image_display_percentage, &i18n::translator(cx))),
+            );
+        let preview = deferred(
+            anchored()
+                .position(point(px(placement.position.x), px(placement.position.y)))
+                .anchor(placement.anchor)
+                .snap_to_window()
+                .child(overlay),
+        )
+        .priority(1);
+        let connector = connector_source_rect
+            .zip(connector_target_rect)
+            .map(|(source_rect, target_rect)| {
+                connector_element(
+                    source_rect,
+                    target_rect,
+                    theme.primary,
+                    theme.primary_active,
+                    theme.primary_active,
+                )
+            })
+            .unwrap_or_else(|| div().into_any_element());
+        let connector = deferred(connector).priority(2);
+        div()
+            .relative()
+            .size_full()
+            .when(self.visible, |this| this.child(preview).child(connector))
+            .into_any_element()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ConnectorAnchor {
+    point: Point<f32>,
+    normal: Point<f32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ConnectorPath {
+    source: Point<f32>,
+    target: Point<f32>,
+    control_1: Point<f32>,
+    control_2: Point<f32>,
+}
+
+fn connector_element(
+    source_rect: LogicalRect,
+    target_rect: LogicalRect,
+    line_color: gpui::Hsla,
+    source_color: gpui::Hsla,
+    target_color: gpui::Hsla,
+) -> AnyElement {
+    let Some(path) = resolve_best_connector(source_rect, target_rect) else {
+        return div().into_any_element();
+    };
+    let line_color = line_color;
+    let source_glow = gpui::ColorExt::opacity(&source_color, 0.3);
+    let target_glow = gpui::ColorExt::opacity(&target_color, 0.3);
+    let source = path.source;
+    let target = path.target;
+    let source_dot = div()
+        .absolute()
+        .left(px(source.x - 6.0))
+        .top(px(source.y - 6.0))
+        .size(px(12.0))
+        .rounded_full()
+        .bg(source_glow)
+        .child(
+            div()
+                .absolute()
+                .inset(px(2.0))
+                .rounded_full()
+                .bg(source_color),
+        );
+    let target_dot = div()
+        .absolute()
+        .left(px(target.x - 6.0))
+        .top(px(target.y - 6.0))
+        .size(px(12.0))
+        .rounded_full()
+        .bg(target_glow)
+        .child(
+            div()
+                .absolute()
+                .inset(px(2.0))
+                .rounded_full()
+                .bg(target_color),
+        );
+
+    div()
+        .absolute()
+        .inset_0()
+        .child(
+            canvas(
+                |_bounds, _window, _cx| (),
+                move |bounds, (), window, _cx| {
+                    let origin = bounds.origin;
+                    let mut builder = gpui::PathBuilder::stroke(px(2.0));
+                    builder.move_to(point(
+                        origin.x + px(path.source.x),
+                        origin.y + px(path.source.y),
+                    ));
+                    builder.cubic_bezier_to(
+                        point(origin.x + px(path.target.x), origin.y + px(path.target.y)),
+                        point(
+                            origin.x + px(path.control_1.x),
+                            origin.y + px(path.control_1.y),
+                        ),
+                        point(
+                            origin.x + px(path.control_2.x),
+                            origin.y + px(path.control_2.y),
+                        ),
+                    );
+                    if let Ok(path) = builder.build() {
+                        window.paint_path(path, line_color);
+                    }
+                },
+            )
+            .absolute()
+            .inset_0(),
+        )
+        .child(source_dot)
+        .child(target_dot)
+        .into_any_element()
+}
+
+fn rect_connection_anchors(rect: LogicalRect) -> [ConnectorAnchor; 4] {
+    [
+        ConnectorAnchor {
+            point: point(rect.left, rect.top + rect.height / 2.0),
+            normal: point(-1.0, 0.0),
+        },
+        ConnectorAnchor {
+            point: point(rect.right(), rect.top + rect.height / 2.0),
+            normal: point(1.0, 0.0),
+        },
+        ConnectorAnchor {
+            point: point(rect.left + rect.width / 2.0, rect.top),
+            normal: point(0.0, -1.0),
+        },
+        ConnectorAnchor {
+            point: point(rect.left + rect.width / 2.0, rect.bottom()),
+            normal: point(0.0, 1.0),
+        },
+    ]
+}
+
+fn segment_overlaps_rect_interior(start: Point<f32>, end: Point<f32>, rect: LogicalRect) -> bool {
+    let margin = 6.0;
+    let inner_left = rect.left + margin;
+    let inner_top = rect.top + margin;
+    let inner_right = rect.right() - margin;
+    let inner_bottom = rect.bottom() - margin;
+    if inner_left >= inner_right || inner_top >= inner_bottom {
+        return false;
+    }
+
+    for step in 1..24 {
+        let progress = step as f32 / 24.0;
+        let point = point(
+            start.x + (end.x - start.x) * progress,
+            start.y + (end.y - start.y) * progress,
+        );
+        if point.x > inner_left
+            && point.x < inner_right
+            && point.y > inner_top
+            && point.y < inner_bottom
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn resolve_best_connector(
+    source_rect: LogicalRect,
+    target_rect: LogicalRect,
+) -> Option<ConnectorPath> {
+    let mut best: Option<(f32, ConnectorPath)> = None;
+    for source in rect_connection_anchors(source_rect) {
+        for target in rect_connection_anchors(target_rect) {
+            let delta_x = target.point.x - source.point.x;
+            let delta_y = target.point.y - source.point.y;
+            let distance = delta_x.hypot(delta_y);
+            let crosses_target =
+                segment_overlaps_rect_interior(source.point, target.point, target_rect);
+            let source_outward = delta_x * source.normal.x + delta_y * source.normal.y >= 0.0;
+            let target_outward = -delta_x * target.normal.x - delta_y * target.normal.y >= 0.0;
+            let control = (distance * 0.22).clamp(20.0, 64.0);
+            let path = ConnectorPath {
+                source: source.point,
+                target: target.point,
+                control_1: point(
+                    source.point.x + source.normal.x * control,
+                    source.point.y + source.normal.y * control,
+                ),
+                control_2: point(
+                    target.point.x + target.normal.x * control,
+                    target.point.y + target.normal.y * control,
+                ),
+            };
+            let score = (crosses_target as u32 * 100_000) as f32
+                + if source_outward { 0.0 } else { 40.0 }
+                + if target_outward { 0.0 } else { 40.0 }
+                + distance;
+            if best.is_none_or(|(best_score, _)| score < best_score) {
+                best = Some((score, path));
+            }
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+fn intersect_logical_rect(first: LogicalRect, second: LogicalRect) -> Option<LogicalRect> {
+    let left = first.left.max(second.left);
+    let top = first.top.max(second.top);
+    let right = first.right().min(second.right());
+    let bottom = first.bottom().min(second.bottom());
+    (right > left && bottom > top).then_some(LogicalRect {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+fn preview_rect_for_placement(
+    placement: PreviewPlacement,
+    width: f32,
+    height: f32,
+    work_area: LogicalRect,
+) -> LogicalRect {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let mut rect = preview_rect_from_anchor(placement, width, height);
+    let max_left = (work_area.right() - width).max(work_area.left);
+    let max_top = (work_area.bottom() - height).max(work_area.top);
+    rect.left = rect.left.clamp(work_area.left, max_left);
+    rect.top = rect.top.clamp(work_area.top, max_top);
+    rect
+}
+
+fn preview_rect_from_anchor(placement: PreviewPlacement, width: f32, height: f32) -> LogicalRect {
+    let (left, top) = match placement.anchor {
+        Anchor::TopLeft => (placement.position.x, placement.position.y),
+        Anchor::TopRight => (placement.position.x - width, placement.position.y),
+        Anchor::BottomLeft => (placement.position.x, placement.position.y - height),
+        Anchor::BottomRight => (placement.position.x - width, placement.position.y - height),
+        Anchor::LeftCenter => (placement.position.x, placement.position.y - height / 2.0),
+        Anchor::RightCenter => (
+            placement.position.x - width,
+            placement.position.y - height / 2.0,
+        ),
+        Anchor::TopCenter => (placement.position.x - width / 2.0, placement.position.y),
+        Anchor::BottomCenter => (
+            placement.position.x - width / 2.0,
+            placement.position.y - height,
+        ),
+    };
+    LogicalRect {
+        left,
+        top,
+        width,
+        height,
+    }
+}
+
+fn preview_reveal_start_size(
+    anchor: LogicalRect,
+    side: PreviewPlacementSide,
+    target_width: f32,
+    target_height: f32,
+) -> (f32, f32) {
+    match side {
+        PreviewPlacementSide::Left | PreviewPlacementSide::Right => {
+            (0.0, anchor.height.max(1.0).min(target_height.max(1.0)))
+        }
+        PreviewPlacementSide::Top | PreviewPlacementSide::Bottom => {
+            (anchor.width.max(1.0).min(target_width.max(1.0)), 0.0)
+        }
+        PreviewPlacementSide::Overlay
+        | PreviewPlacementSide::PointerLeft
+        | PreviewPlacementSide::PointerRight => (0.0, 0.0),
+    }
+}
+
+fn interpolate_reveal_size(start: f32, target: f32, progress: f32) -> f32 {
+    start + (target - start) * progress
+}
+
+fn resolve_preview_hint_top(preview_top: Option<f32>, work_area_top: f32) -> f32 {
+    let Some(preview_top) = preview_top else {
+        return 0.0;
+    };
+    if preview_top - PREVIEW_HINT_HEIGHT - PREVIEW_HINT_GAP >= work_area_top {
+        -(PREVIEW_HINT_HEIGHT + PREVIEW_HINT_GAP)
+    } else {
+        0.0
+    }
+}
+
+fn choose_preview_placement(
+    pointer: Point<f32>,
+    work_area: LogicalRect,
+    main_window: Option<LogicalRect>,
+    preview_size: Option<(f32, f32)>,
+) -> PreviewPlacement {
+    let (preview_width, preview_height) = preview_size
+        .map(|(width, height)| (width.max(TEXT_MIN_WIDTH), height.max(TEXT_MIN_HEIGHT)))
+        .unwrap_or((TEXT_MIN_WIDTH, TEXT_MIN_HEIGHT));
+
+    if let Some(main) = main_window {
+        let right_space = work_area.right() - main.right() - PREVIEW_MAIN_GAP;
+        let left_space = main.left - work_area.left - PREVIEW_MAIN_GAP;
+        let horizontal_width = preview_width.max(HORIZONTAL_PREVIEW_MIN_WIDTH);
+        let can_place_right = right_space >= horizontal_width;
+        let can_place_left = left_space >= horizontal_width;
+        if can_place_right || can_place_left {
+            let place_right = can_place_right && (!can_place_left || right_space >= left_space);
+            let position_y =
+                clamp_preview_center(pointer.y, work_area.top, work_area.bottom(), preview_height);
+            if place_right {
+                return PreviewPlacement {
+                    position: point(main.right() + PREVIEW_MAIN_GAP, position_y),
+                    anchor: Anchor::LeftCenter,
+                    side: PreviewPlacementSide::Right,
+                };
+            }
+            return PreviewPlacement {
+                position: point(main.left - PREVIEW_MAIN_GAP, position_y),
+                anchor: Anchor::RightCenter,
+                side: PreviewPlacementSide::Left,
+            };
+        }
+
+        let bottom_space = work_area.bottom() - main.bottom() - PREVIEW_MAIN_GAP;
+        let top_space = main.top - work_area.top - PREVIEW_MAIN_GAP;
+        let can_place_bottom = bottom_space >= preview_height;
+        let can_place_top = top_space >= preview_height;
+        if can_place_bottom || can_place_top {
+            let place_bottom = can_place_bottom && (!can_place_top || bottom_space >= top_space);
+            let position_x =
+                clamp_preview_center(pointer.x, work_area.left, work_area.right(), preview_width);
+            if place_bottom {
+                return PreviewPlacement {
+                    position: point(position_x, main.bottom() + PREVIEW_MAIN_GAP),
+                    anchor: Anchor::TopCenter,
+                    side: PreviewPlacementSide::Bottom,
+                };
+            }
+            return PreviewPlacement {
+                position: point(position_x, main.top - PREVIEW_MAIN_GAP),
+                anchor: Anchor::BottomCenter,
+                side: PreviewPlacementSide::Top,
+            };
+        }
+
+        return PreviewPlacement {
+            position: point(
+                main.left + main.width / 2.0,
+                main.top + main.height / 2.0 - preview_height / 2.0,
+            ),
+            anchor: Anchor::TopCenter,
+            side: PreviewPlacementSide::Overlay,
+        };
+    }
+
+    choose_pointer_placement(pointer, work_area, preview_width, preview_height)
+}
+
+fn choose_pointer_placement(
+    pointer: Point<f32>,
+    work_area: LogicalRect,
+    preview_width: f32,
+    preview_height: f32,
+) -> PreviewPlacement {
+    let candidates = [
+        (
+            point(pointer.x + PREVIEW_OFFSET, pointer.y + PREVIEW_OFFSET),
+            Anchor::TopLeft,
+            PreviewPlacementSide::PointerRight,
+        ),
+        (
+            point(pointer.x - PREVIEW_OFFSET, pointer.y + PREVIEW_OFFSET),
+            Anchor::TopRight,
+            PreviewPlacementSide::PointerLeft,
+        ),
+        (
+            point(pointer.x - PREVIEW_OFFSET, pointer.y - PREVIEW_OFFSET),
+            Anchor::BottomRight,
+            PreviewPlacementSide::PointerLeft,
+        ),
+        (
+            point(pointer.x + PREVIEW_OFFSET, pointer.y - PREVIEW_OFFSET),
+            Anchor::BottomLeft,
+            PreviewPlacementSide::PointerRight,
+        ),
+    ];
+
+    let first = candidates[0];
+    candidates
+        .into_iter()
+        .map(|(position, anchor, side)| PreviewPlacement {
+            position,
+            anchor,
+            side,
+        })
+        .find(|placement| {
+            let rect = preview_rect_from_anchor(*placement, preview_width, preview_height);
+            rect.left >= work_area.left
+                && rect.top >= work_area.top
+                && rect.right() <= work_area.right()
+                && rect.bottom() <= work_area.bottom()
+        })
+        .unwrap_or(PreviewPlacement {
+            position: first.0,
+            anchor: first.1,
+            side: first.2,
+        })
+}
+
+fn clamp_preview_center(value: f32, start: f32, end: f32, size: f32) -> f32 {
+    let half_size = size / 2.0;
+    let min_value = start + half_size;
+    let max_value = end - half_size;
+    if min_value <= max_value {
+        value.clamp(min_value, max_value)
+    } else {
+        (start + end) / 2.0
+    }
+}
+
+fn resolve_preview_max_width(
+    work_area: LogicalRect,
+    main_window: Option<LogicalRect>,
+    pointer: Point<f32>,
+    side: PreviewPlacementSide,
+) -> f32 {
+    let work_area_max = (work_area.width - 24.0).max(1.0);
+    let available = match side {
+        PreviewPlacementSide::Right => main_window
+            .map(|main| work_area.right() - main.right() - PREVIEW_MAIN_GAP)
+            .unwrap_or(work_area_max),
+        PreviewPlacementSide::Left => main_window
+            .map(|main| main.left - work_area.left - PREVIEW_MAIN_GAP)
+            .unwrap_or(work_area_max),
+        PreviewPlacementSide::Bottom
+        | PreviewPlacementSide::Top
+        | PreviewPlacementSide::Overlay => work_area_max,
+        PreviewPlacementSide::PointerRight => work_area.right() - pointer.x - PREVIEW_OFFSET,
+        PreviewPlacementSide::PointerLeft => pointer.x - work_area.left - PREVIEW_OFFSET,
+    };
+    if available > 0.0 {
+        available.min(work_area_max)
+    } else {
+        work_area_max
+    }
+}
+
+fn resolve_preview_max_height(work_area_height: f32) -> f32 {
+    (work_area_height * PREVIEW_MAX_HEIGHT_RATIO).max(1.0)
+}
+
+fn text_line_ranges(text: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut line_start = 0;
+
+    for (index, byte) in text.bytes().enumerate() {
+        if byte != b'\n' {
+            continue;
+        }
+        let line_end = if index > line_start && text.as_bytes()[index - 1] == b'\r' {
+            index - 1
+        } else {
+            index
+        };
+        ranges.push(line_start..line_end);
+        line_start = index + 1;
+    }
+
+    if line_start <= text.len() {
+        ranges.push(line_start..text.len());
+    }
+    ranges
+}
+
+fn wrapped_text_line_ranges(text: &str, wrap_width: Pixels, window: &Window) -> Vec<Range<usize>> {
+    let text_style = window.text_style();
+    let mut line_wrapper = window
+        .text_system()
+        .line_wrapper(text_style.font(), px(14.0));
+    let mut ranges = Vec::new();
+
+    for line_range in text_line_ranges(text) {
+        let line = &text[line_range.clone()];
+        let mut start = 0;
+        for boundary in line_wrapper.wrap_line(&[LineFragment::text(line)], wrap_width) {
+            if boundary.ix > start {
+                ranges.push((line_range.start + start)..(line_range.start + boundary.ix));
+                start = boundary.ix;
+            }
+        }
+        ranges.push((line_range.start + start)..line_range.end);
+    }
+
+    ranges
+}
+
+fn mode_for_preview(preview: &FormatPreview) -> Option<PreviewMode> {
+    match preview.role() {
+        FormatRole::PlainText | FormatRole::Rtf => Some(PreviewMode::Text),
+        FormatRole::Html => Some(PreviewMode::Html),
+        FormatRole::Image if preview.image_source.is_some() => Some(PreviewMode::Image),
+        FormatRole::FileList | FormatRole::VirtualFile if preview.image_source.is_some() => {
+            if preview.content_kind == ContentKind::Image {
+                Some(PreviewMode::Image)
+            } else {
+                Some(PreviewMode::File)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn display_priority_roles(priority: ClipboardDisplayPriority) -> [FormatRole; 3] {
+    match priority {
+        ClipboardDisplayPriority::TextHtmlImage => {
+            [FormatRole::PlainText, FormatRole::Html, FormatRole::Image]
+        }
+        ClipboardDisplayPriority::TextImageHtml => {
+            [FormatRole::PlainText, FormatRole::Image, FormatRole::Html]
+        }
+        ClipboardDisplayPriority::HtmlTextImage => {
+            [FormatRole::Html, FormatRole::PlainText, FormatRole::Image]
+        }
+        ClipboardDisplayPriority::HtmlImageText => {
+            [FormatRole::Html, FormatRole::Image, FormatRole::PlainText]
+        }
+        ClipboardDisplayPriority::ImageTextHtml => {
+            [FormatRole::Image, FormatRole::PlainText, FormatRole::Html]
+        }
+        ClipboardDisplayPriority::ImageHtmlText => {
+            [FormatRole::Image, FormatRole::Html, FormatRole::PlainText]
+        }
+    }
+}
+
+trait ScrollWheelDelta {
+    fn delta_y(&self, line_height: Pixels) -> f32;
+}
+
+impl ScrollWheelDelta for ScrollWheelEvent {
+    fn delta_y(&self, line_height: Pixels) -> f32 {
+        f32::from(self.delta.pixel_delta(line_height).y)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LogicalRect, PreviewPlacementSide, PreviewWindow, choose_preview_placement,
+        interpolate_reveal_size, intersect_logical_rect, preview_reveal_start_size,
+        resolve_best_connector, resolve_preview_hint_top, resolve_preview_max_height,
+        resolve_preview_max_width, text_line_ranges,
+    };
+    use gpui::{Anchor, point};
+
+    #[test]
+    fn preview_prefers_the_larger_side_of_the_main_window() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let main = LogicalRect {
+            left: 700.0,
+            top: 200.0,
+            width: 400.0,
+            height: 600.0,
+        };
+        let placement = choose_preview_placement(point(900.0, 400.0), work, Some(main), None);
+        assert_eq!(placement.side, PreviewPlacementSide::Right);
+        assert_eq!(
+            resolve_preview_max_width(work, Some(main), point(900.0, 400.0), placement.side),
+            802.0
+        );
+    }
+
+    #[test]
+    fn preview_max_height_is_ninety_percent_of_work_area() {
+        assert_eq!(resolve_preview_max_height(1080.0), 972.0);
+    }
+
+    #[test]
+    fn preview_reveal_grows_outward_from_each_main_window_side() {
+        let anchor = LogicalRect {
+            left: 100.0,
+            top: 200.0,
+            width: 320.0,
+            height: 48.0,
+        };
+        let target = (480.0, 240.0);
+
+        assert_eq!(
+            preview_reveal_start_size(anchor, PreviewPlacementSide::Left, target.0, target.1),
+            (0.0, 48.0)
+        );
+        assert_eq!(
+            preview_reveal_start_size(anchor, PreviewPlacementSide::Right, target.0, target.1),
+            (0.0, 48.0)
+        );
+        assert_eq!(
+            preview_reveal_start_size(anchor, PreviewPlacementSide::Top, target.0, target.1),
+            (320.0, 0.0)
+        );
+        assert_eq!(
+            preview_reveal_start_size(anchor, PreviewPlacementSide::Bottom, target.0, target.1),
+            (320.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn preview_reveal_interpolates_to_the_target_size() {
+        assert_eq!(interpolate_reveal_size(0.0, 480.0, 0.5), 240.0);
+        assert_eq!(interpolate_reveal_size(48.0, 240.0, 0.5), 144.0);
+    }
+
+    #[test]
+    fn text_line_ranges_preserve_empty_lines_and_normalize_crlf() {
+        let text = "第一行\r\n\r\n第三行\n";
+        let lines = text_line_ranges(text)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines, vec!["第一行", "", "第三行", ""]);
+    }
+
+    #[test]
+    fn text_line_ranges_return_one_empty_line_for_empty_text() {
+        assert_eq!(text_line_ranges(""), vec![0..0]);
+    }
+
+    #[test]
+    fn preview_position_flips_left_when_right_side_is_too_small() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let main = Some(LogicalRect {
+            left: 1500.0,
+            top: 200.0,
+            width: 300.0,
+            height: 600.0,
+        });
+        let placement = choose_preview_placement(point(1600.0, 400.0), work, main, None);
+        assert_eq!(placement.side, PreviewPlacementSide::Left);
+        assert!(placement.position.x < 1500.0);
+    }
+
+    #[test]
+    fn preview_uses_vertical_space_when_horizontal_space_is_below_400_logical_pixels() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1200.0,
+            height: 900.0,
+        };
+        let main = LogicalRect {
+            left: 408.0,
+            top: 200.0,
+            width: 400.0,
+            height: 500.0,
+        };
+        let placement =
+            choose_preview_placement(point(600.0, 450.0), work, Some(main), Some((300.0, 100.0)));
+        assert_eq!(placement.side, PreviewPlacementSide::Bottom);
+    }
+
+    #[test]
+    fn preview_uses_vertical_space_when_both_horizontal_sides_are_too_small() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let main = LogicalRect {
+            left: 700.0,
+            top: 300.0,
+            width: 520.0,
+            height: 400.0,
+        };
+        let placement =
+            choose_preview_placement(point(900.0, 500.0), work, Some(main), Some((1000.0, 300.0)));
+        assert_eq!(placement.side, PreviewPlacementSide::Bottom);
+        assert_eq!(placement.anchor, Anchor::TopCenter);
+        assert_eq!(placement.position.y, 718.0);
+    }
+
+    #[test]
+    fn preview_falls_back_to_the_pointer_lower_right_corner() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        let placement =
+            choose_preview_placement(point(200.0, 200.0), work, None, Some((300.0, 200.0)));
+        assert_eq!(placement.side, PreviewPlacementSide::PointerRight);
+        assert_eq!(placement.anchor, Anchor::TopLeft);
+        assert_eq!(placement.position, point(214.0, 214.0));
+    }
+
+    #[test]
+    fn preview_falls_back_to_the_pointer_upper_left_corner_when_needed() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        let placement =
+            choose_preview_placement(point(900.0, 700.0), work, None, Some((300.0, 200.0)));
+        assert_eq!(placement.side, PreviewPlacementSide::PointerLeft);
+        assert_eq!(placement.anchor, Anchor::BottomRight);
+        assert_eq!(placement.position, point(886.0, 686.0));
+    }
+
+    #[test]
+    fn preview_overlays_main_window_when_surrounding_space_is_insufficient() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        let main = LogicalRect {
+            left: 100.0,
+            top: 100.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let placement =
+            choose_preview_placement(point(500.0, 400.0), work, Some(main), Some((300.0, 200.0)));
+        assert_eq!(placement.side, PreviewPlacementSide::Overlay);
+        assert_eq!(placement.anchor, Anchor::TopCenter);
+        assert_eq!(placement.position, point(500.0, 300.0));
+    }
+
+    #[test]
+    fn pointer_fallback_width_uses_the_selected_horizontal_space() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        assert_eq!(
+            resolve_preview_max_width(
+                work,
+                None,
+                point(200.0, 200.0),
+                PreviewPlacementSide::PointerRight,
+            ),
+            786.0
+        );
+        assert_eq!(
+            resolve_preview_max_width(
+                work,
+                None,
+                point(900.0, 200.0),
+                PreviewPlacementSide::PointerLeft,
+            ),
+            886.0
+        );
+    }
+
+    #[test]
+    fn image_preview_uses_a_shared_logical_base_size() {
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 1.0, 1.0),
+            Some(gpui::size(480.0, 270.0))
+        );
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(160, 90, 1000.0, 1000.0, 1.0, 1.0),
+            Some(gpui::size(480.0, 270.0))
+        );
+    }
+
+    #[test]
+    fn image_preview_percentage_reports_actual_logical_scale() {
+        assert_eq!(
+            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 1.0, 1.0,)
+                .map(|scale| scale * 100.0),
+            Some(25.0)
+        );
+        assert_eq!(
+            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 2.0, 1.0,)
+                .map(|scale| scale * 100.0),
+            Some(50.0)
+        );
+        assert_eq!(
+            PreviewWindow::resolve_image_display_scale(160, 90, 1000.0, 1000.0, 1.0, 1.0)
+                .map(|scale| scale * 100.0),
+            Some(300.0)
+        );
+    }
+
+    #[test]
+    fn image_preview_percentage_includes_zoom_factor() {
+        assert_eq!(
+            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 1.0, 2.0)
+                .map(|scale| scale * 100.0),
+            Some(50.0)
+        );
+    }
+
+    #[test]
+    fn image_preview_base_size_is_limited_by_available_logical_space() {
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(1000, 1000, 260.0, 1000.0, 1.0, 1.0),
+            Some(gpui::size(260.0, 260.0))
+        );
+    }
+
+    #[test]
+    fn image_preview_zoom_scales_from_the_shared_base_size() {
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 2.0, 2.0),
+            Some(gpui::size(960.0, 540.0))
+        );
+    }
+
+    #[test]
+    fn image_preview_can_zoom_out_below_the_base_size() {
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 1.0, 0.1),
+            Some(gpui::size(48.0, 27.0))
+        );
+    }
+
+    #[test]
+    fn preview_hint_is_above_the_surface_when_top_space_is_available() {
+        assert_eq!(resolve_preview_hint_top(Some(80.0), 0.0), -30.0);
+    }
+
+    #[test]
+    fn preview_hint_stays_inside_the_surface_at_the_work_area_top() {
+        assert_eq!(resolve_preview_hint_top(Some(29.0), 0.0), 0.0);
+        assert_eq!(resolve_preview_hint_top(Some(30.0), 10.0), 0.0);
+    }
+
+    #[test]
+    fn preview_hint_is_inside_until_the_external_position_fits() {
+        assert_eq!(resolve_preview_hint_top(Some(29.0), 0.0), 0.0);
+        assert_eq!(resolve_preview_hint_top(Some(60.0), 0.0), -30.0);
+    }
+
+    #[test]
+    fn connector_source_is_clipped_to_the_visible_main_window_area() {
+        let item = LogicalRect {
+            left: 40.0,
+            top: 20.0,
+            width: 260.0,
+            height: 180.0,
+        };
+        let main = LogicalRect {
+            left: 100.0,
+            top: 50.0,
+            width: 160.0,
+            height: 100.0,
+        };
+        let visible = intersect_logical_rect(item, main).expect("矩形应有可见交集");
+        assert_eq!(visible.left, 100.0);
+        assert_eq!(visible.top, 50.0);
+        assert_eq!(visible.width, 160.0);
+        assert_eq!(visible.height, 100.0);
+    }
+
+    #[test]
+    fn connector_prefers_opposite_horizontal_edges() {
+        let source = LogicalRect {
+            left: 0.0,
+            top: 100.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let target = LogicalRect {
+            left: 200.0,
+            top: 100.0,
+            width: 240.0,
+            height: 100.0,
+        };
+        let path = resolve_best_connector(source, target).expect("应生成连接线");
+        assert_eq!(path.source, point(100.0, 150.0));
+        assert_eq!(path.target, point(200.0, 150.0));
+    }
+}

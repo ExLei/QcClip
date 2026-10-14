@@ -1,0 +1,602 @@
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PointerButtons {
+    pub(crate) left: bool,
+    pub(crate) right: bool,
+    pub(crate) middle: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PointerSnapshot {
+    pub(crate) position: gpui::Point<f32>,
+    pub(crate) buttons: PointerButtons,
+    pub(crate) mouse_move_sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum GlobalMouseEvent {
+    MouseDown {
+        sequence: u64,
+        position: gpui::Point<f32>,
+        foreground_window: Option<isize>,
+    },
+    MouseUp {
+        position: gpui::Point<f32>,
+        left_pressed: bool,
+    },
+}
+
+#[cfg(target_os = "windows")]
+mod windows_input {
+    use std::{
+        sync::{Arc, Mutex, OnceLock},
+        thread,
+        time::Duration,
+    };
+
+    use raw_input::{Display, Event, Listen, MouseButton, Simulate, SubscriptionHandle};
+    use windows::Win32::{
+        UI::WindowsAndMessaging::GetForegroundWindow,
+    };
+
+    use super::{GlobalMouseEvent, PointerButtons, PointerSnapshot};
+
+    static INPUT_STATE: OnceLock<Arc<Mutex<InputState>>> = OnceLock::new();
+    static CURRENT_TRIGGER_KEY: Mutex<Option<TriggerKey>> = Mutex::new(None);
+    static PASTE_SIMULATION_LOCK: Mutex<()> = Mutex::new(());
+    const PHYSICAL_KEY_COUNT: usize = raw_input::Key::Unidentified as usize + 1;
+    static PHYSICAL_KEY_STATE: OnceLock<Mutex<[bool; PHYSICAL_KEY_COUNT]>> = OnceLock::new();
+
+    #[derive(Clone, Copy)]
+    struct TriggerKey {
+        key: raw_input::Key,
+    }
+
+    struct InputState {
+        snapshot: Option<PointerSnapshot>,
+        mouse_move_sequence: u64,
+        mouse_down_sequence: u64,
+        mouse_event_senders: Vec<(u64, async_channel::Sender<GlobalMouseEvent>)>,
+        next_mouse_event_subscription: u64,
+    }
+
+    impl InputState {
+        fn new() -> Self {
+            Self {
+                snapshot: cursor_position().map(|position| PointerSnapshot {
+                    position,
+                    buttons: PointerButtons::default(),
+                    mouse_move_sequence: 0,
+                }),
+                mouse_move_sequence: 0,
+                mouse_down_sequence: 0,
+                mouse_event_senders: Vec::new(),
+                next_mouse_event_subscription: 0,
+            }
+        }
+    }
+
+    pub(crate) fn start() -> Result<(), String> {
+        if INPUT_STATE.get().is_some() {
+            return Ok(());
+        }
+
+        let state = Arc::new(Mutex::new(InputState::new()));
+        INPUT_STATE
+            .set(state.clone())
+            .map_err(|_| "全局鼠标监听状态已初始化".to_owned())?;
+
+        let _subscription: SubscriptionHandle = Listen::subscribe(move |event| {
+            handle_event(&state, event);
+        });
+
+        // 只监听输入，不拦截或阻断输入。
+        Listen::start();
+        Listen::mouse_move(true);
+        Listen::mouse_button(true);
+        Listen::mouse_wheel(false);
+        Listen::keyboard(true);
+
+        let result = thread::Builder::new()
+            .name("qcclip-raw-input".to_owned())
+            .spawn(|| {
+                match raw_input::Core::start() {
+                    Ok(()) => tracing::debug!("全局鼠标事件处理线程已退出"),
+                    Err(error) => tracing::error!("全局鼠标事件处理线程启动失败：{error:?}"),
+                }
+            })
+            .map(|_| ())
+            .map_err(|error| format!("无法启动全局鼠标事件线程：{error}"));
+        result
+    }
+
+    fn physical_key_state() -> &'static Mutex<[bool; PHYSICAL_KEY_COUNT]> {
+        PHYSICAL_KEY_STATE.get_or_init(|| Mutex::new([false; PHYSICAL_KEY_COUNT]))
+    }
+
+    fn update_physical_key(key: raw_input::Key, pressed: bool) {
+        let index = key as usize;
+        if index < PHYSICAL_KEY_COUNT {
+            match physical_key_state().lock() {
+                Ok(mut state) => state[index] = pressed,
+                Err(poisoned) => poisoned.into_inner()[index] = pressed,
+            }
+        }
+    }
+
+    fn is_physical_key_pressed(key: raw_input::Key) -> bool {
+        let index = key as usize;
+        match physical_key_state().lock() {
+            Ok(state) => state[index],
+            Err(poisoned) => poisoned.into_inner()[index],
+        }
+    }
+
+    pub(crate) fn subscribe_mouse_events() -> (u64, async_channel::Receiver<GlobalMouseEvent>) {
+        let (sender, receiver) = async_channel::unbounded();
+        let state = INPUT_STATE
+            .get()
+            .expect("全局鼠标监听状态尚未初始化")
+            .clone();
+        let mut state = lock_state(&state);
+        let subscription_id = state.next_mouse_event_subscription;
+        state.next_mouse_event_subscription = state.next_mouse_event_subscription.wrapping_add(1);
+        state.mouse_event_senders.push((subscription_id, sender));
+        (subscription_id, receiver)
+    }
+
+    pub(crate) fn unsubscribe_mouse_events(subscription_id: u64) {
+        if let Some(state) = INPUT_STATE.get() {
+            lock_state(state)
+                .mouse_event_senders
+                .retain(|(id, _)| *id != subscription_id);
+        }
+    }
+
+    pub(crate) fn pointer_snapshot() -> Option<PointerSnapshot> {
+        // 虚拟机、远程桌面等设备可能只上报绝对坐标移动，不能只依赖 Raw Input 的相对移动事件。
+        let position = cursor_position();
+        let state = INPUT_STATE.get()?.clone();
+        let mut state = lock_state(&state);
+        if let Some(position) = position {
+            if let Some(snapshot) = state.snapshot.as_mut() {
+                snapshot.position = position;
+            } else {
+                state.snapshot = Some(PointerSnapshot {
+                    position,
+                    buttons: PointerButtons::default(),
+                    mouse_move_sequence: state.mouse_move_sequence,
+                });
+            }
+        }
+        state.snapshot
+    }
+
+    pub(crate) fn latest_mouse_down_sequence() -> Option<u64> {
+        let state = INPUT_STATE.get()?.clone();
+        let sequence = lock_state(&state).mouse_down_sequence;
+        (sequence != 0).then_some(sequence)
+    }
+
+    fn handle_event(state: &Arc<Mutex<InputState>>, event: Event) {
+        match event {
+            Event::KeyDown { key, .. } => {
+                update_physical_key(key, true);
+                return;
+            }
+            Event::KeyUp { key, .. } => {
+                update_physical_key(key, false);
+                return;
+            }
+            _ => {}
+        }
+
+        let mut global_event = None;
+        let senders;
+        {
+            let mut state = lock_state(state);
+            let position = match event {
+                Event::MouseMove { .. } | Event::MouseDown { .. } | Event::MouseUp { .. } => {
+                    cursor_position()
+                }
+                Event::MouseWheel { .. } | Event::KeyDown { .. } | Event::KeyUp { .. } => None,
+            };
+            if let Some(position) = position {
+                if let Some(snapshot) = state.snapshot.as_mut() {
+                    snapshot.position = position;
+                } else {
+                    state.snapshot = Some(PointerSnapshot {
+                        position,
+                        buttons: PointerButtons::default(),
+                        mouse_move_sequence: state.mouse_move_sequence,
+                    });
+                }
+            }
+
+            match event {
+                Event::MouseMove { .. } => {
+                    state.mouse_move_sequence = state.mouse_move_sequence.wrapping_add(1);
+                    let sequence = state.mouse_move_sequence;
+                    if let Some(snapshot) = state.snapshot.as_mut() {
+                        snapshot.mouse_move_sequence = sequence;
+                    }
+                }
+                Event::MouseDown { button } => {
+                    state.mouse_down_sequence = state.mouse_down_sequence.wrapping_add(1);
+                    let sequence = state.mouse_down_sequence;
+                    let Some(snapshot) = state.snapshot.as_mut() else {
+                        return;
+                    };
+                    set_button(&mut snapshot.buttons, button, true);
+                    let event = GlobalMouseEvent::MouseDown {
+                        sequence,
+                        position: snapshot.position,
+                        foreground_window: current_foreground_window(),
+                    };
+                    global_event = Some(event);
+                }
+                Event::MouseUp { button } => {
+                    let Some(snapshot) = state.snapshot.as_mut() else {
+                        return;
+                    };
+                    set_button(&mut snapshot.buttons, button, false);
+                }
+                Event::MouseWheel { .. } | Event::KeyDown { .. } | Event::KeyUp { .. } => return,
+            }
+            global_event = match event {
+                Event::MouseUp { .. } => state.snapshot.map(|snapshot| GlobalMouseEvent::MouseUp {
+                    position: snapshot.position,
+                    left_pressed: snapshot.buttons.left,
+                }),
+                _ => global_event,
+            };
+            senders = state.mouse_event_senders.clone();
+        }
+
+        if let Some(event) = global_event {
+            for (_, sender) in senders {
+                let _ = sender.try_send(event);
+            }
+        }
+    }
+
+    fn set_button(buttons: &mut PointerButtons, button: MouseButton, pressed: bool) {
+        match button {
+            MouseButton::Left => buttons.left = pressed,
+            MouseButton::Right => buttons.right = pressed,
+            MouseButton::Middle => buttons.middle = pressed,
+            MouseButton::Back | MouseButton::Forward => {}
+        }
+    }
+
+    fn cursor_position() -> Option<gpui::Point<f32>> {
+        Display::get_cursor_position().map(|(x, y)| gpui::Point {
+            x: x as f32,
+            y: y as f32,
+        })
+    }
+
+    fn current_foreground_window() -> Option<isize> {
+        // SAFETY: GetForegroundWindow 只读取系统当前前台窗口句柄。
+        let hwnd = unsafe { GetForegroundWindow() };
+        (!hwnd.0.is_null()).then_some(hwnd.0 as isize)
+    }
+
+    fn lock_state(state: &Arc<Mutex<InputState>>) -> std::sync::MutexGuard<'_, InputState> {
+        match state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    pub(crate) fn set_trigger_key_code(code: global_hotkey::hotkey::Code) {
+        *lock_trigger_key() = raw_input_key(code).map(|key| TriggerKey { key });
+    }
+
+    pub(crate) fn clear_trigger_key() {
+        lock_trigger_key().take();
+    }
+
+    pub(crate) fn trigger_key_is_physically_pressed() -> bool {
+        current_trigger_key()
+            .is_some_and(|trigger_key| is_physical_key_pressed(trigger_key.key))
+    }
+
+    pub(crate) fn trigger_shortcut_is_physically_pressed(
+        modifiers: global_hotkey::hotkey::Modifiers,
+    ) -> bool {
+        if !trigger_key_is_physically_pressed() {
+            return false;
+        }
+        (!modifiers.contains(global_hotkey::hotkey::Modifiers::CONTROL)
+            || is_physical_key_pressed(raw_input::Key::ControlLeft)
+            || is_physical_key_pressed(raw_input::Key::ControlRight))
+            && (!modifiers.contains(global_hotkey::hotkey::Modifiers::ALT)
+                || is_physical_key_pressed(raw_input::Key::AltLeft)
+                || is_physical_key_pressed(raw_input::Key::AltRight))
+            && (!modifiers.contains(global_hotkey::hotkey::Modifiers::SHIFT)
+                || is_physical_key_pressed(raw_input::Key::ShiftLeft)
+                || is_physical_key_pressed(raw_input::Key::ShiftRight))
+            && (!modifiers.contains(global_hotkey::hotkey::Modifiers::SUPER)
+                || is_physical_key_pressed(raw_input::Key::MetaLeft)
+                || is_physical_key_pressed(raw_input::Key::MetaRight))
+    }
+
+    pub(crate) fn simulate_ctrl_v() {
+        let _paste_guard = match PASTE_SIMULATION_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        let modifiers = ModifierState::record();
+        // Ctrl、Shift、Win 不能参与下面的 Ctrl+V；Alt 必须等触发键释放后再释放，
+        // 否则前台程序可能把 Alt 解释成菜单导航。
+        modifiers.release_conflicting();
+        if let Some(trigger_key) = current_trigger_key() {
+            Simulate::keyboard(trigger_key.key, false);
+        }
+        modifiers.release_alt();
+
+        Simulate::keyboard(raw_input::Key::ControlLeft, true);
+        Simulate::keyboard(raw_input::Key::KeyV, true);
+        thread::sleep(Duration::from_millis(8));
+        Simulate::keyboard(raw_input::Key::KeyV, false);
+        Simulate::keyboard(raw_input::Key::ControlLeft, false);
+
+        // 不重新按下触发键：触发键若先于 Ctrl 等修饰键恢复，会被前台程序
+        // 当作普通字符；若与修饰键同时恢复，又可能再次触发全局快捷键。
+        modifiers.restore_physical();
+    }
+
+    #[derive(Clone, Copy)]
+    struct ModifierState {
+        control_left: bool,
+        control_right: bool,
+        alt_left: bool,
+        alt_right: bool,
+        shift_left: bool,
+        shift_right: bool,
+        win_left: bool,
+        win_right: bool,
+    }
+
+    impl ModifierState {
+        fn record() -> Self {
+            Self {
+                control_left: is_physical_key_pressed(raw_input::Key::ControlLeft),
+                control_right: is_physical_key_pressed(raw_input::Key::ControlRight),
+                alt_left: is_physical_key_pressed(raw_input::Key::AltLeft),
+                alt_right: is_physical_key_pressed(raw_input::Key::AltRight),
+                shift_left: is_physical_key_pressed(raw_input::Key::ShiftLeft),
+                shift_right: is_physical_key_pressed(raw_input::Key::ShiftRight),
+                win_left: is_physical_key_pressed(raw_input::Key::MetaLeft),
+                win_right: is_physical_key_pressed(raw_input::Key::MetaRight),
+            }
+        }
+
+        fn release_conflicting(&self) {
+            let mut released = false;
+            for (key, pressed) in [
+                (raw_input::Key::ControlLeft, self.control_left),
+                (raw_input::Key::ControlRight, self.control_right),
+                (raw_input::Key::ShiftLeft, self.shift_left),
+                (raw_input::Key::ShiftRight, self.shift_right),
+                (raw_input::Key::MetaLeft, self.win_left),
+                (raw_input::Key::MetaRight, self.win_right),
+            ] {
+                if pressed {
+                    Simulate::keyboard(key, false);
+                    released = true;
+                }
+            }
+            if released {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn release_alt(&self) {
+            if self.alt_left {
+                Simulate::keyboard(raw_input::Key::AltLeft, false);
+            }
+            if self.alt_right {
+                Simulate::keyboard(raw_input::Key::AltRight, false);
+            }
+        }
+
+        fn restore_physical(&self) {
+            // 临时用于 Ctrl+V 的左 Ctrl 不属于物理状态，只恢复粘贴前已按下的修饰键。
+            for (key, touched) in [
+                (raw_input::Key::ControlLeft, self.control_left),
+                (raw_input::Key::ControlRight, self.control_right),
+                (raw_input::Key::ShiftLeft, self.shift_left),
+                (raw_input::Key::ShiftRight, self.shift_right),
+                (raw_input::Key::AltLeft, self.alt_left),
+                (raw_input::Key::AltRight, self.alt_right),
+                (raw_input::Key::MetaLeft, self.win_left),
+                (raw_input::Key::MetaRight, self.win_right),
+            ] {
+                if touched {
+                    Simulate::keyboard(key, is_physical_key_pressed(key));
+                }
+            }
+        }
+    }
+
+    fn lock_trigger_key() -> std::sync::MutexGuard<'static, Option<TriggerKey>> {
+        match CURRENT_TRIGGER_KEY.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn current_trigger_key() -> Option<TriggerKey> {
+        lock_trigger_key().as_ref().copied()
+    }
+
+    fn raw_input_key(code: global_hotkey::hotkey::Code) -> Option<raw_input::Key> {
+        use global_hotkey::hotkey::Code;
+
+        // global-hotkey 已经完成快捷键字符串到 Code 的解析；这里只做两个库之间
+        // 的物理按键类型转换，Windows 扫描码和虚拟键码仍由 raw-input 负责。
+        Some(match code {
+            Code::Backquote => raw_input::Key::Backquote,
+            Code::Backslash => raw_input::Key::Backslash,
+            Code::BracketLeft => raw_input::Key::BracketLeft,
+            Code::BracketRight => raw_input::Key::BracketRight,
+            Code::Comma => raw_input::Key::Comma,
+            Code::Digit0 => raw_input::Key::Digit0,
+            Code::Digit1 => raw_input::Key::Digit1,
+            Code::Digit2 => raw_input::Key::Digit2,
+            Code::Digit3 => raw_input::Key::Digit3,
+            Code::Digit4 => raw_input::Key::Digit4,
+            Code::Digit5 => raw_input::Key::Digit5,
+            Code::Digit6 => raw_input::Key::Digit6,
+            Code::Digit7 => raw_input::Key::Digit7,
+            Code::Digit8 => raw_input::Key::Digit8,
+            Code::Digit9 => raw_input::Key::Digit9,
+            Code::Equal => raw_input::Key::Equal,
+            Code::IntlBackslash => raw_input::Key::IntlBackslash,
+            Code::IntlRo => raw_input::Key::IntlRo,
+            Code::IntlYen => raw_input::Key::IntlYen,
+            Code::KeyA => raw_input::Key::KeyA,
+            Code::KeyB => raw_input::Key::KeyB,
+            Code::KeyC => raw_input::Key::KeyC,
+            Code::KeyD => raw_input::Key::KeyD,
+            Code::KeyE => raw_input::Key::KeyE,
+            Code::KeyF => raw_input::Key::KeyF,
+            Code::KeyG => raw_input::Key::KeyG,
+            Code::KeyH => raw_input::Key::KeyH,
+            Code::KeyI => raw_input::Key::KeyI,
+            Code::KeyJ => raw_input::Key::KeyJ,
+            Code::KeyK => raw_input::Key::KeyK,
+            Code::KeyL => raw_input::Key::KeyL,
+            Code::KeyM => raw_input::Key::KeyM,
+            Code::KeyN => raw_input::Key::KeyN,
+            Code::KeyO => raw_input::Key::KeyO,
+            Code::KeyP => raw_input::Key::KeyP,
+            Code::KeyQ => raw_input::Key::KeyQ,
+            Code::KeyR => raw_input::Key::KeyR,
+            Code::KeyS => raw_input::Key::KeyS,
+            Code::KeyT => raw_input::Key::KeyT,
+            Code::KeyU => raw_input::Key::KeyU,
+            Code::KeyV => raw_input::Key::KeyV,
+            Code::KeyW => raw_input::Key::KeyW,
+            Code::KeyX => raw_input::Key::KeyX,
+            Code::KeyY => raw_input::Key::KeyY,
+            Code::KeyZ => raw_input::Key::KeyZ,
+            Code::Minus => raw_input::Key::Minus,
+            Code::Period => raw_input::Key::Period,
+            Code::Quote => raw_input::Key::Quote,
+            Code::Semicolon => raw_input::Key::Semicolon,
+            Code::Slash => raw_input::Key::Slash,
+            Code::Backspace => raw_input::Key::Backspace,
+            Code::CapsLock => raw_input::Key::CapsLock,
+            Code::ContextMenu => raw_input::Key::ContextMenu,
+            Code::ControlLeft => raw_input::Key::ControlLeft,
+            Code::ControlRight => raw_input::Key::ControlRight,
+            Code::Enter => raw_input::Key::Enter,
+            Code::AltLeft => raw_input::Key::AltLeft,
+            Code::AltRight => raw_input::Key::AltRight,
+            Code::MetaLeft => raw_input::Key::MetaLeft,
+            Code::MetaRight => raw_input::Key::MetaRight,
+            Code::ShiftLeft => raw_input::Key::ShiftLeft,
+            Code::ShiftRight => raw_input::Key::ShiftRight,
+            Code::Space => raw_input::Key::Space,
+            Code::Tab => raw_input::Key::Tab,
+            Code::Convert => raw_input::Key::Convert,
+            Code::NonConvert => raw_input::Key::NonConvert,
+            Code::Delete => raw_input::Key::Delete,
+            Code::End => raw_input::Key::End,
+            Code::Help => raw_input::Key::Help,
+            Code::Home => raw_input::Key::Home,
+            Code::Insert => raw_input::Key::Insert,
+            Code::PageDown => raw_input::Key::PageDown,
+            Code::PageUp => raw_input::Key::PageUp,
+            Code::ArrowDown => raw_input::Key::ArrowDown,
+            Code::ArrowLeft => raw_input::Key::ArrowLeft,
+            Code::ArrowRight => raw_input::Key::ArrowRight,
+            Code::ArrowUp => raw_input::Key::ArrowUp,
+            Code::NumLock => raw_input::Key::NumLock,
+            Code::Numpad0 => raw_input::Key::Numpad0,
+            Code::Numpad1 => raw_input::Key::Numpad1,
+            Code::Numpad2 => raw_input::Key::Numpad2,
+            Code::Numpad3 => raw_input::Key::Numpad3,
+            Code::Numpad4 => raw_input::Key::Numpad4,
+            Code::Numpad5 => raw_input::Key::Numpad5,
+            Code::Numpad6 => raw_input::Key::Numpad6,
+            Code::Numpad7 => raw_input::Key::Numpad7,
+            Code::Numpad8 => raw_input::Key::Numpad8,
+            Code::Numpad9 => raw_input::Key::Numpad9,
+            Code::NumpadAdd => raw_input::Key::NumpadAdd,
+            Code::NumpadDecimal => raw_input::Key::NumpadDecimal,
+            Code::NumpadDivide => raw_input::Key::NumpadDivide,
+            Code::NumpadEnter => raw_input::Key::NumpadEnter,
+            Code::NumpadMultiply => raw_input::Key::NumpadMultiply,
+            Code::NumpadSubtract => raw_input::Key::NumpadSubtract,
+            Code::Escape => raw_input::Key::Escape,
+            Code::F1 => raw_input::Key::F1,
+            Code::F2 => raw_input::Key::F2,
+            Code::F3 => raw_input::Key::F3,
+            Code::F4 => raw_input::Key::F4,
+            Code::F5 => raw_input::Key::F5,
+            Code::F6 => raw_input::Key::F6,
+            Code::F7 => raw_input::Key::F7,
+            Code::F8 => raw_input::Key::F8,
+            Code::F9 => raw_input::Key::F9,
+            Code::F10 => raw_input::Key::F10,
+            Code::F11 => raw_input::Key::F11,
+            Code::F12 => raw_input::Key::F12,
+            Code::F13 => raw_input::Key::F13,
+            Code::F14 => raw_input::Key::F14,
+            Code::F15 => raw_input::Key::F15,
+            Code::F16 => raw_input::Key::F16,
+            Code::F17 => raw_input::Key::F17,
+            Code::F18 => raw_input::Key::F18,
+            Code::F19 => raw_input::Key::F19,
+            Code::F20 => raw_input::Key::F20,
+            Code::F21 => raw_input::Key::F21,
+            Code::F22 => raw_input::Key::F22,
+            Code::F23 => raw_input::Key::F23,
+            Code::F24 => raw_input::Key::F24,
+            Code::PrintScreen => raw_input::Key::PrintScreen,
+            Code::ScrollLock => raw_input::Key::ScrollLock,
+            Code::Pause => raw_input::Key::Pause,
+            _ => return None,
+        })
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod windows_input {
+    use super::{GlobalMouseEvent, PointerSnapshot};
+
+    pub(crate) fn start() -> Result<(), String> {
+        Ok(())
+    }
+
+    pub(crate) fn pointer_snapshot() -> Option<PointerSnapshot> {
+        None
+    }
+
+    pub(crate) fn subscribe_mouse_events() -> (u64, async_channel::Receiver<GlobalMouseEvent>) {
+        let (_sender, receiver) = async_channel::unbounded();
+        (0, receiver)
+    }
+
+    pub(crate) fn unsubscribe_mouse_events(_subscription_id: u64) {}
+
+    pub(crate) fn latest_mouse_down_sequence() -> Option<u64> {
+        None
+    }
+}
+
+pub(crate) use windows_input::{pointer_snapshot, start};
+
+pub(crate) use windows_input::{
+    latest_mouse_down_sequence, subscribe_mouse_events, unsubscribe_mouse_events,
+};
+
+#[cfg(target_os = "windows")]
+pub(crate) use windows_input::{
+    clear_trigger_key, set_trigger_key_code, simulate_ctrl_v,
+    trigger_shortcut_is_physically_pressed,
+};
