@@ -34,6 +34,18 @@ const WINDOW_MIN_SIZE: f32 = crate::state_runtime::PersistedWindowSize::MIN_SIZE
 
 pub fn run() {
     let _logging_guard = crate::logging::init(&crate::logging::fallback_directory());
+    let single_instance = match crate::platform::single_instance::SingleInstance::acquire() {
+        Ok(Some(instance)) => instance,
+        Ok(None) => {
+            tracing::info!("QcClip 已在运行，已请求显示已有实例的主窗口");
+            return;
+        }
+        Err(error) => {
+            tracing::error!("单实例检查失败，已停止启动：{error}");
+            return;
+        }
+    };
+    let activation_path = single_instance.activation_path();
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"), os = std::env::consts::OS,
         arch = std::env::consts::ARCH, pid = std::process::id(),
@@ -295,6 +307,29 @@ pub fn run() {
                 initial_logical_size,
                 cx,
             );
+            cx.spawn(async move |cx| {
+                loop {
+                    cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
+                    match crate::platform::single_instance::take_activation_request(&activation_path) {
+                        Ok(true) => {
+                            cx.update(|cx| {
+                                crate::windows::main::show_main_window(cx);
+                                if let Some(window) = crate::windows::main::MainWindowService::window_handle(cx)
+                                    && let Err(error) = window.update(cx, |_, window, _| window.activate_window())
+                                {
+                                    tracing::error!("激活已有实例主窗口失败：{error}");
+                                }
+                                cx.activate(true);
+                            });
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            tracing::error!("读取单实例窗口显示请求失败：{error}");
+                            break;
+                        }
+                    }
+                }
+            }).detach();
             crate::services::application_filter::ApplicationFilterService::install(cx);
             #[cfg(target_os = "windows")]
             crate::services::system::check_win_v_on_startup(cx);

@@ -43,12 +43,13 @@ mod windows_impl {
         let executable = env::current_exe()?;
         let executable = wide_string(executable.as_os_str());
         let operation = wide_string("runas");
+        let arguments = wide_string(super::super::single_instance::WAIT_FOR_INSTANCE_ARGUMENT);
         let result = unsafe {
             ShellExecuteW(
                 None,
                 PCWSTR(operation.as_ptr()),
                 PCWSTR(executable.as_ptr()),
-                PCWSTR::null(),
+                PCWSTR(arguments.as_ptr()),
                 PCWSTR::null(),
                 SW_SHOWNORMAL,
             )

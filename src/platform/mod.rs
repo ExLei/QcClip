@@ -10,4 +10,5 @@ pub mod image_temp_file;
 pub mod input;
 pub mod os_version;
 pub mod shell_open;
+pub(crate) mod single_instance;
 pub mod window;
