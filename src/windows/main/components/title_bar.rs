@@ -152,7 +152,8 @@ pub fn render(
 
                 search_input_for_mouse.update(cx, |input, cx| input.focus(window, cx));
             }))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
         if is_vertical {
             search_input_element = search_input_element.h_full().pl(ui_rem(6.0)).pr_0();
             let mut search_input_area = div()
@@ -202,6 +203,7 @@ pub fn render(
             .cursor_pointer()
             .hover(|this| this.bg(theme.secondary_hover))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, window, cx| {
                 this.toggle_search_input(window, cx);
             }))
@@ -215,6 +217,7 @@ pub fn render(
 
     let more_button = div()
         .id("titlebar-more-button")
+        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .on_click(|event: &ClickEvent, window, cx| {
             cx.stop_propagation();
             open_more_menu(event.position(), window, cx);
@@ -234,6 +237,7 @@ pub fn render(
                 theme,
             )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, _, cx| {
                 let mut clipboard = config_runtime::clipboard_config(cx);
                 clipboard.edge_hide = !clipboard.edge_hide;
@@ -250,6 +254,7 @@ pub fn render(
                 theme,
             )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| {
                 this.titlebar_window_fixed = !this.titlebar_window_fixed;
                 crate::windows::main::MainWindowService::set_window_fixed(
@@ -268,6 +273,10 @@ pub fn render(
         .justify_between()
         .relative()
         .bg(theme.title_bar)
+        .on_mouse_down(MouseButton::Right, |event, window, cx| {
+            cx.stop_propagation();
+            open_more_menu(event.position, window, cx);
+        })
         .child(
             div()
                 .id("main-update-icon")
@@ -277,6 +286,7 @@ pub fn render(
                 .flex()
                 .items_center()
                 .justify_center()
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .child(img("assets/icon64.png").size(ui_rem(20.0)))
                 .when(crate::services::updates::UpdateService::available(cx).is_some(), |view| {
                     let tooltip = i18n::translator(cx).translate("updates.open_release");
