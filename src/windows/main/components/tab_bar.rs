@@ -481,12 +481,11 @@ pub fn render(
             }
             cx.notify();
         }))
-        .on_hover(cx.listener(|this, hovered, _, cx| {
-            if *hovered {
-                this.cancel_tags_panel_close();
-            } else {
-                this.schedule_tags_panel_close(cx);
-            }
+        .on_prepaint(cx.listener(|this, prepaint: &gpui::InteractivityPrepaint, _, _| {
+            this.tags_button_bounds = Some(prepaint.bounds);
+        }))
+        .on_hover(cx.listener(|this, _, window, cx| {
+            this.update_tags_panel_auto_close(window, cx);
         }));
 
     if sidebar_layout {

@@ -707,19 +707,28 @@ pub fn render(
         .border(px(0.5))
         .border_color(theme.border)
         .when(!material_enabled, |this| this.shadow_lg())
-        .on_hover(cx.listener(|this, hovered, _, cx| {
-            if *hovered {
-                this.cancel_tags_panel_close();
-            } else if !cx.has_active_drag() && !this.tags_panel_pinned {
-                this.schedule_tags_panel_close(cx);
-            }
+        .on_prepaint(cx.listener(|this, prepaint: &gpui::InteractivityPrepaint, _, _| {
+            this.tags_panel_bounds = Some(prepaint.bounds);
         }))
+        .on_hover(cx.listener(|this, _, window, cx| {
+            this.update_tags_panel_auto_close(window, cx);
+        }))
+        .on_mouse_move_all({
+            let main_window = cx.entity().downgrade();
+            move |_, phase, _, window, cx| {
+                if phase == gpui::DispatchPhase::Capture {
+                    main_window.update(cx, |this, cx| {
+                        this.update_tags_panel_auto_close(window, cx);
+                    }).ok();
+                }
+            }
+        })
         .on_drag_move(
             cx.listener(|this, event: &DragMoveEvent<TagDrag>, window, cx| {
                 if event.bounds.contains(&window.mouse_position()) {
                     this.cancel_tags_panel_close();
                 } else if !this.tags_panel_pinned {
-                    this.schedule_tags_panel_close(cx);
+                    this.schedule_tags_panel_close(window, cx);
                 }
             }),
         )
