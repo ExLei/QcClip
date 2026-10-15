@@ -223,9 +223,33 @@ fn handle_menu_action(action: MenuActionId, cx: &mut App) {
             crate::windows::main::MainWindowService::toggle_clipboard_listener(cx)
         }
         TOGGLE_GLOBAL_HOTKEYS_ACTION => {
-            if let Err(error) = crate::hotkey::toggle_global_hotkeys(cx) {
-                tracing::error!("切换全局快捷键失败：{error}");
-            }
+            use crate::windows::notification::{NotificationLevel, NotificationService};
+            let enabled = !crate::hotkey::global_hotkeys_enabled(cx);
+            let result = crate::hotkey::toggle_global_hotkeys(cx);
+            let translator = i18n::translator(cx);
+            let (title_key, detail, level) = match result {
+                Ok(()) if enabled => (
+                    "notification.global_hotkeys.enabled.title",
+                    translator.translate("notification.global_hotkeys.enabled.detail"),
+                    NotificationLevel::Success,
+                ),
+                Ok(()) => (
+                    "notification.global_hotkeys.disabled.title",
+                    translator.translate("notification.global_hotkeys.disabled.detail"),
+                    NotificationLevel::Info,
+                ),
+                Err(error) => {
+                    tracing::error!("切换全局快捷键失败：{error}");
+                    ("notification.global_hotkeys.failed.title", error, NotificationLevel::Error)
+                }
+            };
+            NotificationService::show_message_for(
+                crate::config::NotificationKind::FeatureStatus,
+                translator.translate(title_key),
+                detail,
+                level,
+                cx,
+            );
         }
         SETTINGS_ACTION => crate::windows::settings::open_settings_window(cx),
         CHECK_UPDATES_ACTION => crate::services::updates::UpdateService::check(true, cx),

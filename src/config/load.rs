@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::{
     default_window_material_opacity, AppConfig, ApplicationFilterConfig, AppearanceConfig, ClipboardConfig,
-    CURRENT_SCHEMA_VERSION, GeneralConfig, HistoryConfig, QuickPasteConfig,
+    CURRENT_SCHEMA_VERSION, GeneralConfig, HistoryConfig, NotificationConfig, QuickPasteConfig,
     SessionShortcutConfig, SessionShortcutId, ShortcutsConfig, SoundConfig, SoundEffectConfig,
 };
 
@@ -180,6 +180,7 @@ fn read_general(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Gene
             default.global_notification_enabled,
             warnings,
         ),
+        notifications: read_group(object, "notifications", warnings, read_notifications),
         launch_at_login: read_field(
             object,
             "launchAtLogin",
@@ -194,6 +195,17 @@ fn read_general(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Gene
             default.run_as_administrator,
             warnings,
         ),
+    }
+}
+
+fn read_notifications(object: &Map<String, Value>, warnings: &mut Vec<String>) -> NotificationConfig {
+    let default = NotificationConfig::default();
+    NotificationConfig {
+        startup: read_field(object, "startup", "general.notifications.startup", default.startup, warnings),
+        clipboard_preview: read_field(object, "clipboardPreview", "general.notifications.clipboardPreview", default.clipboard_preview, warnings),
+        feature_status: read_field(object, "featureStatus", "general.notifications.featureStatus", default.feature_status, warnings),
+        operation_result: read_field(object, "operationResult", "general.notifications.operationResult", default.operation_result, warnings),
+        attention: read_field(object, "attention", "general.notifications.attention", default.attention, warnings),
     }
 }
 

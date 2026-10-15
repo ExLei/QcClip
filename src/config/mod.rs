@@ -1,8 +1,10 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod load;
+mod notification;
 mod tab_bar;
 
+pub use notification::{NotificationConfig, NotificationKind};
 pub use tab_bar::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -182,6 +184,7 @@ impl InterfaceLanguage {
 pub struct GeneralConfig {
     pub language: InterfaceLanguage,
     pub global_notification_enabled: bool,
+    pub notifications: NotificationConfig,
     pub launch_at_login: bool,
     pub run_as_administrator: bool,
 }
@@ -191,6 +194,7 @@ impl Default for GeneralConfig {
         Self {
             language: InterfaceLanguage::default(),
             global_notification_enabled: true,
+            notifications: NotificationConfig::default(),
             launch_at_login: false,
             run_as_administrator: false,
         }

@@ -12,7 +12,7 @@ use gpui::{
 };
 
 use crate::{
-    config::ClipboardDisplayPriority,
+    config::{ClipboardDisplayPriority, NotificationKind},
     config_runtime,
     domain::{
         capture::FormatRole,
@@ -120,6 +120,7 @@ pub(crate) enum NotificationContent {
 
 #[derive(Clone)]
 pub(crate) struct NotificationRequest {
+    pub(crate) kind: NotificationKind,
     pub(crate) title: Option<String>,
     pub(crate) icon: Option<Arc<RenderImage>>,
     pub(crate) content: NotificationContent,
@@ -134,6 +135,7 @@ pub(crate) struct NotificationRequest {
 impl NotificationRequest {
     pub(crate) fn text(title: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
+            kind: NotificationKind::OperationResult,
             title: Some(title.into()),
             icon: application_icon(),
             content: NotificationContent::Text(text.into()),
@@ -143,6 +145,13 @@ impl NotificationRequest {
             duration: DEFAULT_DURATION,
             action_url: None,
             action_label: None,
+        }
+    }
+
+    fn preference_kind(&self) -> NotificationKind {
+        match self.level {
+            NotificationLevel::Warning | NotificationLevel::Error => NotificationKind::Attention,
+            _ => self.kind,
         }
     }
 }
@@ -188,6 +197,7 @@ fn clipboard_notification_request(
         .next();
     let content = clipboard_notification_content(preview, content_kind, image_service);
     NotificationRequest {
+        kind: NotificationKind::ClipboardPreview,
         title: None,
         icon: application_icon(),
         content,
@@ -299,6 +309,7 @@ fn progress_from_right(position: NotificationPosition) -> bool {
 
 struct ActiveNotification {
     handle: WindowHandle<NotificationWindow>,
+    kind: NotificationKind,
 }
 
 #[derive(Default)]
@@ -719,8 +730,19 @@ impl NotificationService {
         level: NotificationLevel,
         cx: &mut App,
     ) {
+        Self::show_message_for(NotificationKind::OperationResult, title, message, level, cx);
+    }
+
+    pub(crate) fn show_message_for(
+        kind: NotificationKind,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        level: NotificationLevel,
+        cx: &mut App,
+    ) {
         Self::show(
             NotificationRequest {
+                kind,
                 title: Some(title.into()),
                 icon: application_icon(),
                 content: NotificationContent::Text(message.into()),
@@ -769,7 +791,7 @@ impl NotificationService {
     }
 
     pub(crate) fn show(request: NotificationRequest, cx: &mut App) {
-        if !config_runtime::global_notification_enabled(cx) {
+        if !config_runtime::notification_enabled(request.preference_kind(), cx) {
             return;
         }
         cx.update_global::<Self, _>(|service, cx| service.enqueue(request, cx));
@@ -789,6 +811,7 @@ impl NotificationService {
     pub(crate) fn show_startup(cx: &mut App) {
         Self::show(
             NotificationRequest {
+                kind: NotificationKind::Startup,
                 title: None,
                 icon: application_icon(),
                 content: NotificationContent::Text(
@@ -806,7 +829,7 @@ impl NotificationService {
     }
 
     pub(crate) fn show_clipboard(history_id: HistoryItemId, cx: &mut App) {
-        if !config_runtime::global_notification_enabled(cx) {
+        if !config_runtime::notification_enabled(NotificationKind::ClipboardPreview, cx) {
             return;
         }
         let (repository, image_service) = cx.read_global::<Self, _>(|service, _| {
@@ -844,7 +867,7 @@ impl NotificationService {
     }
 
     pub(crate) fn show_clipboard_item(item_id: ClipboardItemId, cx: &mut App) {
-        if !config_runtime::global_notification_enabled(cx) {
+        if !config_runtime::notification_enabled(NotificationKind::ClipboardPreview, cx) {
             return;
         }
         let (repository, image_service) = cx.read_global::<Self, _>(|service, _| {
@@ -879,6 +902,22 @@ impl NotificationService {
         .detach();
     }
 
+    pub(crate) fn dismiss_disabled(cx: &mut App) {
+        cx.update_global::<Self, _>(|service, cx| {
+            if service.pending.as_ref().is_some_and(|(_, request)| {
+                !config_runtime::notification_enabled(request.preference_kind(), cx)
+            }) {
+                service.pending = None;
+            }
+            if let Some(active) = service.active.as_ref()
+                && !config_runtime::notification_enabled(active.kind, cx)
+                && let Err(error) = active.handle.update(cx, |view, window, cx| view.dismiss(window, cx))
+            {
+                tracing::debug!(%error, "关闭已禁用的通知失败");
+            }
+        });
+    }
+
     pub(crate) fn dismiss_all(cx: &mut App) {
         cx.update_global::<Self, _>(|service, cx| {
             service.generation = service.generation.wrapping_add(1);
@@ -909,6 +948,10 @@ impl NotificationService {
     }
 
     fn open(&mut self, request: NotificationRequest, cx: &mut App) {
+        let kind = request.preference_kind();
+        if !config_runtime::notification_enabled(kind, cx) {
+            return;
+        }
         let cursor = input::pointer_snapshot()
             .map(|snapshot| snapshot.position)
             .or_else(platform_window::physical_cursor_position);
@@ -952,7 +995,7 @@ impl NotificationService {
             },
         );
         match result {
-            Ok(handle) => self.active = Some(ActiveNotification { handle }),
+            Ok(handle) => self.active = Some(ActiveNotification { handle, kind }),
             Err(error) => tracing::error!(%error, "打开全局通知窗口失败"),
         }
     }
@@ -966,6 +1009,30 @@ mod tests {
         render_image_from_rgba,
     };
     use crate::platform::window::PhysicalDisplayBounds;
+
+    #[test]
+    fn warning_and_error_notifications_use_the_attention_preference() {
+        use super::{NotificationKind, NotificationLevel, NotificationRequest};
+        let mut config = crate::config::AppConfig::default();
+        config.set_notification_preference(NotificationKind::OperationResult, false);
+        config.set_notification_preference(NotificationKind::FeatureStatus, false);
+        let mut request = NotificationRequest::text("测试", "测试");
+        for kind in [NotificationKind::OperationResult, NotificationKind::FeatureStatus] {
+            request.kind = kind;
+            for level in [NotificationLevel::Info, NotificationLevel::Success] {
+                request.level = level;
+                assert!(!config.allows_notification(request.preference_kind()));
+            }
+            for level in [NotificationLevel::Warning, NotificationLevel::Error] {
+                request.level = level;
+                assert_eq!(request.preference_kind(), NotificationKind::Attention);
+                assert!(config.allows_notification(request.preference_kind()));
+                config.set_notification_preference(NotificationKind::Attention, false);
+                assert!(!config.allows_notification(request.preference_kind()));
+                config.set_notification_preference(NotificationKind::Attention, true);
+            }
+        }
+    }
 
     #[test]
     fn flatten_line_breaks_prevents_hard_wrapped_notification_text() {

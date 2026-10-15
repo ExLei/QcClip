@@ -5,22 +5,23 @@ use gpui::{AnyElement, App, Context, Entity, PromptButton, PromptLevel, Window};
 
 use super::super::{
     SettingsWindowView,
-    components::settings_page_header,
+    components::{clickable_setting_row, setting_row, settings_page_header},
 };
 use std::{cell::Cell, rc::Rc};
 
 use super::super::{SETTINGS_DROPDOWN_HEIGHT, SETTINGS_DROPDOWN_WIDTH};
 use crate::{
-    config::InterfaceLanguage,
+    config::{InterfaceLanguage, NotificationKind, WindowMaterial},
     config_runtime, i18n,
     platform::elevation,
     platform::window as platform_window,
     ui::hover_icon,
     windows::menu::{DropdownAnchor, DropdownItem, DropdownItemId, DropdownModel, MenuService},
 };
-use gpui::{Bounds, Pixels, div, px};
+use gpui::{Bounds, FontWeight, Pixels, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, Sizable as _, v_flex};
+use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, v_flex};
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::switch::Switch;
 
 impl SettingsWindowView {
@@ -34,6 +35,15 @@ impl SettingsWindowView {
         let launch_at_login = config_runtime::launch_at_login(cx);
         let run_as_administrator = config_runtime::run_as_administrator(cx);
         let notifications_enabled = config_runtime::global_notification_enabled(cx);
+        let notification_preferences = config_runtime::notification_preferences(cx);
+        let notification_summary = if notifications_enabled {
+            translator.translate_with_args("settings.notifications.summary", &[
+                ("enabled", notification_preferences.iter().filter(|(_, enabled)| *enabled).count().to_string()),
+                ("total", notification_preferences.len().to_string()),
+            ])
+        } else {
+            translator.translate("settings.notifications.paused")
+        };
         let language_label = translator.translate(language_label_key(language));
         let view = cx.entity().clone();
         let reset_error = translator.translate("settings.general.reset_error");
@@ -236,6 +246,20 @@ impl SettingsWindowView {
                 Some(translator.translate("settings.general.global_notifications_description").into()),
                 notification_switch,
             ))
+            .child(self.highlight_element(
+                theme,
+                translator.translate("settings.notifications.title"),
+                clickable_setting_row(
+                    "settings-general-notification-preferences",
+                    theme,
+                    translator.translate("settings.notifications.title"),
+                    Some(notification_summary.into()),
+                    {
+                        let view = cx.entity();
+                        move |_, window, cx| open_notification_preferences(view.clone(), window, cx)
+                    },
+                ),
+            ))
             .child(self.setting_row(
                 theme,
                 translator.translate("settings.general.launch_at_login"),
@@ -262,6 +286,81 @@ impl SettingsWindowView {
         }
         section.into_any_element()
     }
+}
+
+fn open_notification_preferences(
+    view: Entity<SettingsWindowView>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.open_sheet(cx, move |sheet, _, cx| {
+        let theme = cx.theme().colors;
+        let translator = i18n::translator(cx);
+        let enabled = config_runtime::global_notification_enabled(cx);
+        let preferences = config_runtime::notification_preferences(cx);
+        let appearance = config_runtime::appearance_config(cx);
+        let background = gpui::ColorExt::opacity(
+            &crate::window_material::excluded_window_theme(cx).background,
+            0.9,
+        );
+        let mut content = v_flex().size_full().min_h_0().overflow_y_scrollbar();
+        if !enabled {
+            content = content.child(
+                div().px_4().py_2().text_sm().text_color(theme.muted_foreground)
+                    .child(translator.translate("settings.notifications.paused")),
+            );
+        }
+        for (kind, checked) in preferences {
+            let group = match kind {
+                NotificationKind::Startup => Some("settings.notifications.group.daily"),
+                NotificationKind::OperationResult => Some("settings.notifications.group.feedback"),
+                NotificationKind::VersionUpdate => Some("settings.notifications.group.updates"),
+                _ => None,
+            };
+            if let Some(group) = group {
+                content = content.child(
+                    div().px_4().pt_4().pb_2().text_xs()
+                        .font_weight(FontWeight::MEDIUM).text_color(theme.muted_foreground)
+                        .child(translator.translate(group)),
+                );
+            }
+            let label = translator.translate(kind.label_key());
+            let switch = Switch::new(format!("settings-notification-{}", kind.label_key()))
+                .large()
+                .checked(checked)
+                .disabled(!enabled)
+                .accessibility_label(label.clone())
+                .on_click({
+                    let view = view.clone();
+                    move |checked, _, cx| {
+                        let error = config_runtime::set_notification_preference(kind, *checked, cx)
+                            .err().map(|error| {
+                                tracing::error!("保存通知偏好失败：{error}");
+                                i18n::translator(cx).translate("settings.general.notification_save_error")
+                            });
+                        view.update(cx, |view, cx| {
+                            view.language_error = notify_settings_error(SettingsPage::General, error, cx);
+                            cx.notify();
+                        });
+                    }
+                });
+            content = content.child(setting_row(theme, label, None, switch));
+        }
+        if let Some(error) = view.read(cx).language_error.clone() {
+            content = content.child(
+                div().px_4().py_2().text_sm().text_color(theme.danger).child(error),
+            );
+        }
+        sheet
+            .title(translator.translate("settings.notifications.title"))
+            .size(ui_rem(420.0))
+            .resizable(false)
+            .shadow_none()
+            .bg(background)
+            .when(appearance.window_material != WindowMaterial::Disabled,
+                |this| this.backdrop_blur(px(18.0)))
+            .child(content)
+    });
 }
 
 fn handle_run_as_administrator_switch(

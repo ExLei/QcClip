@@ -14,7 +14,7 @@ use crate::{
         default_window_material_opacity, AnimationKind, AppConfig, ApplicationFilterConfig,
         AppearanceConfig,
         ClipboardConfig, HistoryConfig, InterfaceLanguage, ShortcutBinding, ShortcutsConfig, SoundConfig,
-        QuickPasteConfig, WindowMaterial,
+        NotificationKind, QuickPasteConfig, WindowMaterial,
     },
     i18n::{self, Locale},
 };
@@ -107,6 +107,8 @@ impl ConfigRuntime {
         if previous.general.global_notification_enabled && !config.general.global_notification_enabled
         {
             crate::windows::notification::NotificationService::dismiss_all(cx);
+        } else {
+            crate::windows::notification::NotificationService::dismiss_disabled(cx);
         }
         if previous.general.launch_at_login != config.general.launch_at_login {
             if let Err(error) = crate::platform::auto_start::set_enabled(config.general.launch_at_login)
@@ -159,6 +161,37 @@ pub(crate) fn global_notification_enabled(cx: &App) -> bool {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| {
         runtime.config.general.global_notification_enabled
     })
+}
+
+pub(crate) fn notification_enabled(kind: NotificationKind, cx: &App) -> bool {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.allows_notification(kind))
+}
+
+pub(crate) fn notification_preferences(cx: &App) -> [(NotificationKind, bool); 6] {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| {
+        NotificationKind::ALL.map(|kind| (kind, runtime.config.notification_preference(kind)))
+    })
+}
+
+pub(crate) fn set_notification_preference(
+    kind: NotificationKind,
+    enabled: bool,
+    cx: &mut App,
+) -> Result<bool, ConfigError> {
+    let (path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
+        (runtime.path.clone(), runtime.config.clone())
+    });
+    if next.notification_preference(kind) == enabled {
+        return Ok(false);
+    }
+    next.set_notification_preference(kind, enabled);
+    persist_config(&path, &next)?;
+    cx.update_global::<ConfigRuntime, _>(|runtime, _| runtime.config = next);
+    if !enabled {
+        crate::windows::notification::NotificationService::dismiss_disabled(cx);
+    }
+    cx.refresh_windows();
+    Ok(true)
 }
 
 pub(crate) fn appearance_config(cx: &App) -> AppearanceConfig {
@@ -357,6 +390,7 @@ pub(crate) fn set_global_notification_enabled(
     if !enabled {
         crate::windows::notification::NotificationService::dismiss_all(cx);
     }
+    cx.refresh_windows();
     Ok(true)
 }
 
@@ -399,7 +433,8 @@ pub(crate) fn reset_general_config(cx: &mut App) -> Result<bool, ConfigError> {
         )
     });
     let default = AppConfig::default().general;
-    if current == default {
+    let default_update_notification = AppConfig::default().updates.notification_enabled;
+    if current == default && next.updates.notification_enabled == default_update_notification {
         return Ok(false);
     }
 
@@ -409,6 +444,7 @@ pub(crate) fn reset_general_config(cx: &mut App) -> Result<bool, ConfigError> {
     }
     let language = default.language;
     next.general = default;
+    next.updates.notification_enabled = default_update_notification;
     if let Err(error) = persist_config(&path, &next) {
         if current.launch_at_login != next.general.launch_at_login {
             if let Err(restore_error) =
@@ -427,6 +463,8 @@ pub(crate) fn reset_general_config(cx: &mut App) -> Result<bool, ConfigError> {
         runtime.config = next;
     });
     i18n::set_locale(Locale::new(language.code()), cx);
+    crate::windows::notification::NotificationService::dismiss_disabled(cx);
+    cx.refresh_windows();
     Ok(true)
 }
 

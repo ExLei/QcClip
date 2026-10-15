@@ -6,7 +6,7 @@ use atomic_write_file::AtomicWriteFile;
 use gpui::{App, AppContext, BorrowAppContext, Global};
 use serde::{Deserialize, Serialize};
 
-use crate::{config_runtime, i18n};
+use crate::{config::NotificationKind, config_runtime, i18n};
 use crate::windows::notification::{NotificationLevel, NotificationRequest, NotificationService};
 pub(crate) use client::{Release, valid_proxy_url};
 use client::{fetch_latest, newer_than_current};
@@ -98,8 +98,8 @@ impl UpdateService {
     }
 
     fn finish(result: Result<Option<Release>, String>, manual: bool, cx: &mut App) {
-        let config = config_runtime::update_config(cx);
-        let notifications = (manual || config.notification_enabled) && config_runtime::global_notification_enabled(cx);
+        let notifications = (manual && config_runtime::global_notification_enabled(cx))
+            || config_runtime::notification_enabled(NotificationKind::VersionUpdate, cx);
         let mut notify_release = None;
         cx.update_global::<Self, _>(|service, _| {
             service.checking = false;
@@ -136,6 +136,7 @@ impl UpdateService {
                 ("latest", release.version_label()),
             ]);
             let mut request = NotificationRequest::text(title, detail);
+            request.kind = if manual { NotificationKind::OperationResult } else { NotificationKind::VersionUpdate };
             request.duration = Duration::from_secs(12);
             request.action_url = Some(release.url());
             request.action_label = Some(translator.translate("updates.open_release"));

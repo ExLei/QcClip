@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Root, Sizable as _, h_flex, v_flex};
-use gpui_component::{input::Input, switch::Switch};
+use gpui_component::input::Input;
 use gpui_component::Disableable as _;
 
 use super::super::SettingsWindowView;
@@ -178,17 +178,6 @@ impl SettingsWindowView {
             },
             cx,
         );
-        let notifications = Switch::new("about-update-notifications")
-            .checked(updates.notification_enabled)
-            .accessibility_label(translator.translate("updates.notification"))
-            .on_click({
-                let view = cx.entity();
-                move |checked, _, cx| {
-                    let mut config = config_runtime::update_config(cx);
-                    config.notification_enabled = *checked;
-                    save_update_settings(&view, config, cx);
-                }
-            });
         let modes = [
             ("updates.proxy.system", UpdateProxyMode::System),
             ("updates.proxy.direct", UpdateProxyMode::Direct),
@@ -227,7 +216,6 @@ impl SettingsWindowView {
                 .on_click(|_, _, cx| UpdateService::check(true, cx)))
             .into_any_element();
         let frequency = about_update_row(translator.translate("updates.frequency"), frequency_menu, cx);
-        let notification = about_update_row(translator.translate("updates.notification"), notifications, cx);
         let proxy = about_update_row(translator.translate("updates.proxy"), proxy_menu, cx);
         let proxy_editor = (self.update_proxy_mode == UpdateProxyMode::Custom)
             .then(|| self.render_about_proxy_editor(cx));
@@ -236,7 +224,6 @@ impl SettingsWindowView {
             .flex_1().min_w_0()
             .child(heading)
             .child(frequency)
-            .child(notification)
             .child(proxy)
             .when_some(proxy_editor, |view, editor| view.child(editor))
             .child(div().w_full().pt_3().text_xs()

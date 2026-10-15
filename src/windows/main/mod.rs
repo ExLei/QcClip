@@ -213,7 +213,8 @@ impl MainWindowService {
             ),
         };
         let translator = crate::i18n::translator(cx);
-        crate::windows::notification::NotificationService::show_message(
+        crate::windows::notification::NotificationService::show_message_for(
+            crate::config::NotificationKind::FeatureStatus,
             translator.translate(title_key),
             translator.translate(detail_key),
             level,

@@ -338,8 +338,9 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
     &[
         SearchTargetSpec { page: General, title_key: "settings.general.interface_language", description_key: None, ratio: 0.02 },
         SearchTargetSpec { page: General, title_key: "settings.general.global_notifications", description_key: Some("settings.general.global_notifications_description"), ratio: 0.12 },
-        SearchTargetSpec { page: General, title_key: "settings.general.launch_at_login", description_key: Some("settings.general.launch_at_login_description"), ratio: 0.22 },
-        SearchTargetSpec { page: General, title_key: "settings.general.run_as_administrator", description_key: Some("settings.general.run_as_administrator_description"), ratio: 0.32 },
+        SearchTargetSpec { page: General, title_key: "settings.notifications.title", description_key: Some("settings.notifications.search_description"), ratio: 0.22 },
+        SearchTargetSpec { page: General, title_key: "settings.general.launch_at_login", description_key: Some("settings.general.launch_at_login_description"), ratio: 0.32 },
+        SearchTargetSpec { page: General, title_key: "settings.general.run_as_administrator", description_key: Some("settings.general.run_as_administrator_description"), ratio: 0.42 },
         SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.mouse_left_behavior", description_key: Some("settings.clipboard.mouse_left_behavior_description"), ratio: 0.02 },
         SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.mouse_middle_behavior", description_key: Some("settings.clipboard.mouse_middle_behavior_description"), ratio: 0.09 },
         SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.edge_hide", description_key: Some("settings.clipboard.edge_hide_description"), ratio: 0.18 },
