@@ -25,6 +25,7 @@ use gpui_component::{
     h_flex, kbd::Kbd, switch::Switch, tab::{Tab, TabBar}, tooltip::Tooltip, v_flex,
 };
 use gpui_component::scroll::ScrollableElement as _;
+use gpui_component::slider::Slider;
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_shortcuts(
@@ -111,6 +112,7 @@ impl SettingsWindowView {
         let translator_for_session_rows = translator.clone();
         let view_for_session_rows = view.clone();
         let shortcut_id = view_for_key.clone();
+        let middle_mouse_controls = self.middle_mouse_controls(cx);
         let shortcut_section = v_flex()
             .id("settings-shortcuts-page")
             .size_full()
@@ -379,6 +381,7 @@ impl SettingsWindowView {
                             None,
                         ),
                     ))
+                    .when(cfg!(target_os = "windows"), |this| this.child(middle_mouse_controls))
                     .child(self.compact_setting_row(
                         theme,
                         translator.translate("settings.shortcuts.open_settings"),
@@ -539,6 +542,133 @@ impl SettingsWindowView {
     }
 }
 
+impl SettingsWindowView {
+    fn middle_mouse_controls(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().colors;
+        let translator = i18n::translator(cx);
+        let config = config_runtime::shortcuts_config(cx).middle_mouse;
+        let mut items = vec![DropdownItem::option(
+            DropdownItemId::new("none"),
+            translator.translate("settings.shortcuts.middle_mouse.none"),
+        ).selected(config.modifier.is_none())];
+        items.extend(QuickPasteShortcutModifier::ALL.into_iter().map(|modifier| {
+            DropdownItem::option(
+                DropdownItemId::new(modifier.code()),
+                translator.translate(modifier.label_key()),
+            ).selected(config.modifier == Some(modifier))
+        }));
+        let view = cx.entity();
+        let modifier_view = view.clone();
+        let selector = settings_fused_dropdown(
+            "settings-shortcuts-middle-mouse",
+            config.modifier.map(|modifier| modifier.code()).unwrap_or("none"),
+            items,
+            translator.translate("settings.shortcuts.middle_mouse.button"),
+            Vec::new(),
+            move |id, cx| {
+                let modifier = if id.as_str() == "none" {
+                    None
+                } else {
+                    let Some(modifier) = QuickPasteShortcutModifier::from_code(id.as_str()) else {
+                        return;
+                    };
+                    Some(modifier)
+                };
+                let mut config = config_runtime::shortcuts_config(cx).middle_mouse;
+                config.modifier = modifier;
+                save_middle_mouse_config(&modifier_view, config, cx);
+            },
+            |_, _| {},
+            !config.enabled,
+            cx,
+        );
+        let enabled = Switch::new("settings-shortcuts-middle-mouse-enabled")
+            .large()
+            .checked(config.enabled)
+            .accessibility_label(translator.translate("settings.shortcuts.middle_mouse.enabled"))
+            .on_click(move |checked, _, cx| {
+                let mut config = config_runtime::shortcuts_config(cx).middle_mouse;
+                config.enabled = *checked;
+                save_middle_mouse_config(&view, config, cx);
+            });
+        let enabled_title = translator.translate("settings.shortcuts.middle_mouse.enabled");
+        let threshold_title = translator.translate("settings.shortcuts.middle_mouse.threshold");
+        let description = translator.translate("settings.shortcuts.middle_mouse.description");
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .gap_2()
+            .py_2()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(self.highlight_element(
+                theme,
+                enabled_title.clone(),
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .min_h(ui_rem(36.0))
+                    .flex_wrap()
+                    .justify_between()
+                    .gap_4()
+                    .px_4()
+                    .child(div().min_w(ui_rem(180.0)).flex_1().pl_2()
+                        .text_sm().text_color(theme.muted_foreground).child(enabled_title))
+                    .child(h_flex().flex_shrink_0().gap_2().child(selector).child(enabled)),
+            ))
+            .child(self.highlight_element(
+                theme,
+                threshold_title.clone(),
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .min_h(ui_rem(28.0))
+                    .flex_wrap()
+                    .justify_between()
+                    .gap_4()
+                    .px_4()
+                    .child(h_flex()
+                        .id("settings-shortcuts-middle-mouse-threshold-label")
+                        .min_w(ui_rem(180.0))
+                        .flex_1()
+                        .pl_2()
+                        .gap_2()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(threshold_title)
+                        .child(div().opacity(0.7).child("10–1000 ms"))
+                        .tooltip(move |window, cx| Tooltip::new(description.clone()).build(window, cx)))
+                    .child(h_flex()
+                        .w(ui_rem(248.0))
+                        .flex_shrink_0()
+                        .gap_3()
+                        .when(!config.enabled, |this| this.opacity(0.5))
+                        .child(Slider::new(&self.middle_mouse_threshold_slider)
+                            .disabled(!config.enabled).flex_1())
+                        .child(div().w(ui_rem(62.0)).text_xs().text_right()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("{} ms", config.hold_threshold_ms)))),
+            ))
+            .into_any_element()
+    }
+}
+
+fn save_middle_mouse_config(
+    view: &Entity<SettingsWindowView>,
+    config: crate::config::MiddleMouseShortcutConfig,
+    cx: &mut gpui::App,
+) {
+    let error = hotkey::set_middle_mouse_config(config, cx).err().map(|error| {
+        tracing::error!("保存鼠标中键呼出设置失败：{error}");
+        i18n::translator(cx).translate("settings.shortcuts.save_error")
+    });
+    view.update(cx, |view, cx| {
+        view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
+        cx.notify();
+    });
+}
+
 fn quick_paste_1_to_9_row(
     config: QuickPasteShortcutConfig,
     status: hotkey::RegistrationStatus,
@@ -621,6 +751,7 @@ fn quick_paste_1_to_9_row(
         key_items,
         modifier_handler,
         key_handler,
+        false,
         cx,
     );
     let enabled_switch_error = save_error.clone();

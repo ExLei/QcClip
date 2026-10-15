@@ -531,6 +531,13 @@ fn read_shortcuts(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Sh
             default.toggle_main_window.clone(),
             warnings,
         ),
+        middle_mouse: read_field(
+            object,
+            "middleMouse",
+            "shortcuts.middleMouse",
+            default.middle_mouse,
+            warnings,
+        ),
         open_settings: read_field(
             object,
             "openSettings",
@@ -996,6 +1003,33 @@ mod tests {
             })
         );
         assert!(!loaded.config.shortcuts.select_previous_item.only_in_window);
+    }
+
+    #[test]
+    fn middle_mouse_old_config_defaults_and_new_config_round_trips() {
+        let old = from_str(r#"{"shortcuts":{"openSettings":null}}"#).unwrap();
+        assert_eq!(old.config.shortcuts.middle_mouse, super::super::MiddleMouseShortcutConfig::default());
+        assert!(old.warnings.is_empty());
+
+        let loaded = from_str(r#"{"shortcuts":{"middleMouse":{
+            "enabled":true,"modifier":"control-shift","holdThresholdMs":350
+        }}}"#).unwrap();
+        let config = loaded.config.shortcuts.middle_mouse;
+        assert!(config.enabled);
+        assert_eq!(config.modifier, Some(super::super::QuickPasteShortcutModifier::ControlShift));
+        assert_eq!(config.hold_threshold_ms, 350);
+        let saved = serde_json::to_string(&loaded.config).unwrap();
+        assert_eq!(from_str(&saved).unwrap().config.shortcuts.middle_mouse, config);
+    }
+
+    #[test]
+    fn middle_mouse_threshold_is_limited_to_supported_range() {
+        for (input, expected) in [(0, 10), (10, 10), (1000, 1000), (1001, 1000)] {
+            let loaded = from_str(&format!(
+                r#"{{"shortcuts":{{"middleMouse":{{"holdThresholdMs":{input}}}}}}}"#,
+            )).unwrap();
+            assert_eq!(loaded.config.shortcuts.middle_mouse.hold_threshold_ms, expected);
+        }
     }
 
     #[test]

@@ -8,8 +8,11 @@ use gpui::{App, AppContext as _, BorrowAppContext as _, Global, Keystroke, Modif
 use gpui_component::kbd::Kbd;
 
 use crate::config::{
-    QuickPasteConfig, QuickPasteShortcutConfig, SessionShortcutId, ShortcutBinding, ShortcutsConfig,
+    MiddleMouseShortcutConfig, QuickPasteConfig, QuickPasteShortcutConfig, SessionShortcutId, ShortcutBinding, ShortcutsConfig,
 };
+
+#[cfg(target_os = "windows")]
+mod middle_mouse;
 
 const SESSION_SHORTCUT_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(250);
 const SESSION_SHORTCUT_REPEAT_INTERVAL: Duration = Duration::from_millis(50);
@@ -28,6 +31,8 @@ pub(crate) enum RegistrationStatus {
 }
 
 pub(crate) struct HotkeyRuntime {
+    #[cfg(target_os = "windows")]
+    middle_mouse: middle_mouse::MiddleMouseRuntime,
     manager: Option<GlobalHotKeyManager>,
     main_hotkey: Option<HotKey>,
     settings_hotkey: Option<HotKey>,
@@ -164,6 +169,10 @@ impl HotkeyRuntime {
             }
         };
         let mut runtime = Self {
+            #[cfg(target_os = "windows")]
+            middle_mouse: middle_mouse::MiddleMouseRuntime::install(
+                crate::config_runtime::shortcuts_config(cx).middle_mouse, cx,
+            ),
             manager,
             main_hotkey: None,
             settings_hotkey: None,
@@ -992,6 +1001,8 @@ impl HotkeyRuntime {
             return Ok(());
         }
         self.global_enabled = enabled;
+        #[cfg(target_os = "windows")]
+        self.middle_mouse.configure(shortcuts.middle_mouse, enabled && !self.suspended);
         if !enabled {
             return self.unregister_all();
         }
@@ -1016,6 +1027,8 @@ impl HotkeyRuntime {
             .map(|id| (id, self.status_for_session(id, true)))
             .collect();
         self.suspended = true;
+        #[cfg(target_os = "windows")]
+        self.middle_mouse.configure(crate::config::MiddleMouseShortcutConfig::default(), false);
         let first_error = self.unregister_all().err();
         self.status = RegistrationStatus::Suspended;
         self.quick_paste_index_status = RegistrationStatus::Suspended;
@@ -1029,6 +1042,8 @@ impl HotkeyRuntime {
         pointer_inside: bool,
     ) -> Result<(), String> {
         self.suspended = false;
+        #[cfg(target_os = "windows")]
+        self.middle_mouse.configure(shortcuts.middle_mouse, self.global_enabled);
         self.suspended_main_status = None;
         self.suspended_settings_status = None;
         self.suspended_clipboard_monitor_status = None;
@@ -1742,6 +1757,25 @@ pub(crate) fn set_toggle_main_window_shortcut(
     crate::config_runtime::set_shortcuts_config(shortcuts, cx)
         .map_err(|error| error.to_string())?;
     synchronize_shortcuts(cx)?;
+    cx.refresh_windows();
+    Ok(())
+}
+
+pub(crate) fn set_middle_mouse_config(
+    config: MiddleMouseShortcutConfig,
+    cx: &mut App,
+) -> Result<(), String> {
+    let mut shortcuts = crate::config_runtime::shortcuts_config(cx);
+    shortcuts.middle_mouse = config.normalized();
+    let config = shortcuts.middle_mouse;
+    crate::config_runtime::set_shortcuts_config(shortcuts, cx)
+        .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+        runtime.middle_mouse.configure(config, runtime.global_enabled && !runtime.suspended);
+    });
+    #[cfg(not(target_os = "windows"))]
+    let _ = config;
     cx.refresh_windows();
     Ok(())
 }

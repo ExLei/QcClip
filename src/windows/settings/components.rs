@@ -114,6 +114,7 @@ pub(in crate::windows::settings) fn settings_fused_dropdown<FL, FR>(
     right_items: Vec<DropdownItem>,
     on_left_select: FL,
     on_right_select: FR,
+    disabled: bool,
     cx: &mut Context<SettingsWindowView>,
 ) -> AnyElement
 where
@@ -123,6 +124,7 @@ where
     let theme = cx.theme().colors;
     let left_current = left_current.into();
     let right_current = right_current.into();
+    let right_fixed = right_items.is_empty();
     let left_label = left_items
         .iter()
         .find(|item| item.id.as_str() == left_current.as_ref())
@@ -186,10 +188,11 @@ where
         .border_1()
         .border_color(theme.input)
         .bg(theme.background)
-        .cursor_pointer()
         .overflow_hidden()
-        .hover(|style| style.border_color(theme.primary).bg(theme.accent))
-        .active(|style| style.border_color(theme.primary_active))
+        .when(disabled, |this| this.opacity(0.5))
+        .when(!disabled, |this| this
+            .hover(|style| style.border_color(theme.primary).bg(theme.accent))
+            .active(|style| style.border_color(theme.primary_active)))
         .child(
             div()
                 .w(ui_rem(99.0))
@@ -210,8 +213,7 @@ where
                         .gap_1()
                         .px_3()
                         .text_sm()
-                        .cursor_pointer()
-                        .on_click(move |_, window, cx| {
+                        .when(!disabled, |this| this.cursor_pointer().on_click(move |_, window, cx| {
                             open_menu_for_left(
                                 left_bounds_for_click.get(),
                                 left_menu_for_click.clone(),
@@ -219,7 +221,7 @@ where
                                 window,
                                 cx,
                             );
-                        })
+                        }))
                         .child(div().flex_1().min_w_0().truncate().child(left_label))
                         .child(hover_icon(
                             format!("{id}-left"),
@@ -250,23 +252,24 @@ where
                         .gap_1()
                         .px_3()
                         .text_sm()
-                        .cursor_pointer()
-                        .on_click(move |_, window, cx| {
-                            open_menu_for_right(
-                                right_bounds_for_click.get(),
-                                right_menu_for_click.clone(),
-                                right_handler_for_click.clone(),
-                                window,
-                                cx,
-                            );
-                        })
+                        .when(!right_fixed && !disabled, |this| this.cursor_pointer()
+                            .on_click(move |_, window, cx| {
+                                open_menu_for_right(
+                                    right_bounds_for_click.get(),
+                                    right_menu_for_click.clone(),
+                                    right_handler_for_click.clone(),
+                                    window,
+                                    cx,
+                                );
+                            }))
+                        .when(right_fixed, |this| this.cursor_default())
                         .child(div().flex_1().min_w_0().truncate().child(right_label))
-                        .child(hover_icon(
+                        .when(!right_fixed, |this| this.child(hover_icon(
                             format!("{id}-right"),
                             "chevron-down",
                             12.0,
                             theme.muted_foreground,
-                        )),
+                        ))),
                 ),
         )
         .into_any_element()

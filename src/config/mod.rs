@@ -145,6 +145,7 @@ impl Default for ApplicationFilterApplication {
 impl AppConfig {
     pub fn normalized(mut self) -> Self {
         self.schema_version = CURRENT_SCHEMA_VERSION;
+        self.shortcuts.middle_mouse = self.shortcuts.middle_mouse.normalized();
         self.quick_paste = self.quick_paste.normalized();
         self.sound = self.sound.normalized();
         self.appearance = self.appearance.normalized();
@@ -198,6 +199,7 @@ impl Default for GeneralConfig {
 #[serde(default)]
 pub struct ShortcutsConfig {
     pub toggle_main_window: Option<ShortcutBinding>,
+    pub middle_mouse: MiddleMouseShortcutConfig,
     pub open_settings: Option<ShortcutBinding>,
     pub toggle_clipboard_monitor: Option<ShortcutBinding>,
     pub plain_text_paste: Option<ShortcutBinding>,
@@ -222,6 +224,7 @@ impl Default for ShortcutsConfig {
     fn default() -> Self {
         Self {
             toggle_main_window: Some(ShortcutBinding::toggle_main_window_default()),
+            middle_mouse: MiddleMouseShortcutConfig::default(),
             open_settings: None,
             toggle_clipboard_monitor: None,
             plain_text_paste: None,
@@ -753,7 +756,7 @@ impl QuickPasteShortcutModifier {
         Self::ALL.into_iter().find(|value| value.code() == code)
     }
 
-    fn binding_flags(self) -> (bool, bool, bool) {
+    pub(crate) fn binding_flags(self) -> (bool, bool, bool) {
         match self {
             Self::Alt => (false, true, false),
             Self::Control => (true, false, false),
@@ -762,6 +765,31 @@ impl QuickPasteShortcutModifier {
             Self::AltShift => (false, true, true),
             Self::ControlShift => (true, false, true),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MiddleMouseShortcutConfig {
+    pub enabled: bool,
+    pub modifier: Option<QuickPasteShortcutModifier>,
+    pub hold_threshold_ms: u16,
+}
+
+impl Default for MiddleMouseShortcutConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            modifier: None,
+            hold_threshold_ms: 200,
+        }
+    }
+}
+
+impl MiddleMouseShortcutConfig {
+    pub(crate) fn normalized(mut self) -> Self {
+        self.hold_threshold_ms = self.hold_threshold_ms.clamp(10, 1000);
+        self
     }
 }
 
