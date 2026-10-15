@@ -45,6 +45,7 @@ impl Render for MainWindow {
             AdaptiveHeightCacheKey {
                 viewport_width: window.viewport_size().width,
                 rem_size: window.rem_size(),
+                font_metrics: crate::ui::fonts::AppFontMetrics::from_window(window, cx),
                 list_item_style: appearance.list_item_style,
                 card_item_gap: appearance.card_item_gap,
                 adaptive_max_lines: appearance.adaptive_max_lines,

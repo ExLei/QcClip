@@ -147,7 +147,7 @@ pub(crate) fn quick_paste_row_metrics(
         appearance.card_item_gap,
         ListItemHeight::ExtraSmall,
         appearance.adaptive_max_lines,
-    );
+    ).with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx));
     (
         metrics.row_height,
         metrics.content_height,
@@ -184,7 +184,8 @@ pub fn render(
         appearance.card_item_gap,
         appearance.list_item_height,
         appearance.adaptive_max_lines,
-    ).with_note_display(appearance.only_show_notes);
+    ).with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx))
+        .with_note_display(appearance.only_show_notes);
     let clipboard = crate::config_runtime::clipboard_config(cx);
     let display_priority = clipboard.display_priority;
     let preview_priority = clipboard.preview_priority.resolve(display_priority);
@@ -382,6 +383,7 @@ fn render_rows(
     let layout_key = ListLayoutCacheKey {
         viewport_width: list_width,
         rem_size: window.rem_size(),
+        font_metrics: crate::ui::fonts::AppFontMetrics::from_window(window, cx),
         list_item_style,
         card_item_gap,
         list_item_height: metrics.height,
@@ -407,6 +409,7 @@ fn render_rows(
                 || cache.key.card_item_gap != layout_key.card_item_gap
                 || cache.key.list_item_height != layout_key.list_item_height
                 || cache.key.adaptive_max_lines != layout_key.adaptive_max_lines
+                || cache.key.font_metrics != layout_key.font_metrics
                 || cache.key.only_show_notes != layout_key.only_show_notes)
     });
     let mut build_layout = || {
@@ -1561,7 +1564,7 @@ fn render_item_surface<T>(
         .flex()
         .items_center()
         .gap(ui_rem(6.0))
-        .text_size(metrics.meta_row_height * 0.6)
+        .text_size(metrics.meta_font_size)
         .line_height(metrics.meta_row_height)
         .text_color(cx.theme().muted_foreground)
         .child(i18n::relative_time(&translator, item.last_seen_at))

@@ -16,6 +16,7 @@ use gpui_component::{ActiveTheme as _, ThemeColor};
 use crate::{
     config::{ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, ListItemHeight},
     i18n::{self, Translator},
+    ui::fonts::AppFontMetrics,
 };
 
 const FILE_ICON_SIZE: u16 = 32;
@@ -56,19 +57,23 @@ pub(crate) fn file_list_preview_height(
     rem_size: Pixels,
     adaptive_max_lines: usize,
     file_count: Option<usize>,
+    font_metrics: Option<AppFontMetrics>,
 ) -> Pixels {
-    if let Some(preview_lines) = height.fixed_preview_lines() {
-        return rem_size * FILE_LIST_PREVIEW_LINE_HEIGHT_SCALE * preview_lines as f32;
+    let mut presentation = file_list_presentation(height, rem_size, adaptive_max_lines);
+    if let Some(font_metrics) = font_metrics {
+        presentation = presentation.with_font_metrics(font_metrics);
     }
-
-    let presentation = file_list_presentation(height, rem_size, adaptive_max_lines);
-    let visible_count = file_count
-        .unwrap_or(1)
-        .min(presentation.visible_entries)
-        .max(1);
-    presentation.entry_height() * visible_count as f32
+    let visible_count = if height.fixed_preview_lines().is_some() {
+        presentation.visible_entries
+    } else {
+        file_count.unwrap_or(1).min(presentation.visible_entries).max(1)
+    };
+    let natural_height = presentation.entry_height() * visible_count as f32
         + presentation.entry_gap(rem_size, height, visible_count)
-            * visible_count.saturating_sub(1) as f32
+            * visible_count.saturating_sub(1) as f32;
+    let minimum = rem_size * FILE_LIST_PREVIEW_LINE_HEIGHT_SCALE
+        * height.fixed_preview_lines().unwrap_or(0) as f32;
+    natural_height.max(minimum)
 }
 
 fn file_list_presentation(
@@ -135,6 +140,11 @@ fn file_list_presentation(
 }
 
 impl FileListPresentation {
+    fn with_font_metrics(mut self, font_metrics: AppFontMetrics) -> Self {
+        self.line_height = font_metrics.line_height(self.text_size, self.line_height);
+        self
+    }
+
     fn natural_entry_height(self) -> Pixels {
         let text_height = self.line_height * if self.show_path { 2.0 } else { 1.0 };
         let text_height = text_height + self.text_gap();
@@ -162,7 +172,7 @@ impl FileListPresentation {
             * height.fixed_preview_lines().unwrap_or(1) as f32;
         let remaining_height =
             f32::from(preview_height) - f32::from(self.entry_height()) * visible_count as f32;
-        px((remaining_height / visible_count.saturating_sub(1) as f32).max(0.0))
+        px((remaining_height / visible_count.saturating_sub(1) as f32).max(f32::from(self.gap)))
     }
 }
 
@@ -414,7 +424,7 @@ impl Render for FileListView {
             appearance.list_item_height,
             window.rem_size(),
             usize::from(appearance.adaptive_max_lines),
-        );
+        ).with_font_metrics(AppFontMetrics::from_window(window, cx));
         let visible_count = self.paths.len().min(presentation.visible_entries);
         let entry_height = presentation.entry_height();
         let entry_gap = presentation.entry_gap(
@@ -475,6 +485,29 @@ mod tests {
 
     fn zh_translator() -> Translator {
         Translator::builtin(Locale::zh_cn())
+    }
+
+    #[test]
+    fn tall_app_fonts_keep_file_names_and_paths_inside_preview() {
+        for height in ListItemHeight::ALL {
+            for scale_factor in [1.0, 1.25, 1.5, 2.0] {
+                let font_metrics = crate::ui::fonts::AppFontMetrics::for_test(1.5, scale_factor);
+                let presentation = file_list_presentation(height, px(16.0), 8)
+                    .with_font_metrics(font_metrics);
+                let preview_height = file_list_preview_height(
+                    height, px(16.0), 8, Some(presentation.visible_entries), Some(font_metrics),
+                );
+                assert!(presentation.line_height >= presentation.text_size * 1.5);
+                let text_height = presentation.line_height * if presentation.show_path { 2.0 } else { 1.0 }
+                    + presentation.text_gap();
+                assert!(presentation.entry_height() >= text_height);
+                let count = presentation.visible_entries;
+                let content_height = presentation.entry_height() * count as f32
+                    + presentation.entry_gap(px(16.0), height, count) * count.saturating_sub(1) as f32;
+                assert!(preview_height >= content_height);
+                assert!(preview_height >= file_list_preview_height(height, px(16.0), 8, Some(count), None));
+            }
+        }
     }
 
     #[test]
@@ -546,6 +579,7 @@ mod tests {
                     px(16.0),
                     max_lines,
                     Some(expected_entries),
+                    None,
                 ),
                 px(expected_height)
             );
@@ -558,19 +592,19 @@ mod tests {
     #[test]
     fn adaptive_file_list_height_follows_actual_file_count() {
         assert_eq!(
-            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, Some(1)),
+            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, Some(1), None),
             px(30.0)
         );
         assert_eq!(
-            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, Some(4)),
+            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, Some(4), None),
             px(138.0)
         );
         assert_eq!(
-            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, Some(10)),
+            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, Some(10), None),
             px(138.0)
         );
         assert_eq!(
-            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, None),
+            file_list_preview_height(ListItemHeight::Adaptive, px(16.0), 8, None, None),
             px(30.0)
         );
     }
@@ -584,7 +618,7 @@ mod tests {
             (ListItemHeight::ExtraSmall, 17.5),
         ] {
             assert_eq!(
-                file_list_preview_height(height, px(16.0), 8, Some(1)),
+                file_list_preview_height(height, px(16.0), 8, Some(1), None),
                 px(expected_height)
             );
         }

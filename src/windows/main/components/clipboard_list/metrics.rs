@@ -9,6 +9,7 @@ pub(super) struct ListItemMetrics {
     pub(super) style: ListItemStyle,
     pub(super) vertical_padding: Pixels,
     pub(super) meta_row_height: Pixels,
+    pub(super) meta_font_size: Pixels,
     pub(super) preview_font_size: Pixels,
     pub(super) preview_line_height: Pixels,
     pub(super) preview_height: Pixels,
@@ -17,6 +18,7 @@ pub(super) struct ListItemMetrics {
     pub(super) preview_line_count: usize,
     pub(super) show_meta: bool,
     pub(super) only_show_notes: bool,
+    font_metrics: Option<crate::ui::fonts::AppFontMetrics>,
 
 }
 
@@ -49,6 +51,7 @@ impl ListItemMetrics {
             style,
             vertical_padding,
             meta_row_height,
+            meta_font_size: meta_row_height * 0.6,
             preview_font_size,
             preview_line_height,
             preview_height: px(0.0),
@@ -57,8 +60,24 @@ impl ListItemMetrics {
             preview_line_count,
             show_meta: height.shows_meta(),
             only_show_notes: false,
+            font_metrics: None,
         };
         metrics.with_preview_line_count(preview_line_count)
+    }
+
+    pub(super) fn with_font_metrics(mut self, font_metrics: crate::ui::fonts::AppFontMetrics) -> Self {
+        self.font_metrics = Some(font_metrics);
+        self.preview_line_height = font_metrics.line_height(self.preview_font_size, self.preview_line_height);
+        self.meta_row_height = font_metrics.line_height(self.meta_font_size, self.meta_row_height);
+        let metrics = self.with_preview_line_count(self.preview_line_count);
+        if self.height == ListItemHeight::Adaptive {
+            return metrics;
+        }
+        // 固定行高需同时容纳文本和文件预览，保证虚拟列表占位与绘制高度一致。
+        let file_height = file_list_preview_height(
+            self.height, self.rem_size, self.adaptive_max_lines, None, self.font_metrics,
+        );
+        metrics.with_preview_height(metrics.preview_height.max(file_height), metrics.preview_line_count)
     }
 
     pub(super) fn with_preview_line_count(self, preview_line_count: usize) -> Self {
@@ -138,12 +157,18 @@ impl ListItemMetrics {
                 self.rem_size,
                 self.adaptive_max_lines,
                 file_count,
+                self.font_metrics,
             );
             let preview_line_count = self.height.fixed_preview_lines().unwrap_or_else(|| {
                 (f32::from(preview_height) / f32::from(self.preview_line_height))
                     .ceil()
                     .max(1.0) as usize
             });
+            let preview_height = if self.height == ListItemHeight::Adaptive {
+                preview_height
+            } else {
+                preview_height.max(self.preview_height)
+            };
             return self.with_preview_height(preview_height, preview_line_count);
         }
 
@@ -340,6 +365,37 @@ impl ListItemMetrics {
 #[cfg(test)]
 mod note_tests {
     use super::*;
+
+    #[test]
+    fn tall_app_fonts_fit_preview_lines_and_file_slots_without_enlarging_text() {
+        for style in [ListItemStyle::Card, ListItemStyle::Seamless] {
+            for height in ListItemHeight::ALL {
+                for scale_factor in [1.0, 1.25, 1.5, 2.0] {
+                    let font_metrics = crate::ui::fonts::AppFontMetrics::for_test(1.5, scale_factor);
+                    let base = ListItemMetrics::from_rem_size(
+                        px(16.0), style, CardItemGap::Eight, height, 8,
+                    );
+                    let metrics = base.with_font_metrics(font_metrics);
+                    assert_eq!(metrics.preview_font_size, base.preview_font_size);
+                    assert_eq!(metrics.meta_font_size, base.meta_font_size);
+                    assert_eq!(metrics.preview_line_count, base.preview_line_count);
+                    assert!(metrics.preview_line_height >= metrics.preview_font_size * 1.5);
+                    assert!(metrics.meta_row_height >= metrics.meta_font_size * 1.5);
+                    assert!(metrics.preview_height >= metrics.preview_line_height * metrics.preview_line_count as f32);
+                    assert_eq!(metrics.content_height,
+                        metrics.vertical_padding * 2.0 + metrics.preview_height + px(MAX_ROW_BORDER_WIDTH)
+                            + if metrics.show_meta { metrics.meta_row_height } else { px(0.0) });
+                    assert_eq!(metrics.row_height,
+                        metrics.content_height + metrics.card_vertical_inset * 2.0);
+                    if height != ListItemHeight::Adaptive {
+                        assert!(metrics.preview_height >= file_list_preview_height(
+                            height, metrics.rem_size, metrics.adaptive_max_lines, Some(2), Some(font_metrics),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn scaled_text_measurement_uses_the_rendered_horizontal_padding() {

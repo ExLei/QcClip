@@ -107,6 +107,7 @@ pub(crate) fn display_priority_roles(priority: ClipboardDisplayPriority) -> [For
 pub(crate) struct AdaptiveHeightCacheKey {
     pub(crate) viewport_width: Pixels,
     pub(crate) rem_size: Pixels,
+    pub(crate) font_metrics: crate::ui::fonts::AppFontMetrics,
     pub(crate) list_item_style: ListItemStyle,
     pub(crate) card_item_gap: CardItemGap,
     pub(crate) adaptive_max_lines: u8,
@@ -119,6 +120,7 @@ pub(crate) struct AdaptiveHeightCacheKey {
 pub(crate) struct ListLayoutCacheKey {
     pub(crate) viewport_width: Pixels,
     pub(crate) rem_size: Pixels,
+    pub(crate) font_metrics: crate::ui::fonts::AppFontMetrics,
     pub(crate) list_item_style: ListItemStyle,
     pub(crate) card_item_gap: CardItemGap,
     pub(crate) list_item_height: crate::config::ListItemHeight,
