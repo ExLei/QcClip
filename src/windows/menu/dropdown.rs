@@ -44,6 +44,7 @@ pub(super) struct DropdownMenuView {
     entrance: MenuPopupEntrance,
     rendered_content_width: Cell<Option<f32>>,
     scroll_handle: ScrollHandle,
+    initial_scroll_index: Option<usize>,
     on_select: DropdownSelectHandler,
     popup: platform_window::BorderlessPopup,
     target_display: Option<platform_window::DisplayPlacement>,
@@ -59,6 +60,7 @@ impl DropdownMenuView {
         target_display: Option<platform_window::DisplayPlacement>,
         _cx: &mut Context<Self>,
     ) -> Self {
+        let initial_scroll_index = menu.selected_index();
         Self {
             generation,
             menu,
@@ -66,6 +68,7 @@ impl DropdownMenuView {
             entrance: MenuPopupEntrance::default(),
             rendered_content_width: Cell::new(None),
             scroll_handle: ScrollHandle::new(),
+            initial_scroll_index,
             on_select,
             popup,
             target_display,
@@ -252,6 +255,14 @@ impl Render for DropdownMenuView {
         window.set_rem_size(crate::ui::scale::standalone_rem_size(13.0, cx));
         let measured_size = self.measure_content_size(window, cx);
         let placement = self.place_window(measured_size, window, cx);
+        if let Some(index) = self.initial_scroll_index.take() {
+            let scroll_handle = self.scroll_handle.clone();
+            // 首帧预绘制后滚动容器才有有效边界；每次打开只定位一次。
+            window.on_next_frame(move |window, _| {
+                scroll_handle.scroll_to_item(index);
+                window.refresh();
+            });
+        }
         let scale_factor = self.display_scale_factor(window);
         let max_height = logical_dropdown_max_height(window, cx, scale_factor, self.target_display);
         let content_bounds = placement.content_bounds;

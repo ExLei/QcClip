@@ -132,6 +132,10 @@ impl DropdownModel {
         &self.items
     }
 
+    pub(crate) fn selected_index(&self) -> Option<usize> {
+        self.items.iter().position(|item| item.selected && !item.separator)
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -297,6 +301,39 @@ impl MenuItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropdown_selected_index_includes_separators_in_scroll_position() {
+        let menu = DropdownModel::new(vec![
+            DropdownItem::option(DropdownItemId::new("first"), "第一个选项"),
+            DropdownItem::separator(),
+            DropdownItem::option(DropdownItemId::new("selected"), "当前选项").selected(true),
+        ]);
+
+        assert_eq!(menu.selected_index(), Some(2));
+    }
+
+    #[test]
+    fn dropdown_without_selection_has_no_initial_scroll_target() {
+        assert_eq!(DropdownModel::new(vec![]).selected_index(), None);
+        let menu = DropdownModel::new(vec![
+            DropdownItem::option(DropdownItemId::new("first"), "第一个选项"),
+            DropdownItem::separator().selected(true),
+        ]);
+        assert_eq!(menu.selected_index(), None);
+    }
+
+    #[test]
+    fn dropdown_scrolls_to_first_selected_option_even_if_disabled() {
+        let menu = DropdownModel::new(vec![
+            DropdownItem::option(DropdownItemId::new("first"), "当前选项")
+                .selected(true).disabled(),
+            DropdownItem::separator(),
+            DropdownItem::option(DropdownItemId::new("second"), "另一组选项").selected(true),
+        ]);
+
+        assert_eq!(menu.selected_index(), Some(0));
+    }
 
     #[test]
     fn action_closes_menu_by_default() {
