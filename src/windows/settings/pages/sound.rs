@@ -18,7 +18,8 @@ use crate::{
 use gpui::{App, Entity, SharedString, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::slider::{Slider, SliderState};
-use gpui_component::{ActiveTheme as _, IconNamed, Sizable as _, h_flex, v_flex};
+use gpui_component::switch::Switch;
+use gpui_component::{ActiveTheme as _, Disableable as _, IconNamed, Sizable as _, h_flex, v_flex};
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_sound(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -44,6 +45,23 @@ impl SettingsWindowView {
                 });
             });
         let save_error = translator.translate("settings.sound.save_error");
+        let enabled_switch = Switch::new("settings-sound-enabled")
+            .large()
+            .checked(sound_config.enabled)
+            .accessibility_label(translator.translate("settings.sound.enabled"))
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    let enabled = *checked;
+                    persist_sound_change(
+                        view.clone(),
+                        move |sound| sound.enabled = enabled,
+                        save_error.clone(),
+                        cx,
+                    );
+                }
+            });
 
         let external_presets = sound::external_presets();
         let paste_items = sound_preset_items(
@@ -131,18 +149,21 @@ impl SettingsWindowView {
             "settings-sound-paste-preview",
             sound_config.paste.preset.clone(),
             sound_config.paste.volume,
+            sound_config.enabled,
             translator.translate("settings.sound.preview"),
         );
         let copy_preview = sound_preview_button(
             "settings-sound-copy-preview",
             sound_config.copy.preset.clone(),
             sound_config.copy.volume,
+            sound_config.enabled,
             translator.translate("settings.sound.preview"),
         );
         let quick_paste_scroll_preview = sound_preview_button(
             "settings-sound-quick-paste-scroll-preview",
             sound_config.quick_paste_scroll.preset.clone(),
             sound_config.quick_paste_scroll.volume,
+            sound_config.enabled,
             translator.translate("settings.sound.preview"),
         );
         let paste_volume =
@@ -169,6 +190,12 @@ impl SettingsWindowView {
                 translator.translate("settings.page.sound"),
                 translator.translate("settings.sound.description"),
                 reset_button,
+            ))
+            .child(self.setting_row(
+                theme,
+                translator.translate("settings.sound.enabled"),
+                None,
+                enabled_switch,
             ))
             .child(self.setting_row(
                 theme,
@@ -303,6 +330,7 @@ pub(in crate::windows::settings) fn sound_preview_button(
     id: &'static str,
     preset: SoundPreset,
     volume: u8,
+    enabled: bool,
     tooltip: String,
 ) -> AnyElement {
     let preset_for_click = preset.clone();
@@ -312,6 +340,7 @@ pub(in crate::windows::settings) fn sound_preview_button(
         .tab_stop(false)
         .icon(SoundPreviewIcon::Play)
         .tooltip(tooltip)
+        .disabled(!enabled || preset == SoundPreset::Disabled || volume == 0)
         .on_click(move |_, _, _| sound::preview(preset_for_click.clone(), volume))
         .into_any_element()
 }

@@ -599,6 +599,7 @@
   "settings.clipboard.search_engine_count": "{count} engines",
   "settings.clipboard.invalid_search_engine_icon": "Icon must be an image file (png / jpg / jpeg / svg / ico / webp / bmp / gif)",
   "settings.sound.description": "Configure crisp feedback sounds for copy and paste. Built-in sounds are generated in code and can later be extended with imported files.",
+  "settings.sound.enabled": "Enable sounds",
   "settings.sound.paste_effect": "Paste sound",
   "settings.sound.copy_effect": "Copy sound",
   "settings.sound.effect_description": "Choose a built-in or external sound to play.",

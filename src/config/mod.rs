@@ -1080,6 +1080,7 @@ impl SoundEffectConfig {
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
 pub struct SoundConfig {
+    pub enabled: bool,
     pub paste: SoundEffectConfig,
     pub copy: SoundEffectConfig,
     pub quick_paste_scroll: SoundEffectConfig,
@@ -1088,6 +1089,7 @@ pub struct SoundConfig {
 impl Default for SoundConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             paste: SoundEffectConfig {
                 preset: SoundPreset::CrispChime,
                 volume: 70,
@@ -1715,6 +1717,7 @@ mod tests {
         );
         assert!(!config.clipboard.edge_hide);
         assert_eq!(config.quick_paste.visible_items, 7);
+        assert!(config.sound.enabled);
         assert_eq!(config.sound.paste.preset, SoundPreset::CrispChime);
         assert_eq!(config.sound.copy.preset, SoundPreset::BrightPing);
         assert_eq!(config.appearance.mode, AppearanceMode::System);
@@ -1742,6 +1745,7 @@ mod tests {
         assert_eq!(value["clipboard"]["mouseLeftBehavior"], "single-paste");
         assert_eq!(value["clipboard"]["edgeHide"], false);
         assert_eq!(value["quickPaste"]["visibleItems"], 7);
+        assert_eq!(value["sound"]["enabled"], true);
         assert_eq!(value["sound"]["paste"]["preset"], "crisp-chime");
         assert_eq!(value["sound"]["paste"]["volume"], 70);
         assert_eq!(value["sound"]["copy"]["volume"], 70);

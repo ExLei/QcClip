@@ -28,6 +28,24 @@ struct SoundRequest {
     directory: Option<PathBuf>,
 }
 
+impl SoundRequest {
+    fn new(
+        config: &SoundConfig,
+        preset: SoundPreset,
+        volume: u8,
+        directory: Option<PathBuf>,
+    ) -> Option<Self> {
+        if !config.enabled || preset == SoundPreset::Disabled || volume == 0 {
+            return None;
+        }
+        Some(Self {
+            preset,
+            volume: f32::from(volume.min(SOUND_VOLUME_MAX)) / f32::from(SOUND_VOLUME_MAX),
+            directory,
+        })
+    }
+}
+
 struct SoundPlayer {
     sender: mpsc::SyncSender<SoundRequest>,
     disconnected_reported: AtomicBool,
@@ -36,6 +54,7 @@ struct SoundPlayer {
 static SOUND_CONFIG: OnceLock<RwLock<SoundConfig>> = OnceLock::new();
 static SOUND_DIRECTORY: OnceLock<RwLock<PathBuf>> = OnceLock::new();
 static SOUND_PLAYER: OnceLock<SoundPlayer> = OnceLock::new();
+static SOUND_SINK: OnceLock<Sink> = OnceLock::new();
 
 pub(crate) fn install(config: SoundConfig, sound_directory: PathBuf) {
     if let Err(error) = fs::create_dir_all(&sound_directory) {
@@ -69,7 +88,14 @@ pub(crate) fn set_config(config: SoundConfig) {
         return;
     };
     match settings.write() {
-        Ok(mut current) => *current = config,
+        Ok(mut current) => {
+            *current = config;
+            if !current.enabled {
+                if let Some(sink) = SOUND_SINK.get() {
+                    sink.stop();
+                }
+            }
+        }
         Err(_) => tracing::error!("更新音效配置失败：配置锁状态异常"),
     }
 }
@@ -134,6 +160,7 @@ pub(crate) fn play(event: SoundEvent) {
         SoundEvent::Copy => config.copy.clone(),
         SoundEvent::QuickPasteScroll => config.quick_paste_scroll.clone(),
     };
+    drop(config);
     enqueue(effect.preset, effect.volume);
 }
 
@@ -142,18 +169,21 @@ pub(crate) fn preview(preset: SoundPreset, volume: u8) {
 }
 
 fn enqueue(preset: SoundPreset, volume: u8) {
-    if preset == SoundPreset::Disabled || volume == 0 {
+    let Some(settings) = SOUND_CONFIG.get() else {
         return;
-    }
+    };
+    let Ok(config) = settings.read() else {
+        tracing::error!("读取音效配置失败：配置锁状态异常");
+        return;
+    };
     let directory = SOUND_DIRECTORY
         .get()
         .and_then(|directory| directory.read().ok().map(|directory| directory.clone()));
+    let Some(request) = SoundRequest::new(&config, preset, volume, directory) else {
+        return;
+    };
     let player = SOUND_PLAYER.get_or_init(SoundPlayer::new);
-    if let Err(error) = player.sender.try_send(SoundRequest {
-        preset,
-        volume: f32::from(volume.min(SOUND_VOLUME_MAX)) / f32::from(SOUND_VOLUME_MAX),
-        directory,
-    }) {
+    if let Err(error) = player.sender.try_send(request) {
         if matches!(error, mpsc::TrySendError::Disconnected(_))
             && !player.disconnected_reported.swap(true, Ordering::Relaxed)
         {
@@ -176,6 +206,9 @@ impl SoundPlayer {
 }
 
 fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
+    let Some(settings) = SOUND_CONFIG.get() else {
+        return;
+    };
     let (stream, stream_handle) = match OutputStream::try_default() {
         Ok(output) => output,
         Err(error) => {
@@ -191,6 +224,7 @@ fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
         }
     };
     let _stream = stream;
+    let sink = SOUND_SINK.get_or_init(|| sink);
 
     while let Ok(request) = receiver.recv() {
         // 播放期间丢弃新请求，避免滚动等高频操作把过期提示排队播放。
@@ -203,7 +237,7 @@ fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
             SoundPreset::CrispChime | SoundPreset::BrightPing | SoundPreset::QuickPasteScroll => {
                 let source = SamplesBuffer::new(1, SAMPLE_RATE, generate_samples(request.preset))
                     .amplify(request.volume);
-                sink.append(source);
+                append_if_enabled(settings, sink, source);
             }
             SoundPreset::External(file_name) => {
                 let Some(directory) = request.directory.as_deref() else {
@@ -213,11 +247,26 @@ fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
                 let Some(source) = load_external_source(directory, &file_name) else {
                     continue;
                 };
-                sink.append(source.amplify(request.volume));
+                append_if_enabled(settings, sink, source.amplify(request.volume).convert_samples());
             }
         }
     }
     tracing::debug!("音效播放线程已退出");
+}
+
+fn append_if_enabled(
+    settings: &RwLock<SoundConfig>,
+    sink: &Sink,
+    source: impl Source<Item = f32> + Send + 'static,
+) {
+    let Ok(config) = settings.read() else {
+        tracing::error!("读取音效配置失败：配置锁状态异常");
+        return;
+    };
+    // 与关闭开关时的写锁互斥，防止已入队或正在解码的音效在关闭后开始播放。
+    if config.enabled {
+        sink.append(source);
+    }
 }
 
 fn scan_external_presets(directory: &Path) -> Vec<SoundPreset> {
@@ -397,9 +446,56 @@ fn sweep_phase_cycles(
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_samples, scan_external_presets};
-    use crate::config::SoundPreset;
+    use super::{SoundRequest, append_if_enabled, generate_samples, scan_external_presets};
+    use crate::config::{SoundConfig, SoundPreset};
+    use rodio::{Sink, buffer::SamplesBuffer};
     use std::fs;
+    use std::sync::RwLock;
+
+    #[test]
+    fn master_switch_blocks_all_presets_and_keeps_unconfigured_effects_silent() {
+        let mut config = SoundConfig::default();
+        for enabled in [false, true] {
+            config.enabled = enabled;
+            for preset in [
+                SoundPreset::Disabled,
+                SoundPreset::CrispChime,
+                SoundPreset::BrightPing,
+                SoundPreset::QuickPasteScroll,
+                SoundPreset::External("提示.wav".to_owned()),
+            ] {
+                for volume in [0, 35, 100, u8::MAX] {
+                    let should_play = enabled && preset != SoundPreset::Disabled && volume > 0;
+                    let request = SoundRequest::new(&config, preset.clone(), volume, None);
+                    assert_eq!(request.is_some(), should_play);
+                    if let Some(request) = request {
+                        assert_eq!(request.preset, preset);
+                        assert_eq!(request.volume, f32::from(volume.min(100)) / 100.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn queued_sound_is_blocked_if_master_switch_was_disabled() {
+        let settings = RwLock::new(SoundConfig::default());
+        let (sink, _output) = Sink::new_idle();
+        let request = SoundRequest::new(
+            &settings.read().expect("无法读取测试音效配置"),
+            SoundPreset::CrispChime,
+            70,
+            None,
+        )
+        .expect("启用音效时应生成播放请求");
+        settings.write().expect("无法更新测试音效配置").enabled = false;
+        append_if_enabled(&settings, &sink, SamplesBuffer::new(1, 44_100, generate_samples(request.preset)));
+        assert!(sink.empty());
+
+        settings.write().expect("无法更新测试音效配置").enabled = true;
+        append_if_enabled(&settings, &sink, SamplesBuffer::new(1, 44_100, generate_samples(SoundPreset::CrispChime)));
+        assert!(!sink.empty());
+    }
 
     #[test]
     fn built_in_presets_generate_non_empty_samples() {

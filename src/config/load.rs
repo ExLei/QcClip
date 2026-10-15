@@ -439,6 +439,7 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
 fn read_sound(object: &Map<String, Value>, warnings: &mut Vec<String>) -> SoundConfig {
     let default = SoundConfig::default();
     SoundConfig {
+        enabled: read_field(object, "enabled", "sound.enabled", default.enabled, warnings),
         paste: read_sound_effect(object, "paste", "sound.paste", default.paste, warnings),
         copy: read_sound_effect(object, "copy", "sound.copy", default.copy, warnings),
         quick_paste_scroll: read_sound_effect(
@@ -735,6 +736,36 @@ mod tests {
         ClipboardWindowPosition, InterfaceLanguage, ListItemHeight, ListItemStyle,
         ShortcutBinding, SoundPreset, TitlebarPosition, WindowMaterial,
     };
+
+    #[test]
+    fn sound_enabled_defaults_and_preserves_effects_when_disabled() {
+        let old = from_str(r#"{"sound":{"copy":{"preset":"disabled"}}}"#)
+            .expect("无法加载旧音效配置");
+        assert!(old.config.sound.enabled);
+        assert_eq!(old.config.sound.copy.preset, SoundPreset::Disabled);
+        assert!(old.warnings.is_empty());
+
+        for enabled in [false, true] {
+            let loaded = from_str(&format!(
+                r#"{{"sound":{{"enabled":{enabled},"paste":{{"preset":"external:提示.wav","volume":35}},"copy":{{"preset":"disabled"}}}}}}"#,
+            ))
+            .expect("无法加载音效总开关配置");
+            assert_eq!(loaded.config.sound.enabled, enabled);
+            assert_eq!(loaded.config.sound.paste.preset, SoundPreset::External("提示.wav".to_owned()));
+            assert_eq!(loaded.config.sound.paste.volume, 35);
+            assert_eq!(loaded.config.sound.copy.preset, SoundPreset::Disabled);
+            let saved = serde_json::to_string(&loaded.config).expect("无法保存音效配置");
+            assert_eq!(from_str(&saved).expect("无法重新加载音效配置").config, loaded.config);
+            assert!(loaded.warnings.is_empty());
+        }
+
+        let invalid = from_str(r#"{"sound":{"enabled":"false","copy":{"preset":"disabled"}}}"#)
+            .expect("无法加载字段级容错音效配置");
+        assert!(invalid.config.sound.enabled);
+        assert_eq!(invalid.config.sound.copy.preset, SoundPreset::Disabled);
+        assert_eq!(invalid.warnings.len(), 1);
+        assert!(invalid.warnings[0].contains("sound.enabled"));
+    }
 
     #[test]
     fn empty_object_returns_complete_defaults() {

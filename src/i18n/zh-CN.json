@@ -599,6 +599,7 @@
   "settings.clipboard.search_engine_count": "{count} 个引擎",
   "settings.clipboard.invalid_search_engine_icon": "图标必须是图片文件（png / jpg / jpeg / svg / ico / webp / bmp / gif）",
   "settings.sound.description": "设置特定事件触发时播放的音效",
+  "settings.sound.enabled": "启用音效",
   "settings.sound.paste_effect": "粘贴音效",
   "settings.sound.copy_effect": "复制音效",
   "settings.sound.effect_description": "选择要播放的内置或外部音效。",
