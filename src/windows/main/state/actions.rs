@@ -1045,6 +1045,8 @@ impl MainWindow {
                         if this.active_tab == source_tab {
                             if !this.apply_removed_list_items(&[history_id]) {
                                 this.refresh_history(cx);
+                            } else {
+                                cx.notify();
                             }
                         } else {
                             this.refresh_history(cx);
