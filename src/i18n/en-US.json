@@ -1,4 +1,7 @@
 {
+  "settings.personalization.app_font": "App font",
+  "settings.personalization.app_font_description": "Choose the interface font. Changes apply immediately.",
+  "settings.personalization.app_font_default": "Follow theme (default)",
   "settings.personalization.ui_scale": "Interface scale",
   "settings.personalization.ui_scale_description": "Resize text, icons, and controls together. Changes apply immediately.",
   "common.retry": "Retry",

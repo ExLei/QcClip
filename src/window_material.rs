@@ -5,7 +5,7 @@ use gpui::{
     IntoElement, ParentElement, Render, RenderImage, Styled, StyledImage, Window,
     WindowBackgroundAppearance, WindowId, div, img, px,
 };
-use gpui_component::{Root, Theme, ThemeColor};
+use gpui_component::{ActiveTheme as _, Root, Theme, ThemeColor};
 
 use crate::{
     config::{
@@ -103,7 +103,9 @@ pub(crate) fn with_background(
     cx: &App,
 ) -> impl IntoElement {
     let background = background_element(window, cx);
-    div().relative().size_full().child(background).child(view)
+    div().relative().size_full()
+        .font_family(cx.theme().font_family.clone())
+        .child(background).child(view)
 }
 
 pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement {

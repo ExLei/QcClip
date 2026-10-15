@@ -1,4 +1,5 @@
 pub mod common;
+pub(crate) mod fonts;
 pub mod html;
 pub mod icon;
 pub mod scale;

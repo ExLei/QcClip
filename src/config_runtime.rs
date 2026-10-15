@@ -524,6 +524,7 @@ fn appearance_requires_global_refresh(
     current: &AppearanceConfig,
 ) -> bool {
     previous.ui_scale_percent != current.ui_scale_percent
+        || previous.app_font_family != current.app_font_family
         || previous.mode != current.mode
         || previous.light_theme != current.light_theme
         || previous.dark_theme != current.dark_theme
@@ -859,6 +860,16 @@ mod tests {
         assert!(appearance_requires_global_refresh(&current, &next));
         assert!(!background_image_needs_refresh(&current, &next));
         assert!(!appearance_requires_global_refresh(&next, &next));
+    }
+
+    #[test]
+    fn app_font_changes_and_reset_refresh_all_windows() {
+        let current = AppConfig::default().appearance;
+        let mut next = current.clone();
+        next.app_font_family = Some("Microsoft YaHei".to_owned());
+        assert!(appearance_requires_global_refresh(&current, &next));
+        assert!(appearance_requires_global_refresh(&next, &current));
+        assert!(!background_image_needs_refresh(&current, &next));
     }
 
     #[test]

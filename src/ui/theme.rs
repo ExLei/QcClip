@@ -338,6 +338,14 @@ fn apply_ui_scale(theme: &mut Theme, scale: f32) {
     theme.sheet.margin_top = QC_CLIP_TITLE_BAR_HEIGHT * (f32::from(theme.font_size) / 16.0);
 }
 
+fn apply_app_font(theme: &mut Theme, family: Option<&str>) {
+    let config = if theme.mode.is_dark() { &theme.dark_theme } else { &theme.light_theme };
+    // 恢复默认或切换主题时重新取主题字体，避免沿用上一次的用户选择。
+    theme.font_family = family.map(|family| family.to_owned().into())
+        .or_else(|| config.font_family.clone())
+        .unwrap_or_else(|| Theme::default().font_family);
+}
+
 pub fn install(cx: &mut App) {
     let mode = ThemeMode::from(cx.window_appearance());
     cx.set_global(QcClipThemeRuntime {
@@ -430,6 +438,7 @@ fn apply_system_theme(window: Option<&mut Window>, cx: &mut App) {
     }
     Theme::change(mode, window, cx);
     apply_ui_scale(Theme::global_mut(cx), appearance.ui_scale());
+    apply_app_font(Theme::global_mut(cx), appearance.app_font_family.as_deref());
     Theme::sync_base(cx);
     crate::window_material::capture_base_colors(cx);
     crate::window_material::apply_from_config(cx);
@@ -746,6 +755,24 @@ mod tests {
         theme.mode = ThemeMode::Light;
         super::apply_ui_scale(&mut theme, 1.0);
         assert_eq!(theme.font_size, base_font_size);
+    }
+
+    #[test]
+    fn app_font_override_and_reset_respect_the_active_theme() {
+        let mut theme = gpui_component::Theme::default();
+        theme.light_theme = std::rc::Rc::new(gpui_component::ThemeConfig {
+            font_family: Some("主题字体".into()),
+            ..Default::default()
+        });
+        theme.dark_theme = std::rc::Rc::new(gpui_component::ThemeConfig::default());
+        theme.mode = ThemeMode::Light;
+        super::apply_app_font(&mut theme, Some("用户字体"));
+        assert_eq!(theme.font_family.as_ref(), "用户字体");
+        super::apply_app_font(&mut theme, None);
+        assert_eq!(theme.font_family.as_ref(), "主题字体");
+        theme.mode = ThemeMode::Dark;
+        super::apply_app_font(&mut theme, None);
+        assert_eq!(theme.font_family, gpui_component::Theme::default().font_family);
     }
 
     #[test]

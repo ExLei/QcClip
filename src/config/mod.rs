@@ -1311,6 +1311,7 @@ impl CardItemGap {
 pub struct AppearanceConfig {
     pub mode: AppearanceMode,
     pub ui_scale_percent: u16,
+    pub app_font_family: Option<String>,
     pub light_theme: String,
     pub dark_theme: String,
     pub titlebar_position: TitlebarPosition,
@@ -1334,6 +1335,7 @@ impl Default for AppearanceConfig {
         Self {
             mode: AppearanceMode::default(),
             ui_scale_percent: 100,
+            app_font_family: None,
             light_theme: "QcClip Default Light".to_owned(),
             dark_theme: "QcClip Default Dark".to_owned(),
             titlebar_position: TitlebarPosition::default(),
@@ -1614,6 +1616,10 @@ impl AppearanceConfig {
     pub(crate) fn normalized(mut self) -> Self {
         let default = Self::default();
         self.ui_scale_percent = self.ui_scale_percent.clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX);
+        self.app_font_family = self.app_font_family.and_then(|family| {
+            let family = family.trim();
+            (!family.is_empty()).then(|| family.to_owned())
+        });
         self.adaptive_max_lines = self
             .adaptive_max_lines
             .clamp(ADAPTIVE_MAX_LINES_MIN, ADAPTIVE_MAX_LINES_MAX);

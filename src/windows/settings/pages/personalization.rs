@@ -9,7 +9,7 @@ use super::super::{
     SettingsWindowView,
     components::{
         clickable_setting_row, setting_row, settings_dropdown, settings_error_row,
-        settings_page_header,
+        settings_page_header, settings_dropdown_with_font,
     },
 };
 use crate::{
@@ -83,6 +83,35 @@ impl SettingsWindowView {
                     persist_appearance_change(
                         view.clone(), "界面缩放",
                         move |appearance| appearance.ui_scale_percent = percent,
+                        save_error.clone(), cx,
+                    );
+                }
+            },
+            cx,
+        );
+
+        let current_font = appearance.app_font_family.as_deref().unwrap_or("");
+        let mut font_items = vec![DropdownItem::option(
+            DropdownItemId::new(""),
+            translator.translate("settings.personalization.app_font_default"),
+        ).selected(current_font.is_empty())];
+        font_items.extend(crate::ui::fonts::system_font_names(cx).iter().map(|family| {
+            DropdownItem::option(DropdownItemId::new(family.clone()), family.clone())
+                .selected(family == current_font)
+        }));
+        let font_selector = settings_dropdown_with_font(
+            "settings-app-font-select",
+            current_font.to_owned(),
+            font_items,
+            Some(".SystemUIFont".into()),
+            {
+                let view = view.clone();
+                let save_error = translator.translate("settings.personalization.save_error");
+                move |id, cx| {
+                    let family = (!id.as_str().is_empty()).then(|| id.as_str().to_owned());
+                    persist_appearance_change(
+                        view.clone(), "应用字体",
+                        move |appearance| appearance.app_font_family = family,
                         save_error.clone(), cx,
                     );
                 }
@@ -534,6 +563,12 @@ impl SettingsWindowView {
                 translator.translate("settings.personalization.ui_scale"),
                 Some(translator.translate("settings.personalization.ui_scale_description").into()),
                 scale_selector,
+            ))
+            .child(self.setting_row(
+                theme,
+                translator.translate("settings.personalization.app_font"),
+                Some(translator.translate("settings.personalization.app_font_description").into()),
+                font_selector,
             ))
             .child(self.setting_row(
                 theme,

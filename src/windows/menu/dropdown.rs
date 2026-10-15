@@ -111,6 +111,7 @@ impl DropdownMenuView {
             &self.scroll_handle,
             1.0,
         )
+        .when_some(self.menu.font_family.clone(), |this, family| this.font_family(family))
         .into_any_element()
         .layout_as_root(
             size(AvailableSpace::MinContent, AvailableSpace::MinContent),
@@ -281,6 +282,7 @@ impl Render for DropdownMenuView {
                             &self.scroll_handle,
                             width,
                         )
+                        .when_some(self.menu.font_family.clone(), |this, family| this.font_family(family))
                         .w(px(width))
                         .h(px(height)),
                     ),

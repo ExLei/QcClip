@@ -1,4 +1,7 @@
 {
+  "settings.personalization.app_font": "应用字体",
+  "settings.personalization.app_font_description": "选择应用界面字体，修改后立即生效。",
+  "settings.personalization.app_font_default": "跟随主题（默认）",
   "settings.personalization.ui_scale": "界面缩放",
   "settings.personalization.ui_scale_description": "统一调整文字、图标和控件大小，修改后立即生效。",
   "common.retry": "重试",

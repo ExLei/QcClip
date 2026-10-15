@@ -64,6 +64,8 @@ raw-window-handle = "0.6"
 raw-input = { path = "vendor/raw-input" }
 winreg = "0.55"
 windows = { version = "0.62.2", features = [
+    "Win32_Globalization",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",

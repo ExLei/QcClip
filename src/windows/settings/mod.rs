@@ -399,6 +399,7 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         SearchTargetSpec { page: Personalization, title_key: "settings.personalization.light_theme", description_key: Some("settings.personalization.light_theme_description"), ratio: 0.08 },
         SearchTargetSpec { page: Personalization, title_key: "settings.personalization.dark_theme", description_key: Some("settings.personalization.dark_theme_description"), ratio: 0.14 },
         SearchTargetSpec { page: Personalization, title_key: "settings.personalization.ui_scale", description_key: Some("settings.personalization.ui_scale_description"), ratio: 0.18 },
+        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.app_font", description_key: Some("settings.personalization.app_font_description"), ratio: 0.20 },
         SearchTargetSpec { page: Personalization, title_key: "settings.personalization.titlebar_position", description_key: Some("settings.personalization.titlebar_position_description"), ratio: 0.22 },
         SearchTargetSpec { page: Personalization, title_key: "settings.personalization.window_material", description_key: Some("settings.personalization.window_material_description"), ratio: 0.32 },
         SearchTargetSpec { page: Personalization, title_key: "settings.personalization.window_material_opacity", description_key: Some("settings.personalization.window_material_opacity_description"), ratio: 0.40 },

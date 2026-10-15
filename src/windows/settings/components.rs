@@ -26,13 +26,30 @@ pub(in crate::windows::settings) fn settings_dropdown<F>(
 where
     F: Fn(DropdownItemId, &mut App) + 'static,
 {
+    settings_dropdown_with_font(id, current, items, None, on_select, cx)
+}
+
+pub(in crate::windows::settings) fn settings_dropdown_with_font<F>(
+    id: &'static str,
+    current: impl Into<SharedString>,
+    items: Vec<DropdownItem>,
+    font_family: Option<SharedString>,
+    on_select: F,
+    cx: &mut Context<SettingsWindowView>,
+) -> AnyElement
+where
+    F: Fn(DropdownItemId, &mut App) + 'static,
+{
     let current = current.into();
     let current_label = items
         .iter()
         .find(|item| item.id.as_str() == current.as_ref())
         .map(|item| item.label.clone())
         .unwrap_or_else(|| current.clone());
-    let menu = DropdownModel::new(items);
+    let mut menu = DropdownModel::new(items);
+    if let Some(family) = font_family.clone() {
+        menu = menu.font_family(family);
+    }
     let on_select: Rc<dyn Fn(DropdownItemId, &mut App)> = Rc::new(on_select);
     let trigger_bounds = Rc::new(Cell::new(None::<Bounds<Pixels>>));
     let trigger_bounds_for_paint = trigger_bounds.clone();
@@ -41,6 +58,7 @@ where
 
     div()
         .w(ui_rem(SETTINGS_DROPDOWN_WIDTH))
+        .when_some(font_family, |this, family| this.font_family(family))
         .on_children_prepainted(move |bounds, _, _| {
             if let Some(bounds) = bounds.first().copied() {
                 trigger_bounds_for_paint.set(Some(bounds));

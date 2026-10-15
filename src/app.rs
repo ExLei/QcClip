@@ -138,7 +138,6 @@ pub fn run() {
         .with_assets(Assets::new())
         .run(move |cx: &mut App| {
             init(cx);
-            crate::assets::install_fonts(cx);
             crate::config_runtime::ConfigRuntime::install(&config_path, cx);
             if crate::config_runtime::run_as_administrator(cx) {
                 match crate::platform::elevation::is_elevated() {

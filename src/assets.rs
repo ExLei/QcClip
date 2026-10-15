@@ -14,14 +14,6 @@ impl Assets {
     }
 }
 
-pub fn install_fonts(cx: &mut gpui::App) {
-    if let Err(error) = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(
-        include_bytes!("../assets/fonts/NotoEmoji-Regular.ttf").as_slice(),
-    )]) {
-        tracing::error!("加载 Emoji 字体失败：{error}");
-    }
-}
-
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
         let Some(asset_path) = path.strip_prefix("assets/") else {

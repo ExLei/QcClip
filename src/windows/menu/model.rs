@@ -115,11 +115,17 @@ impl DropdownItemId {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DropdownModel {
     items: Vec<DropdownItem>,
+    pub(crate) font_family: Option<SharedString>,
 }
 
 impl DropdownModel {
     pub fn new(items: Vec<DropdownItem>) -> Self {
-        Self { items }
+        Self { items, font_family: None }
+    }
+
+    pub(crate) fn font_family(mut self, family: impl Into<SharedString>) -> Self {
+        self.font_family = Some(family.into());
+        self
     }
 
     pub(crate) fn items(&self) -> &[DropdownItem] {

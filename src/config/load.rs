@@ -222,6 +222,9 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
         ui_scale_percent: read_field(
             object, "uiScalePercent", "appearance.uiScalePercent", default.ui_scale_percent, warnings,
         ),
+        app_font_family: read_field(
+            object, "appFontFamily", "appearance.appFontFamily", default.app_font_family, warnings,
+        ),
         light_theme: read_field(
             object,
             "lightTheme",
@@ -850,6 +853,28 @@ mod tests {
         assert_eq!(invalid.warnings.len(), 1);
         let json = serde_json::to_string(&default.config).expect("无法序列化缩放配置");
         assert_eq!(from_str(&json).expect("无法重新加载缩放配置").config, default.config);
+    }
+
+    #[test]
+    fn app_font_defaults_normalizes_and_survives_round_trip() {
+        let default = from_str(r#"{"appearance":{"mode":"dark"}}"#).expect("无法加载旧配置");
+        assert_eq!(default.config.appearance.app_font_family, None);
+        for (value, expected) in [
+            (r#""  Microsoft YaHei  ""#, Some("Microsoft YaHei")),
+            (r#""   ""#, None),
+            ("null", None),
+        ] {
+            let loaded = from_str(&format!(r#"{{"appearance":{{"appFontFamily":{value}}}}}"#))
+                .expect("无法加载字体配置");
+            assert_eq!(loaded.config.appearance.app_font_family.as_deref(), expected);
+            let json = serde_json::to_string(&loaded.config).expect("无法保存字体配置");
+            assert_eq!(from_str(&json).expect("无法重新加载字体配置").config, loaded.config);
+        }
+        let invalid = from_str(r#"{"appearance":{"appFontFamily":123,"onlyShowNotes":true}}"#)
+            .expect("无法加载字段级容错配置");
+        assert_eq!(invalid.config.appearance.app_font_family, None);
+        assert!(invalid.config.appearance.only_show_notes);
+        assert_eq!(invalid.warnings.len(), 1);
     }
 
     #[test]
