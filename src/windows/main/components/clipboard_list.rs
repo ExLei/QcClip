@@ -1929,9 +1929,16 @@ fn render_row(
                 return;
             }
 
+            let hitboxes = children_bounds.into_iter()
+                .map(|bounds| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal))
+                .collect::<Vec<_>>();
             let selection_window = selection_window.clone();
-            window.on_next_frame(move |_, cx| {
-                if !MenuService::hover_animation_allowed(cx) {
+            window.on_next_frame(move |window, cx| {
+                // 完整帧生成后再检查命中框，让标签面板等遮挡层的 occlude 生效。
+                if !window.is_window_hovered()
+                    || !hitboxes.iter().any(|hitbox| hitbox.is_hovered(window))
+                    || !MenuService::hover_animation_allowed(cx)
+                {
                     return;
                 }
                 let _ = selection_window.update(cx, |this, cx| {
