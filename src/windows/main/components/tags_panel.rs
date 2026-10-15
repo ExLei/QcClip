@@ -640,12 +640,14 @@ pub fn render(
                 .cursor_pointer()
                 .hover(|this| this.bg(theme.secondary_hover))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(move |_, window, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.tags_search_query.clear();
                     tags_search_input_for_clear.update(cx, |input, cx| {
                         input.set_value("", window, cx);
                         input.focus(window, cx);
                     });
-                })
+                    cx.notify();
+                }))
                 .child(hover_icon(
                     "tags-panel-search-clear",
                     "x",
