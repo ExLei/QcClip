@@ -1882,6 +1882,21 @@ pub(crate) fn set_session_shortcut_only_in_window(
     Ok(())
 }
 
+pub(crate) fn set_all_session_shortcuts_only_in_window(
+    only_in_window: bool,
+    cx: &mut App,
+) -> Result<(), String> {
+    let mut shortcuts = crate::config_runtime::shortcuts_config(cx);
+    for id in SessionShortcutId::ALL {
+        shortcuts.session_mut(id).only_in_window = only_in_window;
+    }
+    crate::config_runtime::set_shortcuts_config(shortcuts, cx)
+        .map_err(|error| error.to_string())?;
+    synchronize_shortcuts(cx)?;
+    cx.refresh_windows();
+    Ok(())
+}
+
 fn validate_shortcuts_config(shortcuts: &ShortcutsConfig) -> Result<(), String> {
     let mut registered = HashMap::new();
     let mut bindings = Vec::with_capacity(SessionShortcutId::ALL.len() + 5);

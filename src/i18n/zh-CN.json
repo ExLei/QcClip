@@ -293,6 +293,8 @@
   "settings.shortcuts.session_section": "临时快捷键",
   "settings.shortcuts.session_description": "仅在主窗口显示时生效，勾选“仅在窗口内生效”后，需要鼠标位于窗口内才生效",
   "settings.shortcuts.only_in_window": "仅在窗口内生效",
+  "settings.shortcuts.select_all": "全选",
+  "settings.shortcuts.deselect_all": "取消全部",
   "settings.shortcuts.toggle_main_window": "显示/隐藏窗口",
   "settings.shortcuts.middle_mouse.enabled": "鼠标中键呼出",
   "settings.shortcuts.middle_mouse.none": "无",

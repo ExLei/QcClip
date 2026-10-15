@@ -111,6 +111,34 @@ impl SettingsWindowView {
         let save_error_for_session_rows = save_error.clone();
         let translator_for_session_rows = translator.clone();
         let view_for_session_rows = view.clone();
+        let all_only_in_window = SessionShortcutId::ALL
+            .into_iter()
+            .all(|id| shortcuts.session(id).only_in_window);
+        let select_all_scope = Checkbox::new("settings-session-shortcuts-select-all-scope")
+            .checked(all_only_in_window)
+            .label(translator.translate(if all_only_in_window {
+                "settings.shortcuts.deselect_all"
+            } else {
+                "settings.shortcuts.select_all"
+            }))
+            .tooltip(translator.translate("settings.shortcuts.only_in_window"))
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    cx.stop_propagation();
+                    let error = hotkey::set_all_session_shortcuts_only_in_window(*checked, cx)
+                        .err()
+                        .map(|error| {
+                            tracing::error!("批量更新快捷键窗口范围失败：{error}");
+                            save_error.clone()
+                        });
+                    view.update(cx, |view, cx| {
+                        view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
+                        cx.notify();
+                    });
+                }
+            });
         let shortcut_id = view_for_key.clone();
         let middle_mouse_controls = self.middle_mouse_controls(cx);
         let shortcut_section = v_flex()
@@ -490,6 +518,7 @@ impl SettingsWindowView {
                     )),
                 theme,
                 global_anchor,
+                None,
             )))
                                     .child(div().h(px(1.0)).w_full().bg(theme.border))
                                     .child(self.highlight_element(
@@ -528,6 +557,7 @@ impl SettingsWindowView {
                     })),
                 theme,
                 temporary_anchor,
+                Some(select_all_scope.into_any_element()),
             )),
                             )),
                     )
@@ -843,6 +873,7 @@ fn shortcut_category(
     content: impl IntoElement,
     theme: gpui_component::ThemeColor,
     anchor: ScrollAnchor,
+    header_control: Option<AnyElement>,
 ) -> AnyElement {
     let header = h_flex()
         .w_full()
@@ -875,7 +906,10 @@ fn shortcut_category(
                         .truncate()
                         .child(description),
                 ),
-        );
+        )
+        .when_some(header_control, |this, control| {
+            this.child(h_flex().flex_shrink_0().child(control))
+        });
 
     v_flex()
         .id(match category {
