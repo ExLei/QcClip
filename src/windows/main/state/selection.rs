@@ -189,15 +189,15 @@ impl MainWindow {
     }
 
     pub(crate) fn move_tab(&mut self, direction: isize, cx: &mut Context<Self>) {
-        let Some(index) = super::super::tabs::MAIN_TABS
-            .iter()
-            .position(|tab| tab.id == self.active_tab)
-        else {
+        let layout = crate::config_runtime::appearance_config(cx).tab_bar;
+        let tabs = super::super::tabs::ordered_tabs(&layout);
+        if tabs.is_empty() {
             return;
-        };
-        let count = super::super::tabs::MAIN_TABS.len();
+        }
+        let index = tabs.iter().position(|tab| tab.id == self.active_tab).unwrap_or(0);
+        let count = tabs.len();
         let next_index = (index as isize + direction).rem_euclid(count as isize) as usize;
-        self.select_tab(super::super::tabs::MAIN_TABS[next_index].id, cx);
+        self.select_tab(tabs[next_index].id, cx);
     }
 
     pub(crate) fn paste_selected_item(&mut self, cx: &mut Context<Self>) {

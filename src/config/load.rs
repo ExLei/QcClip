@@ -246,6 +246,13 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
             default.titlebar_position,
             warnings,
         ),
+        tab_bar: read_field(
+            object,
+            "tabBar",
+            "appearance.tabBar",
+            default.tab_bar,
+            warnings,
+        ),
         animations: read_field(
             object,
             "animations",
@@ -904,6 +911,50 @@ mod tests {
         let invalid = from_str(r#"{"appearance":{"appFontFamily":123,"onlyShowNotes":true}}"#)
             .expect("无法加载字段级容错配置");
         assert_eq!(invalid.config.appearance.app_font_family, None);
+        assert!(invalid.config.appearance.only_show_notes);
+        assert_eq!(invalid.warnings.len(), 1);
+    }
+
+    #[test]
+    fn tab_bar_layout_loads_normalizes_and_survives_round_trip() {
+        use super::super::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
+
+        let old = from_str(r#"{"appearance":{"mode":"dark"}}"#).expect("无法加载旧配置");
+        assert_eq!(old.config.appearance.tab_bar, TabBarLayout::default());
+        let loaded = from_str(
+            r#"{"appearance":{"tabBar":{
+            "sections":["tags","filters","pages"],
+            "buttons":["image","text","image"],
+            "hidden":["favorites","text"]
+        }}}"#,
+        )
+        .expect("无法加载 Tab 栏布局");
+        assert!(loaded.warnings.is_empty());
+        let layout = &loaded.config.appearance.tab_bar;
+        assert_eq!(
+            layout.sections,
+            vec![
+                TabBarSection::Tags,
+                TabBarSection::Filters,
+                TabBarSection::Pages
+            ]
+        );
+        assert_eq!(
+            layout.buttons_in(TabBarButtonGroup::Filters).next(),
+            Some(TabBarButton::Image)
+        );
+        assert!(!layout.is_visible(TabBarButton::Favorites));
+        assert_eq!(layout.buttons.len(), TabBarButton::ALL.len());
+        let json = serde_json::to_string(&loaded.config).expect("无法保存 Tab 栏布局");
+        assert_eq!(
+            from_str(&json).expect("无法重新加载 Tab 栏布局").config,
+            loaded.config
+        );
+
+        let invalid =
+            from_str(r#"{"appearance":{"tabBar":{"buttons":["unknown"]},"onlyShowNotes":true}}"#)
+                .expect("无法加载字段级容错配置");
+        assert_eq!(invalid.config.appearance.tab_bar, TabBarLayout::default());
         assert!(invalid.config.appearance.only_show_notes);
         assert_eq!(invalid.warnings.len(), 1);
     }

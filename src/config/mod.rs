@@ -1,6 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod load;
+mod tab_bar;
+
+pub use tab_bar::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
@@ -1317,6 +1320,7 @@ pub struct AppearanceConfig {
     pub light_theme: String,
     pub dark_theme: String,
     pub titlebar_position: TitlebarPosition,
+    pub tab_bar: TabBarLayout,
     pub animations: AnimationConfig,
     pub window_material: WindowMaterial,
     pub window_material_opacity: f32,
@@ -1341,6 +1345,7 @@ impl Default for AppearanceConfig {
             light_theme: "QcClip Default Light".to_owned(),
             dark_theme: "QcClip Default Dark".to_owned(),
             titlebar_position: TitlebarPosition::default(),
+            tab_bar: TabBarLayout::default(),
             animations: AnimationConfig::default(),
             window_material: WindowMaterial::default(),
             window_material_opacity: default_window_material_opacity(WindowMaterial::default()),
@@ -1617,6 +1622,7 @@ impl AppearanceConfig {
 
     pub(crate) fn normalized(mut self) -> Self {
         let default = Self::default();
+        self.tab_bar.normalize();
         self.ui_scale_percent = self.ui_scale_percent.clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX);
         self.app_font_family = self.app_font_family.and_then(|family| {
             let family = family.trim();

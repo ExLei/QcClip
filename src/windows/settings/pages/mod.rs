@@ -5,6 +5,7 @@ mod data_management;
 mod general;
 mod legacy_migration;
 mod personalization;
+mod tab_bar_editor;
 mod quick_paste;
 mod shortcuts;
 mod sound;

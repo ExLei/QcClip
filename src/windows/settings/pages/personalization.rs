@@ -582,6 +582,11 @@ impl SettingsWindowView {
             ))
             .child(self.highlight_element(
                 theme,
+                translator.translate("settings.personalization.tab_bar"),
+                self.render_tab_bar_editor(cx),
+            ))
+            .child(self.highlight_element(
+                theme,
                 translator.translate("settings.personalization.animations"),
                 clickable_setting_row(
                     "settings-personalization-animations",

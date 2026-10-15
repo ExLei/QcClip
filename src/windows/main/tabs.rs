@@ -1,3 +1,4 @@
+use crate::config::{TabBarButton, TabBarButtonGroup, TabBarLayout};
 use serde::{Deserialize, Serialize};
 
 #[repr(u32)]
@@ -6,6 +7,16 @@ pub enum TabId {
     Clipboard,
     Favorites,
     Emoji,
+}
+
+impl TabId {
+    pub const fn layout_button(self) -> TabBarButton {
+        match self {
+            Self::Clipboard => TabBarButton::Clipboard,
+            Self::Favorites => TabBarButton::Favorites,
+            Self::Emoji => TabBarButton::Emoji,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -39,6 +50,16 @@ pub enum SymbolCategoryId {
     Emoji,
     Symbols,
     Gallery,
+}
+
+impl SymbolCategoryId {
+    pub const fn layout_button(self) -> TabBarButton {
+        match self {
+            Self::Emoji => TabBarButton::SymbolEmoji,
+            Self::Symbols => TabBarButton::Symbols,
+            Self::Gallery => TabBarButton::Gallery,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -75,6 +96,56 @@ pub enum FilterId {
     Link,
     Unpasted,
     Pasted,
+}
+
+impl FilterId {
+    pub const fn layout_button(self) -> TabBarButton {
+        match self {
+            Self::Text => TabBarButton::Text,
+            Self::Image => TabBarButton::Image,
+            Self::File => TabBarButton::File,
+            Self::Link => TabBarButton::Link,
+            Self::Unpasted => TabBarButton::Unpasted,
+            Self::Pasted => TabBarButton::Pasted,
+        }
+    }
+}
+
+pub fn ordered_tabs(layout: &TabBarLayout) -> Vec<&'static TabDefinition> {
+    layout
+        .buttons_in(TabBarButtonGroup::Pages)
+        .filter(|button| layout.is_visible(*button))
+        .filter_map(|button| {
+            MAIN_TABS
+                .iter()
+                .find(|tab| tab.id.layout_button() == button)
+        })
+        .collect()
+}
+
+pub fn ordered_filters(layout: &TabBarLayout) -> Vec<&'static FilterDefinition> {
+    layout
+        .buttons_in(TabBarButtonGroup::Filters)
+        .filter(|button| layout.is_visible(*button))
+        .filter_map(|button| {
+            CONTENT_FILTERS
+                .iter()
+                .chain(PASTE_FILTERS.iter())
+                .find(|filter| filter.id.layout_button() == button)
+        })
+        .collect()
+}
+
+pub fn ordered_symbol_categories(layout: &TabBarLayout) -> Vec<&'static SymbolCategoryDefinition> {
+    layout
+        .buttons_in(TabBarButtonGroup::Symbols)
+        .filter(|button| layout.is_visible(*button))
+        .filter_map(|button| {
+            SYMBOL_CATEGORIES
+                .iter()
+                .find(|category| category.id.layout_button() == button)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug)]

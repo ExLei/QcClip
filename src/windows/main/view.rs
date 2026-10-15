@@ -22,6 +22,32 @@ fn is_sidebar_layout(window: &Window) -> bool {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let appearance = config_runtime::appearance_config(cx);
+        let layout = &appearance.tab_bar;
+        let tabs = super::tabs::ordered_tabs(layout);
+        if !layout.is_visible(self.active_tab.layout_button()) {
+            let fallback = tabs.first().map(|tab| tab.id).unwrap_or(TabId::Clipboard);
+            self.select_tab(fallback, cx);
+        }
+        if !layout.is_visible(self.symbol_category.layout_button()) {
+            let categories = super::tabs::ordered_symbol_categories(layout);
+            let fallback = categories.first().map(|category| category.id)
+                .unwrap_or(super::tabs::SymbolCategoryId::Emoji);
+            self.select_symbol_category(fallback, cx);
+        }
+        let filter_count = self.selected_filters.len();
+        self.selected_filters.retain(|filter| layout.is_visible(filter.layout_button()));
+        let mut filters_changed = self.selected_filters.len() != filter_count;
+        if !layout.is_visible(crate::config::TabBarButton::Tags) {
+            self.tags_panel_open = false;
+            self.tags_button_bounds = None;
+            self.cancel_tags_panel_close();
+            filters_changed |= !self.selected_tag_ids.is_empty();
+            self.selected_tag_ids.clear();
+        }
+        if filters_changed {
+            self.refresh_history(cx);
+        }
         if !(self.active_tab == TabId::Emoji
             && self.symbol_category == super::tabs::SymbolCategoryId::Gallery)
         {
@@ -39,7 +65,6 @@ impl Render for MainWindow {
         self.ensure_search_input(window, cx);
         self.sync_search_placeholder(window, cx);
         let theme = cx.theme().colors;
-        let appearance = config_runtime::appearance_config(cx);
         let clipboard = config_runtime::clipboard_config(cx);
         self.prepare_adaptive_height_cache(
             AdaptiveHeightCacheKey {

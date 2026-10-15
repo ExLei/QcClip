@@ -12,14 +12,15 @@ use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
 
 use crate::{
+    config::{TabBarButton, TabBarSection},
     config_runtime,
     i18n,
-    ui::{divider, hover_icon},
+    ui::hover_icon,
     windows::main::{
         state::MainWindow,
         tabs::{
-            CONTENT_FILTERS, FilterDefinition, MAIN_TABS, PASTE_FILTERS, SYMBOL_CATEGORIES,
-            SymbolCategoryDefinition, TabDefinition, TabId,
+            FilterDefinition, SymbolCategoryDefinition, TabDefinition, TabId,
+            ordered_filters, ordered_symbol_categories, ordered_tabs,
         },
     },
 };
@@ -424,16 +425,24 @@ pub fn render(
         crate::config::AnimationKind::SingleSelectIndicator,
     );
     let translator = i18n::translator(cx);
+    let layout = config_runtime::appearance_config(cx).tab_bar;
+    let main_tabs = ordered_tabs(&layout);
+    let filters = ordered_filters(&layout);
+    let symbol_categories = ordered_symbol_categories(&layout);
     let tags_panel_open = main.tags_panel_open;
     let sidebar_show_label = !main.sidebar_collapsed;
-    let main_tab_index = MAIN_TABS
+    let main_tab_index = main_tabs
         .iter()
-        .position(|definition| definition.id == main.active_tab)
-        .unwrap_or(0);
-    let symbol_category_index = SYMBOL_CATEGORIES
+        .position(|definition| definition.id == main.active_tab);
+    let symbol_category_index = symbol_categories
         .iter()
-        .position(|definition| definition.id == main.symbol_category)
-        .unwrap_or(0);
+        .position(|definition| definition.id == main.symbol_category);
+    let middle_visible = if main.active_tab == TabId::Emoji {
+        !symbol_categories.is_empty()
+    } else {
+        !filters.is_empty()
+    };
+    let tags_visible = layout.is_visible(TabBarButton::Tags) && main.active_tab != TabId::Emoji;
     let tags_button_color = if tags_panel_open {
         theme.primary_foreground
     } else {
@@ -481,8 +490,13 @@ pub fn render(
             }
             cx.notify();
         }))
-        .on_prepaint(cx.listener(|this, prepaint: &gpui::InteractivityPrepaint, _, _| {
-            this.tags_button_bounds = Some(prepaint.bounds);
+        .on_prepaint(cx.listener(|this, prepaint: &gpui::InteractivityPrepaint, _, cx| {
+            if this.tags_button_bounds != Some(prepaint.bounds) {
+                this.tags_button_bounds = Some(prepaint.bounds);
+                if this.tags_panel_open {
+                    cx.notify();
+                }
+            }
         }))
         .on_hover(cx.listener(|this, _, window, cx| {
             this.update_tags_panel_auto_close(window, cx);
@@ -577,110 +591,55 @@ pub fn render(
             sidebar = sidebar.w_auto().min_w_auto();
         }
 
-        let sidebar = sidebar
-            .child(
-                div()
-                    .w_auto()
-                    .min_w_auto()
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .p_2()
-                    .relative()
-                    .child(vertical_active_indicator(
-                        "sidebar-main-tab-active-indicator",
-                        main_tab_index,
-                        theme.primary,
-                        8.0,
-                        8.0,
+        let mut tags_button = Some(tags_button);
+        let mut has_section = false;
+        for section in layout.sections.iter().copied() {
+            let content = match section {
+                TabBarSection::Pages if !main_tabs.is_empty() => div()
+                    .w_auto().min_w_auto().flex_none().flex().flex_col().gap_1().p_2().relative()
+                    .when_some(main_tab_index, |this, index| this.child(vertical_active_indicator(
+                        "sidebar-main-tab-active-indicator", index, theme.primary, 8.0, 8.0,
                         animations_enabled,
-                    ))
-                    .children(MAIN_TABS.iter().map(|definition| {
-                        sidebar_tab_item(tab_button(
-                            definition,
-                            definition.id == main.active_tab,
-                            true,
-                            sidebar_show_label,
-                            cx,
-                        ))
-                    })),
-            )
-            .child(
-                div()
-                    .w_auto()
-                    .min_w_auto()
-                    .h(px(0.5))
-                    .flex_none()
-                    .bg(theme.border),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .w_auto()
-                    .min_w_auto()
-                    .overflow_y_scrollbar()
-                    .flex()
-                    .flex_col()
-                    .p_2()
+                    )))
+                    .children(main_tabs.iter().map(|definition| sidebar_tab_item(tab_button(
+                        definition, definition.id == main.active_tab, true, sidebar_show_label, cx,
+                    ))))
+                    .into_any_element(),
+                TabBarSection::Filters if middle_visible => div()
+                    .flex_1().min_h_0().w_auto().min_w_auto().overflow_y_scrollbar()
+                    .flex().flex_col().p_2()
                     .child(if main.active_tab == TabId::Emoji {
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .relative()
-                            .child(vertical_active_indicator(
-                                "sidebar-symbol-category-active-indicator",
-                                symbol_category_index,
-                                theme.primary,
-                                0.0,
-                                0.0,
+                        div().w_full().min_w_0().flex().flex_col().gap_1().relative()
+                            .when_some(symbol_category_index, |this, index| this.child(vertical_active_indicator(
+                                "sidebar-symbol-category-active-indicator", index, theme.primary, 0.0, 0.0,
                                 animations_enabled,
-                            ))
-                            .children(SYMBOL_CATEGORIES.iter().map(|definition| {
-                                sidebar_tab_item(symbol_category_button(
-                                    definition,
-                                    main.symbol_category == definition.id,
-                                    true,
-                                    sidebar_show_label,
-                                    cx,
-                                ))
-                            }))
+                            )))
+                            .children(symbol_categories.iter().map(|definition| sidebar_tab_item(symbol_category_button(
+                                definition, main.symbol_category == definition.id, true, sidebar_show_label, cx,
+                            ))))
                             .into_any_element()
                     } else {
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .children(CONTENT_FILTERS.iter().chain(PASTE_FILTERS.iter()).map(
-                                |definition| {
-                                    sidebar_button_item(filter_button(
-                                        definition,
-                                        main.selected_filters.contains(&definition.id),
-                                        true,
-                                        sidebar_show_label,
-                                        cx,
-                                    ))
-                                },
-                            ))
+                        div().w_full().min_w_0().flex().flex_col().gap_1()
+                            .children(filters.iter().map(|definition| sidebar_button_item(filter_button(
+                                definition, main.selected_filters.contains(&definition.id), true, sidebar_show_label, cx,
+                            ))))
                             .into_any_element()
-                    }),
-            )
-            .child(div().h(px(0.5)).flex_none().mx_2().bg(theme.border))
-            .child(
-                div()
-                    .w_auto()
-                    .min_w_auto()
-                    .flex_none()
-                    .p_2()
-                    .child(tags_button),
-            )
-            .child(
+                    }).into_any_element(),
+                TabBarSection::Tags if layout.is_visible(TabBarButton::Tags) => div()
+                    .w_auto().min_w_auto().flex_none().p_2().children(tags_button.take())
+                    .into_any_element(),
+                _ => continue,
+            };
+            if has_section {
+                sidebar = sidebar.child(div().h(px(0.5)).flex_none().mx_2().bg(theme.border));
+            }
+            sidebar = sidebar.child(content);
+            has_section = true;
+        }
+        if !middle_visible {
+            sidebar = sidebar.child(div().flex_1());
+        }
+        return sidebar.child(
                 div()
                     .w_auto()
                     .min_w_auto()
@@ -698,113 +657,63 @@ pub fn render(
                     .w(px(0.5))
                     .bg(theme.border),
             );
-        return sidebar;
     }
 
-    let tab_bar = div()
+    let mut tab_bar = div()
         .h(ui_rem(TAB_BAR_HEIGHT))
         .flex_none()
         .flex()
         .items_center()
         .relative()
-        .bg(theme.tab_bar)
-        .child(
-            div()
-                .h(ui_rem(TAB_BAR_HEIGHT))
-                .min_w_0()
-                .flex_none()
-                .flex_basis(relative(0.35))
-                .px(ui_rem(6.0))
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .relative()
-                        .w_full()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .child(horizontal_active_indicator(
-                            "main-tab-active-indicator",
-                            main_tab_index,
-                            MAIN_TABS.len(),
-                            theme.primary,
-                            TAB_SLOT_INSET,
-                            animations_enabled,
-                        ))
-                        .children(MAIN_TABS.iter().map(|definition| {
-                            tab_slot(tab_button(
-                                definition,
-                                definition.id == main.active_tab,
-                                false,
-                                true,
-                                cx,
-                            ))
-                        })),
-                ),
-        )
-        .child(div().flex_none().w(px(0.5)).h(ui_rem(24.0)).bg(theme.border))
-        .child(
-            div()
-                .h(ui_rem(TAB_BAR_HEIGHT))
-                .flex_1()
-                .min_w_0()
-                .pl_1()
-                .pr_1()
-                .flex()
-                .items_center()
-                .gap_1()
+        .bg(theme.tab_bar);
+    let mut tags_button = Some(tags_button);
+    let mut has_section = false;
+    for section in layout.sections.iter().copied() {
+        let content = match section {
+            TabBarSection::Pages if !main_tabs.is_empty() => div()
+                .h(ui_rem(TAB_BAR_HEIGHT)).min_w_0().px(ui_rem(6.0))
+                .when(middle_visible, |this| this.flex_none().flex_basis(relative(0.35)))
+                .when(!middle_visible, |this| this.flex_1())
+                .flex().items_center()
+                .child(div().relative().w_full().h_full().flex().items_center()
+                    .when_some(main_tab_index, |this, index| this.child(horizontal_active_indicator(
+                        "main-tab-active-indicator", index, main_tabs.len(), theme.primary,
+                        TAB_SLOT_INSET, animations_enabled,
+                    )))
+                    .children(main_tabs.iter().map(|definition| tab_slot(tab_button(
+                        definition, definition.id == main.active_tab, false, true, cx,
+                    )))))
+                .into_any_element(),
+            TabBarSection::Filters if middle_visible => div()
+                .h(ui_rem(TAB_BAR_HEIGHT)).flex_1().min_w_0().px_1().flex().items_center()
                 .child(if main.active_tab == TabId::Emoji {
-                    div()
-                        .h(ui_rem(TAB_BAR_HEIGHT))
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .relative()
-                        .child(horizontal_active_indicator(
-                            "symbol-category-active-indicator",
-                            symbol_category_index,
-                            SYMBOL_CATEGORIES.len(),
-                            theme.primary,
-                            TAB_SLOT_INSET,
-                            animations_enabled,
-                        ))
-                        .children(SYMBOL_CATEGORIES.iter().map(|definition| {
-                            tab_slot(symbol_category_button(
-                                definition,
-                                main.symbol_category == definition.id,
-                                false,
-                                true,
-                                cx,
-                            ))
-                        }))
+                    div().h_full().flex_1().min_w_0().flex().items_center().relative()
+                        .when_some(symbol_category_index, |this, index| this.child(horizontal_active_indicator(
+                            "symbol-category-active-indicator", index, symbol_categories.len(), theme.primary,
+                            TAB_SLOT_INSET, animations_enabled,
+                        )))
+                        .children(symbol_categories.iter().map(|definition| tab_slot(symbol_category_button(
+                            definition, main.symbol_category == definition.id, false, true, cx,
+                        ))))
                         .into_any_element()
                 } else {
-                    div()
-                        .h(ui_rem(TAB_BAR_HEIGHT))
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .children(CONTENT_FILTERS.iter().chain(PASTE_FILTERS.iter()).map(
-                            |definition| {
-                                filter_button(
-                                    definition,
-                                    main.selected_filters.contains(&definition.id),
-                                    false,
-                                    true,
-                                    cx,
-                                )
-                            },
-                        ))
+                    div().h_full().flex_1().min_w_0().flex().items_center()
+                        .children(filters.iter().map(|definition| filter_button(
+                            definition, main.selected_filters.contains(&definition.id), false, true, cx,
+                        )))
                         .into_any_element()
-                })
-                .when(main.active_tab != TabId::Emoji, |this| {
-                    this.child(divider(theme)).child(tags_button)
-                }),
-        )
-        .child(
+                }).into_any_element(),
+            TabBarSection::Tags if tags_visible => div().flex_none().px_1()
+                .children(tags_button.take()).into_any_element(),
+            _ => continue,
+        };
+        if has_section {
+            tab_bar = tab_bar.child(crate::ui::divider(theme));
+        }
+        tab_bar = tab_bar.child(content);
+        has_section = true;
+    }
+    tab_bar.child(
             div()
                 .absolute()
                 .left_0()
@@ -812,6 +721,5 @@ pub fn render(
                 .bottom_0()
                 .h(px(0.5))
                 .bg(theme.border),
-        );
-    tab_bar
+        )
 }

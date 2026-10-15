@@ -878,6 +878,22 @@ pub fn render(
             .flex_none()
             .border_r(px(0.5));
     } else {
+        let scale = crate::ui::scale::window_scale(window);
+        let content_left = if matches!(titlebar_position, TitlebarPosition::Left) {
+            px(36.0 * scale)
+        } else {
+            px(0.0)
+        };
+        let content_right = window.viewport_size().width - if matches!(titlebar_position, TitlebarPosition::Right) {
+            px(36.0 * scale)
+        } else {
+            px(0.0)
+        };
+        let panel_width = panel_width.min(content_right - content_left);
+        let anchor = main.tags_button_bounds.map(|bounds| bounds.center().x)
+            .unwrap_or(content_right);
+        let panel_left = (anchor - panel_width / 2.0)
+            .max(content_left).min(content_right - panel_width);
         panel = panel
             .absolute()
             .top(if titlebar_position.is_vertical() {
@@ -885,12 +901,8 @@ pub fn render(
             } else {
                 px(70.5 * crate::ui::scale::window_scale(window))
             })
-            .left(relative(0.35))
-            .right(if matches!(titlebar_position, TitlebarPosition::Right) {
-                px(36.0 * crate::ui::scale::window_scale(window))
-            } else {
-                px(-1.0)
-            })
+            .left(panel_left)
+            .w(panel_width)
             .max_h(relative(0.70))
             .border_t_0()
             .rounded_bl(px(16.0))
