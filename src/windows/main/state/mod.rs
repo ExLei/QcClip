@@ -112,6 +112,7 @@ pub(crate) struct AdaptiveHeightCacheKey {
     pub(crate) card_item_gap: CardItemGap,
     pub(crate) adaptive_max_lines: u8,
     pub(crate) only_show_notes: bool,
+    pub(crate) show_info_row: bool,
     pub(crate) display_priority: ClipboardDisplayPriority,
     pub(crate) query_generation: u64,
 }
@@ -126,6 +127,7 @@ pub(crate) struct ListLayoutCacheKey {
     pub(crate) list_item_height: crate::config::ListItemHeight,
     pub(crate) adaptive_max_lines: u8,
     pub(crate) only_show_notes: bool,
+    pub(crate) show_info_row: bool,
     pub(crate) display_priority: ClipboardDisplayPriority,
     pub(crate) query_generation: u64,
     pub(crate) layout_generation: u64,

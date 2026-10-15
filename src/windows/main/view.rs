@@ -75,6 +75,7 @@ impl Render for MainWindow {
                 card_item_gap: appearance.card_item_gap,
                 adaptive_max_lines: appearance.adaptive_max_lines,
                 only_show_notes: appearance.only_show_notes,
+                show_info_row: appearance.item_display.shows_info_row(),
                 display_priority: clipboard.display_priority,
                 query_generation: self.query_generation,
             },

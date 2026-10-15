@@ -341,6 +341,15 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
             default.only_show_notes,
             warnings,
         ),
+        item_display: read_group(object, "itemDisplay", warnings, |object, warnings| {
+            let default = super::ItemDisplayConfig::default();
+            super::ItemDisplayConfig {
+                info_visibility: read_field(object, "infoVisibility", "appearance.itemDisplay.infoVisibility", default.info_visibility, warnings),
+                toolbar_visibility: read_field(object, "toolbarVisibility", "appearance.itemDisplay.toolbarVisibility", default.toolbar_visibility, warnings),
+                actions_visibility: read_field(object, "actionsVisibility", "appearance.itemDisplay.actionsVisibility", default.actions_visibility, warnings),
+                fields: read_field(object, "fields", "appearance.itemDisplay.fields", default.fields, warnings),
+            }
+        }),
     }
 }
 

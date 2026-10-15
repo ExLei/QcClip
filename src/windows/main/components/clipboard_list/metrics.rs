@@ -323,6 +323,11 @@ pub(super) fn resolve_row_height(
 }
 
 impl ListItemMetrics {
+    pub(super) fn with_info_row(mut self, show_meta: bool) -> Self {
+        self.show_meta = show_meta;
+        self.with_preview_height(self.preview_height, self.preview_line_count)
+    }
+
     pub(super) fn with_note_display(mut self, only_show_notes: bool) -> Self {
         self.only_show_notes = only_show_notes;
         self
@@ -358,6 +363,25 @@ impl ListItemMetrics {
             )
         } else {
             metrics
+        }
+    }
+}
+
+#[cfg(test)]
+mod item_display_tests {
+    use super::*;
+
+    #[test]
+    fn information_visibility_changes_height_independently_of_preview_lines() {
+        for height in ListItemHeight::ALL {
+            let metrics = ListItemMetrics::from_rem_size(
+                px(16.0), ListItemStyle::Card, CardItemGap::Eight, height, 8,
+            );
+            let shown = metrics.with_info_row(true);
+            let hidden = metrics.with_info_row(false);
+            assert_eq!(shown.row_height - hidden.row_height, metrics.meta_row_height);
+            assert_eq!(shown.preview_height, hidden.preview_height);
+            assert_eq!(shown.preview_line_count, hidden.preview_line_count);
         }
     }
 }

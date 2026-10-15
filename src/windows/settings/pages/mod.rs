@@ -3,6 +3,7 @@ mod application_filter;
 mod clipboard;
 mod data_management;
 mod general;
+mod item_display_editor;
 mod legacy_migration;
 mod personalization;
 mod tab_bar_editor;

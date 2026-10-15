@@ -154,6 +154,7 @@ pub(super) fn history_item_context_menu(
         items.push(browser_item);
     }
     items.push(tags_menu_item(tags, &item.tag_ids, translator));
+    items.push(pin_menu_item(item, translator));
     if item.favorite_id.is_some() {
         items.push(
             MenuItem::action(
@@ -210,6 +211,7 @@ pub(super) fn favorite_item_context_menu(
         );
     }
     items.push(tags_menu_item(tags, &item.tag_ids, translator));
+    items.push(pin_menu_item(item, translator));
     let mut insert_index = items.len();
     if let Some(search_item) = search_menu_item(
         item,
@@ -236,6 +238,13 @@ pub(super) fn favorite_item_context_menu(
         .with_icon(MenuIcon::svg("star.svg")),
     );
     (MenuModel::new(items), format_actions)
+}
+
+fn pin_menu_item(item: &ClipboardListItem, translator: &Translator) -> MenuItem {
+    MenuItem::action(
+        MenuActionId::new("toggle-pin"),
+        translator.translate(if item.is_pinned { "main.menu.unpin" } else { "main.menu.pin" }),
+    ).with_icon(MenuIcon::svg("pin.svg"))
 }
 
 fn note_menu_item(item: &ClipboardListItem, translator: &Translator) -> MenuItem {
@@ -527,5 +536,36 @@ pub(super) fn format_label(preview: &FormatPreview, translator: &Translator) -> 
             }
         }
         FormatRole::Internal => translator.translate("main.format.internal"),
+    }
+}
+
+#[cfg(test)]
+mod item_display_tests {
+    use super::*;
+    use crate::i18n::Locale;
+
+    #[test]
+    fn both_context_menus_offer_pin_and_unpin_without_toolbar_controls() {
+        let translator = Translator::builtin(Locale::zh_cn());
+        let mut item = ClipboardListItem {
+            history_id: 1, item_id: 1, favorite_id: Some(2), tag_ids: vec![],
+            note_text: String::new(), preview_text: String::new(), preview_char_count: 0,
+            preview_options: vec![], all_format_options: vec![], content_kind: ContentKind::Text,
+            paste_count: 0, is_pinned: false, sort_order: 0, last_seen_at: 0,
+            shortcut: String::new(), source_app_name: None, source_app_icon: None, is_selected: false,
+        };
+        for pinned in [false, true] {
+            item.is_pinned = pinned;
+            for build_menu in [history_item_context_menu, favorite_item_context_menu] {
+                let (menu, _) = build_menu(
+                    &item, &[], &translator, ClipboardDisplayPriority::default(), &[], None, &[],
+                );
+                let action = menu.items().iter().find(|entry| {
+                    entry.id.as_ref().is_some_and(|id| id.as_str() == "toggle-pin")
+                }).expect("右键菜单缺少置顶操作");
+                assert_eq!(action.label.as_ref(), if pinned { "取消置顶" } else { "置顶" });
+                assert!(action.enabled);
+            }
+        }
     }
 }

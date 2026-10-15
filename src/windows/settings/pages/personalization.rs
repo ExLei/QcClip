@@ -8,7 +8,7 @@ use super::super::SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH;
 use super::super::{
     SettingsWindowView,
     components::{
-        clickable_setting_row, setting_row, settings_dropdown, settings_error_row,
+        clickable_setting_row, compact_clickable_setting_row, setting_row, settings_dropdown, settings_error_row,
         settings_page_header, settings_dropdown_with_font,
     },
 };
@@ -587,6 +587,21 @@ impl SettingsWindowView {
             ))
             .child(self.highlight_element(
                 theme,
+                translator.translate("settings.item_display.title"),
+                compact_clickable_setting_row(
+                    "settings-item-display",
+                    theme,
+                    translator.translate("settings.item_display.title"),
+                    {
+                        let view = view.clone();
+                        move |_, window, cx| {
+                            super::item_display_editor::open_item_display_sheet(view.clone(), window, cx)
+                        }
+                    },
+                ),
+            ))
+            .child(self.highlight_element(
+                theme,
                 translator.translate("settings.personalization.animations"),
                 clickable_setting_row(
                     "settings-personalization-animations",
@@ -784,7 +799,7 @@ fn set_all_animations(
     });
 }
 
-fn persist_appearance_change<F>(
+pub(super) fn persist_appearance_change<F>(
     view: Entity<SettingsWindowView>,
     field_name: &'static str,
     update: F,

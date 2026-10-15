@@ -436,11 +436,37 @@ pub(in crate::windows::settings) fn clickable_setting_row<F>(
 where
     F: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App) + 'static,
 {
+    clickable_setting_row_with_min_height(id, theme, title, description, on_click, ui_rem(62.0))
+}
+
+pub(in crate::windows::settings) fn compact_clickable_setting_row<F>(
+    id: impl Into<ElementId>,
+    theme: gpui_component::ThemeColor,
+    title: String,
+    on_click: F,
+) -> AnyElement
+where
+    F: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App) + 'static,
+{
+    clickable_setting_row_with_min_height(id, theme, title, None, on_click, ui_rem(52.0))
+}
+
+fn clickable_setting_row_with_min_height<F>(
+    id: impl Into<ElementId>,
+    theme: gpui_component::ThemeColor,
+    title: String,
+    description: Option<SharedString>,
+    on_click: F,
+    min_height: gpui::Rems,
+) -> AnyElement
+where
+    F: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App) + 'static,
+{
     h_flex()
         .id(id)
         .w_full()
         .min_w_0()
-        .min_h(ui_rem(62.0))
+        .min_h(min_height)
         .flex_shrink_0()
         .items_center()
         .justify_between()

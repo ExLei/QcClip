@@ -35,7 +35,8 @@ use crate::platform::drag_preview::DragPreviewService;
 use crate::{
     config::{
         ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, CardItemGap, ClipboardDisplayPriority,
-        ClipboardMouseMiddleBehavior, ListItemHeight, ListItemStyle, SearchEngine,
+        ClipboardMouseMiddleBehavior, ItemDisplayField, ItemRegionVisibility,
+        ListItemHeight, ListItemStyle, SearchEngine,
     },
     config_runtime,
     domain::{
@@ -184,7 +185,8 @@ pub fn render(
         appearance.card_item_gap,
         appearance.list_item_height,
         appearance.adaptive_max_lines,
-    ).with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx))
+    ).with_info_row(appearance.item_display.shows_info_row())
+        .with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx))
         .with_note_display(appearance.only_show_notes);
     let clipboard = crate::config_runtime::clipboard_config(cx);
     let display_priority = clipboard.display_priority;
@@ -389,6 +391,7 @@ fn render_rows(
         list_item_height: metrics.height,
         adaptive_max_lines: metrics.adaptive_max_lines as u8,
         only_show_notes: metrics.only_show_notes,
+        show_info_row: metrics.show_meta,
         display_priority,
         query_generation,
         // 固定行高与已加载条目的内容无关，分页时无需重建全部行的布局数组。
@@ -410,7 +413,8 @@ fn render_rows(
                 || cache.key.list_item_height != layout_key.list_item_height
                 || cache.key.adaptive_max_lines != layout_key.adaptive_max_lines
                 || cache.key.font_metrics != layout_key.font_metrics
-                || cache.key.only_show_notes != layout_key.only_show_notes)
+                || cache.key.only_show_notes != layout_key.only_show_notes
+                || cache.key.show_info_row != layout_key.show_info_row)
     });
     let mut build_layout = || {
         let sizes = (0..total_item_count)
@@ -935,7 +939,11 @@ fn render_hover_actions(
     selected: bool,
     hover_allowed: bool,
     cx: &mut Context<MainWindow>,
-) -> Option<AnyElement> {
+) -> Option<(AnyElement, usize)> {
+    let display = config_runtime::appearance_config(cx).item_display;
+    if display.actions_visibility == ItemRegionVisibility::Hidden {
+        return None;
+    }
     let translator = i18n::translator(cx);
     let theme = cx.theme().colors;
     let row_id = item.history_id;
@@ -1132,27 +1140,32 @@ fn render_hover_actions(
         )
     });
 
-    let button_count = 3
-        + usize::from(edit_button.is_some())
-        + usize::from(delete_button.is_some())
-        + usize::from(paste_plain_button.is_some())
-        + usize::from(default_open_button.is_some())
-        + usize::from(browser_button.is_some());
+    let buttons = [
+        (ItemDisplayField::Edit, edit_button),
+        (ItemDisplayField::Note, Some(note_button)),
+        (ItemDisplayField::PastePlain, paste_plain_button),
+        (ItemDisplayField::OpenDefault, default_open_button),
+        (ItemDisplayField::OpenBrowser, browser_button),
+        (ItemDisplayField::Favorite, Some(favorite_button)),
+        (ItemDisplayField::Pin, Some(pin_button)),
+        (ItemDisplayField::Delete, delete_button),
+    ].into_iter().filter(|(field, _)| display.enabled(*field))
+        .filter_map(|(_, button)| button).collect::<Vec<_>>();
+    let button_count = buttons.len();
+    if button_count == 0 {
+        return None;
+    }
     let expanded_width = gpui_component::Theme::global(cx).font_size * (button_count as f32 * 20.0 / 16.0);
-    let (width, opacity) = if selected {
-        (expanded_width, 1.0)
-    } else {
-        (px(0.0), 0.0)
-    };
+    let visible = display.actions_visibility.is_visible(selected);
     let animations_enabled =
         crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListActions);
     let motion = Duration::from_millis(160).with_easing(gpui::ease_in_out);
-    Some(
+    Some((
         div()
             .id(("hover-actions", row_id as u64))
             .h_full()
-            .w(width)
-            .opacity(opacity)
+            .w(if visible { expanded_width } else { px(0.0) })
+            .opacity(if visible { 1.0 } else { 0.0 })
             .flex()
             .items_center()
             .flex_none()
@@ -1160,16 +1173,15 @@ fn render_hover_actions(
             .when(hover_allowed && animations_enabled, |this| {
                 this.transitions(|transitions| transitions.w(motion.clone()).opacity(motion))
             })
-            .children(edit_button)
-            .child(note_button)
-            .children(paste_plain_button)
-            .children(default_open_button)
-            .children(browser_button)
-            .child(favorite_button)
-            .child(pin_button)
-            .children(delete_button)
+            .when(hover_allowed && display.actions_visibility == ItemRegionVisibility::Active, |this| {
+                this.group_hover(format!("clipboard-row-hover-{row_id}"), |style| {
+                    style.w(expanded_width).opacity(1.0)
+                })
+            })
+            .children(buttons)
             .into_any_element(),
-    )
+        button_count,
+    ))
 }
 
 fn hover_action_button(
@@ -1390,12 +1402,14 @@ fn render_item_surface<T>(
     file_list: Option<Entity<FileListView>>,
     width: Option<Pixels>,
     drag_preview: bool,
-    hover_actions: Option<AnyElement>,
+    hover_actions: Option<(AnyElement, usize)>,
     selection_window: Option<Entity<MainWindow>>,
     hover_allowed: bool,
     cx: &mut Context<T>,
 ) -> gpui::Div {
     let translator = i18n::translator(cx);
+    let display = config_runtime::appearance_config(cx).item_display;
+    let row_hover_group = format!("clipboard-row-hover-{}", item.history_id);
     let note_only = metrics.shows_only_note(&item.note_text);
     let show_note_header = !item.note_text.is_empty() && !note_only;
     let content_metrics = if show_note_header {
@@ -1436,11 +1450,45 @@ fn render_item_surface<T>(
     } else {
         theme.secondary
     };
+    let (hover_actions, action_count) = hover_actions
+        .map(|(actions, count)| (Some(actions), count)).unwrap_or((None, 0));
+    let show_source = display.toolbar_visibility != ItemRegionVisibility::Hidden
+        && display.enabled(ItemDisplayField::Source);
+    let show_shortcut = display.toolbar_visibility != ItemRegionVisibility::Hidden
+        && display.enabled(ItemDisplayField::Shortcut) && !shortcut_number.is_empty();
+    let identity_count = usize::from(show_source) + usize::from(show_shortcut);
+    let identity_width = ui_rem(20.0 * identity_count as f32);
+    let toolbar_width = 20.0 * (action_count + identity_count) as f32;
+    let has_toolbar = action_count + identity_count > 0;
+    let mut identity = div()
+        .h_full()
+        .w(if display.toolbar_visibility.is_visible(selected) { identity_width } else { ui_rem(0.0) })
+        .flex_none()
+        .flex()
+        .items_center()
+        .overflow_hidden()
+        .when(show_source, |this| this.child(source_application_icon(
+            item.history_id,
+            item.source_app_name.as_deref(),
+            source_app_icon,
+            theme,
+            &translator,
+        )))
+        .when(show_shortcut, |this| this.child(
+            div().h_full().w(ui_rem(20.0)).flex_none()
+                .flex().items_center().justify_center()
+                .text_xs().text_color(theme.primary).child(shortcut_number),
+        ));
+    if hover_allowed && display.toolbar_visibility == ItemRegionVisibility::Active {
+        identity = identity.group_hover(row_hover_group.clone(), |style| style.w(identity_width));
+    }
     let mut info_bar = div()
         .absolute()
         .top_0()
         .right_0()
         .h(ui_rem(20.0))
+        .flex_none()
+        .max_w_full()
         .flex()
         .items_center()
         .overflow_hidden()
@@ -1450,26 +1498,17 @@ fn render_item_surface<T>(
         .bg(info_bar_background)
         .rounded_bl(px(6.0))
         .children(hover_actions)
-        .child(source_application_icon(
-            item.history_id,
-            item.source_app_name.as_deref(),
-            source_app_icon,
-            theme,
-            &translator,
-        ))
-        .child(
-            div()
-                .h_full()
-                .min_w(ui_rem(20.0))
-                .pl(ui_rem(4.0))
-                .pr(ui_rem(4.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_xs()
-                .text_color(theme.primary)
-                .child(shortcut_number),
-        );
+        .when(identity_count > 0, |this| this.child(identity));
+    let toolbar_visible = (identity_count > 0 && display.toolbar_visibility.is_visible(selected))
+        || (action_count > 0 && display.actions_visibility.is_visible(selected));
+    if !toolbar_visible {
+        info_bar = info_bar.invisible();
+        if hover_allowed && ((identity_count > 0 && display.toolbar_visibility == ItemRegionVisibility::Active)
+            || (action_count > 0 && display.actions_visibility == ItemRegionVisibility::Active))
+        {
+            info_bar = info_bar.group_hover(row_hover_group.clone(), |style| style.visible());
+        }
+    }
     if list_item_style == ListItemStyle::Card {
         info_bar = info_bar.rounded_tr(px(CARD_RADIUS));
     }
@@ -1477,7 +1516,7 @@ fn render_item_surface<T>(
     if inline_info_bar {
         info_bar = info_bar.relative().h(metrics.preview_line_height);
     }
-    let mut info_bar = Some(info_bar);
+    let mut info_bar = has_toolbar.then_some(info_bar);
 
     let mut preview = div()
         .flex_none()
@@ -1558,8 +1597,11 @@ fn render_item_surface<T>(
             );
     }
 
-    let meta_row = div()
+    let mut meta_row = div()
         .h(metrics.meta_row_height)
+        .w_full()
+        .min_w_0()
+        .when(has_toolbar, |this| this.pr(ui_rem((toolbar_width - 10.0).max(0.0))))
         .flex_none()
         .flex()
         .items_center()
@@ -1567,15 +1609,27 @@ fn render_item_surface<T>(
         .text_size(metrics.meta_font_size)
         .line_height(metrics.meta_row_height)
         .text_color(cx.theme().muted_foreground)
-        .child(i18n::relative_time(&translator, item.last_seen_at))
-        .child(length);
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .when(display.enabled(ItemDisplayField::Time), |this| {
+            this.child(div().flex_shrink_0().child(i18n::relative_time(&translator, item.last_seen_at)))
+        })
+        .when(display.enabled(ItemDisplayField::Length), |this| {
+            this.child(div().min_w_0().truncate().child(length))
+        });
+    if display.info_visibility == ItemRegionVisibility::Active && !selected {
+        meta_row = meta_row.invisible();
+        if hover_allowed {
+            meta_row = meta_row.group_hover(row_hover_group.clone(), |style| style.visible());
+        }
+    }
     let mut row = div()
         .h(metrics.content_height)
         .flex_none()
         .relative()
         .flex()
         .flex_col()
-        .group(format!("clipboard-row-hover-{}", item.history_id))
+        .group(row_hover_group)
         .cursor_pointer();
     row = if let Some(width) = width {
         row.w(width)
@@ -1584,6 +1638,7 @@ fn render_item_surface<T>(
     };
     row = row.px(ui_rem(10.0)).py(metrics.vertical_padding);
     if metrics.show_meta {
+        // 首行给右上角控件让出实际宽度，避免信息较长时互相遮挡。
         row = row.child(meta_row);
     }
     if show_note_header {
@@ -1882,7 +1937,7 @@ fn render_row(
         hover_group.clone()
     };
     let main_window = cx.entity();
-    let hover_actions = render_hover_actions(&item, active_tab, focused, hover_allowed, cx);
+    let hover_actions = render_hover_actions(&item, active_tab, selected, hover_allowed, cx);
     let mut row = render_item_surface(
         &item,
         selected,
@@ -2337,7 +2392,9 @@ fn render_row(
                             return;
                         }
                         main_window.update(cx, |this, cx| {
-                            if action.as_str() == EDIT_ITEM_ACTION {
+                            if action.as_str() == "toggle-pin" {
+                                this.set_item_pinned(row_id, favorite_id, !menu_item.is_pinned, cx);
+                            } else if action.as_str() == EDIT_ITEM_ACTION {
                                 this.edit_item(item_id, cx);
                             } else if action.as_str() == EDIT_NOTE_ACTION {
                                 this.edit_note(item_id, cx);
@@ -2417,7 +2474,9 @@ fn render_row(
                             return;
                         }
                         main_window.update(cx, |this, cx| {
-                            if action.as_str() == ADD_TO_FAVORITES_ACTION {
+                            if action.as_str() == "toggle-pin" {
+                                this.set_item_pinned(row_id, favorite_id, !menu_item.is_pinned, cx);
+                            } else if action.as_str() == ADD_TO_FAVORITES_ACTION {
                                 this.add_to_favorites(item_id, cx);
                             } else if action.as_str() == EDIT_ITEM_ACTION {
                                 this.edit_item(item_id, cx);

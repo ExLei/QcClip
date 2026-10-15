@@ -1,10 +1,12 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod load;
+mod item_display;
 mod notification;
 mod tab_bar;
 
 pub use notification::{NotificationConfig, NotificationKind};
+pub use item_display::{ItemDisplayConfig, ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility};
 pub use tab_bar::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -1338,6 +1340,7 @@ pub struct AppearanceConfig {
     pub list_item_height: ListItemHeight,
     pub adaptive_max_lines: u8,
     pub only_show_notes: bool,
+    pub item_display: ItemDisplayConfig,
 }
 
 impl Default for AppearanceConfig {
@@ -1361,6 +1364,7 @@ impl Default for AppearanceConfig {
             list_item_height: ListItemHeight::default(),
             adaptive_max_lines: ADAPTIVE_MAX_LINES_DEFAULT,
             only_show_notes: false,
+            item_display: ItemDisplayConfig::default(),
         }
     }
 }
