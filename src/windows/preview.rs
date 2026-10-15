@@ -4,6 +4,7 @@ use std::{collections::HashMap, fs, ops::Range, path::PathBuf, sync::Arc, time::
 
 use file_icon_provider::Icon;
 use gpui::prelude::*;
+use gpui_component::ActiveTheme as _;
 use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, App, AppContext, Bounds, Context, Global,
     IntoElement, LineFragment, ListAlignment, ListSizingBehavior, ListState, ObjectFit, Pixels,
@@ -26,7 +27,7 @@ use crate::{
         physical_client_bounds, work_area_for_physical_point,
     },
     services::image_preview::ImagePreviewService,
-    ui::{html as html_preview, icon},
+    ui::{fonts::AppFontMetrics, html as html_preview, icon},
 };
 
 const HOVER_DELAY: Duration = Duration::from_millis(200);
@@ -532,6 +533,8 @@ struct PreviewWindow {
     text_content: Arc<str>,
     text_line_ranges: Arc<Vec<Range<usize>>>,
     text_wrap_width: Option<f32>,
+    font_metrics: Option<AppFontMetrics>,
+    text_line_height: Pixels,
     text_list_state: ListState,
     html_scroll: ScrollHandle,
     file_scroll: ScrollHandle,
@@ -568,6 +571,8 @@ impl PreviewWindow {
             text_content: Arc::from(""),
             text_line_ranges: Arc::new(Vec::new()),
             text_wrap_width: None,
+            font_metrics: None,
+            text_line_height: px(TEXT_LINE_HEIGHT),
             text_list_state: ListState::new(0, ListAlignment::Top, px(2048.0)),
             html_scroll: ScrollHandle::new(),
             file_scroll: ScrollHandle::new(),
@@ -703,7 +708,7 @@ impl PreviewWindow {
             .reset_with_uniform_height(text_line_ranges.len(), px(TEXT_LINE_HEIGHT));
     }
 
-    fn ensure_text_layout(&mut self, wrap_width: f32, window: &Window) {
+    fn ensure_text_layout(&mut self, wrap_width: f32, window: &Window, cx: &App) {
         if self.mode != Some(PreviewMode::Text) {
             return;
         }
@@ -715,11 +720,13 @@ impl PreviewWindow {
             return;
         }
 
-        let ranges = wrapped_text_line_ranges(&self.text_content, px(wrap_width), window);
+        let ranges = wrapped_text_line_ranges(
+            &self.text_content, px(wrap_width), gpui::font(cx.theme().font_family.clone()), window,
+        );
         self.text_line_ranges = Arc::new(ranges);
         self.text_list_state.reset_with_uniform_height(
             self.text_line_ranges.len(),
-            ui_rem(TEXT_LINE_HEIGHT).to_pixels(window.rem_size()),
+            self.text_line_height,
         );
         self.text_wrap_width = Some(wrap_width);
         self.content_size = None;
@@ -1074,7 +1081,7 @@ impl PreviewWindow {
                     .filter_map(|entry| entry.size)
                     .sum::<u64>();
                 let summary = div()
-                    .h(px(34.0))
+                    .min_h(ui_rem(34.0))
                     .flex_none()
                     .flex()
                     .items_center()
@@ -1290,7 +1297,7 @@ impl PreviewWindow {
                             .child(div().child(html_preview::render_with_images_and_max_lines(
                                 html,
                                 ui_rem(14.0).to_pixels(window.rem_size()),
-                                ui_rem(21.0).to_pixels(window.rem_size()),
+                                self.text_line_height,
                                 preview.text.clone(),
                                 &self.html_images,
                                 10_000,
@@ -1321,6 +1328,7 @@ impl PreviewWindow {
         let ui_scale = crate::ui::scale::window_scale(window);
         let text_content = self.text_content.clone();
         let text_line_ranges = self.text_line_ranges.clone();
+        let line_height = self.text_line_height;
         list(self.text_list_state.clone(), move |index, _, _| {
             let line = text_line_ranges
                 .get(index)
@@ -1330,7 +1338,7 @@ impl PreviewWindow {
             div()
                 .w_full()
                 .text_size(ui_rem(14.0))
-                .line_height(ui_rem(TEXT_LINE_HEIGHT))
+                .line_height(line_height)
                 .text_color(text_color)
                 .child(line)
                 .into_any_element()
@@ -1492,6 +1500,22 @@ impl Render for PreviewWindow {
             self.surface_bounds = None;
         }
         window.set_rem_size(rem_size);
+        let font_metrics = AppFontMetrics::from_window(window, cx);
+        if self.font_metrics != Some(font_metrics) {
+            // 字体变化会影响换行与窗口尺寸，不能沿用旧字体的测量结果。
+            self.text_wrap_width = None;
+            self.content_size = None;
+            self.surface_bounds = None;
+            self.font_metrics = Some(font_metrics);
+            self.reveal_generation = self.reveal_generation.wrapping_add(1);
+        }
+        let font_size = ui_rem(14.0).to_pixels(rem_size);
+        self.text_line_height = font_metrics.line_height(
+            font_size, ui_rem(TEXT_LINE_HEIGHT).to_pixels(rem_size),
+        );
+        let note_line_height = font_metrics.line_height(
+            font_size, ui_rem(20.0).to_pixels(rem_size),
+        );
         let Some(anchor) = self.anchor else {
             return div().size_full().into_any_element();
         };
@@ -1546,7 +1570,9 @@ impl Render for PreviewWindow {
         let (note_width, note_height) = if note_text.is_empty() {
             (0.0, 0.0)
         } else {
-            let runs = [window.text_style().to_run(note_text.len())];
+            let mut text_style = window.text_style();
+            text_style.font_family = cx.theme().font_family.clone();
+            let runs = [text_style.to_run(note_text.len())];
             let layout = window.text_system().shape_text(
                 note_text.clone(), ui_rem(14.0).to_pixels(window.rem_size()), &runs,
                 Some(px((max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window) - surface_border_width * 2.0).max(1.0))), None,
@@ -1558,11 +1584,12 @@ impl Render for PreviewWindow {
             (
                 (width.ceil() + TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window) + surface_border_width * 2.0)
                     .max(TEXT_MIN_WIDTH).min(max_width),
-                ((lines.clamp(1, 6) as f32 * 20.0 + TEXT_VERTICAL_PADDING) * crate::ui::scale::window_scale(window)).min(max_height * 0.3),
+                (lines.clamp(1, 6) as f32 * f32::from(note_line_height)
+                    + TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).min(max_height * 0.3),
             )
         };
         let content_max_height = (max_height - note_height).max(1.0);
-        self.ensure_text_layout(max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window), window);
+        self.ensure_text_layout(max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window), window, cx);
         let image_size = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
             .flatten()
@@ -1688,7 +1715,7 @@ impl Render for PreviewWindow {
                     .border_color(theme.border).bg(theme.secondary)
                     .child(div().id("preview-note-scroll").size_full().overflow_y_scroll()
                         .track_scroll(&self.note_scroll)
-                        .child(div().px_3().py_2().text_size(ui_rem(14.0)).line_height(ui_rem(20.0))
+                        .child(div().px_3().py_2().text_size(ui_rem(14.0)).line_height(note_line_height)
                             .text_color(theme.foreground).child(note_text))),
             ))
             .child(self.render_content(max_width, content_max_height, image_size, window, cx))
@@ -1847,6 +1874,8 @@ impl Render for PreviewWindow {
             .unwrap_or_else(|| div().into_any_element());
         let connector = deferred(connector).priority(2);
         div()
+            .font_family(cx.theme().font_family.clone())
+            .line_height(gpui::relative(f32::from(self.text_line_height) / f32::from(font_size)))
             .relative()
             .size_full()
             .when(self.visible, |this| this.child(preview).child(connector))
@@ -2309,11 +2338,15 @@ fn text_line_ranges(text: &str) -> Vec<Range<usize>> {
     ranges
 }
 
-fn wrapped_text_line_ranges(text: &str, wrap_width: Pixels, window: &Window) -> Vec<Range<usize>> {
-    let text_style = window.text_style();
+fn wrapped_text_line_ranges(
+    text: &str,
+    wrap_width: Pixels,
+    font: gpui::Font,
+    window: &Window,
+) -> Vec<Range<usize>> {
     let mut line_wrapper = window
         .text_system()
-        .line_wrapper(text_style.font(), ui_rem(14.0).to_pixels(window.rem_size()));
+        .line_wrapper(font, ui_rem(14.0).to_pixels(window.rem_size()));
     let mut ranges = Vec::new();
 
     for line_range in text_line_ranges(text) {
