@@ -25,9 +25,29 @@ use crate::{
     windows::main::state::{MainWindow, TagDropTarget, TagReorderAnimation},
 };
 
-const SIDEBAR_PANEL_WIDTH: f32 = 184.0;
 const TAG_REORDER_ANIMATION_DURATION: Duration = Duration::from_millis(260);
 const TAG_DRAG_PREVIEW_BACKGROUND_OPACITY: f32 = 0.8;
+
+fn sidebar_panel_width(preferred_width: f32, viewport_width: f32) -> f32 {
+    use crate::state_runtime::PersistedMainWindowState as State;
+    let max_width = (viewport_width * 0.45)
+        .clamp(State::MIN_TAGS_PANEL_WIDTH, State::MAX_TAGS_PANEL_WIDTH);
+    preferred_width.clamp(State::MIN_TAGS_PANEL_WIDTH, max_width)
+}
+
+impl MainWindow {
+    pub(crate) fn finish_tags_panel_resize(&mut self, cx: &mut Context<Self>) {
+        if self.tags_panel_resize_start.take().is_none() {
+            return;
+        }
+        let mut state = crate::state_runtime::state(cx);
+        state.main_window.tags_panel_width = self.tags_panel_width;
+        if let Err(error) = crate::state_runtime::set_state(state, cx) {
+            tracing::error!("保存标签面板宽度失败：{error}");
+        }
+        cx.notify();
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct TagDrag {
@@ -587,8 +607,9 @@ pub fn render(
     let titlebar_position = appearance.titlebar_position;
     let material_enabled = appearance.window_material != WindowMaterial::Disabled;
     let translator = i18n::translator(cx);
+    let scale = crate::ui::scale::window_scale(window);
     let panel_width = if sidebar_layout {
-        px(SIDEBAR_PANEL_WIDTH * crate::ui::scale::window_scale(window))
+        px(sidebar_panel_width(main.tags_panel_width, f32::from(window.viewport_size().width) / scale) * scale)
     } else {
         window.viewport_size().width * 0.65 + px(1.0)
     };
@@ -700,6 +721,7 @@ pub fn render(
         .track_focus(&main.focus_handle)
         .flex()
         .flex_col()
+        .relative()
         .overflow_hidden()
         .occlude()
         .bg(theme.secondary)
@@ -715,9 +737,38 @@ pub fn render(
         }))
         .on_mouse_move_all({
             let main_window = cx.entity().downgrade();
-            move |_, phase, _, window, cx| {
+            move |event: &gpui::MouseMoveEvent, phase, _, window, cx| {
                 if phase == gpui::DispatchPhase::Capture {
                     main_window.update(cx, |this, cx| {
+                        if let Some((start_x, start_width)) = this.tags_panel_resize_start {
+                            if event.dragging() {
+                                let scale = crate::ui::scale::window_scale(window);
+                                let width = sidebar_panel_width(
+                                    start_width + f32::from(event.position.x - start_x) / scale,
+                                    f32::from(window.viewport_size().width) / scale,
+                                );
+                                if this.tags_panel_width != width {
+                                    this.tags_panel_width = width;
+                                    this.adaptive_item_heights.clear();
+                                    this.invalidate_list_layout_cache();
+                                    cx.notify();
+                                }
+                                cx.stop_propagation();
+                            } else {
+                                this.finish_tags_panel_resize(cx);
+                            }
+                        }
+                        this.update_tags_panel_auto_close(window, cx);
+                    }).ok();
+                }
+            }
+        })
+        .on_mouse_up_all({
+            let main_window = cx.entity().downgrade();
+            move |event, phase, _, window, cx| {
+                if phase == gpui::DispatchPhase::Capture && event.button == MouseButton::Left {
+                    main_window.update(cx, |this, cx| {
+                        this.finish_tags_panel_resize(cx);
                         this.update_tags_panel_auto_close(window, cx);
                     }).ok();
                 }
@@ -757,17 +808,21 @@ pub fn render(
         )
         .child(
             div()
-                .h(ui_rem(34.0))
+                .min_h(ui_rem(34.0))
                 .w_full()
                 .flex_none()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .justify_between()
-                .px_3()
+                .gap(ui_rem(4.0))
+                .px_2()
+                .py(ui_rem(4.0))
                 .border_b(px(0.5))
                 .border_color(theme.border)
                 .child(
                     div()
+                        .flex_none()
                         .text_size(ui_rem(12.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.foreground)
@@ -776,6 +831,7 @@ pub fn render(
                 .child(
                     div()
                         .flex()
+                        .flex_none()
                         .items_center()
                         .gap(ui_rem(2.0))
                         .child(action_button(
@@ -873,10 +929,29 @@ pub fn render(
 
     if sidebar_layout {
         panel = panel
-            .w(px(SIDEBAR_PANEL_WIDTH * crate::ui::scale::window_scale(window)))
+            .w(panel_width)
             .h_full()
             .flex_none()
-            .border_r(px(0.5));
+            .border_r(px(0.5))
+            .child(
+                div()
+                    .id("tags-panel-resize-handle")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(ui_rem(5.0))
+                    .cursor_col_resize()
+                    .hover(|this| this.bg(theme.border))
+                    .when(main.tags_panel_resize_start.is_some(), |this| this.bg(theme.ring))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        this.window_drag_start = None;
+                        this.cancel_tags_panel_close();
+                        this.tags_panel_resize_start = Some((event.position.x, f32::from(panel_width) / scale));
+                        cx.notify();
+                    })),
+            );
     } else {
         let scale = crate::ui::scale::window_scale(window);
         let content_left = if matches!(titlebar_position, TitlebarPosition::Left) {
@@ -910,4 +985,18 @@ pub fn render(
     }
 
     panel
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sidebar_panel_width;
+
+    #[test]
+    fn sidebar_panel_width_respects_drag_limits_and_window_space() {
+        assert_eq!(sidebar_panel_width(80.0, 800.0), 120.0);
+        assert_eq!(sidebar_panel_width(240.0, 800.0), 240.0);
+        assert_eq!(sidebar_panel_width(500.0, 1200.0), 360.0);
+        assert_eq!(sidebar_panel_width(360.0, 500.0), 225.0);
+        assert_eq!(sidebar_panel_width(360.0, 800.0), 360.0);
+    }
 }

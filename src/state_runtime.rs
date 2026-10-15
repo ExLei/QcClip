@@ -107,6 +107,8 @@ pub(crate) struct PersistedMainWindowState {
     pub(crate) normal_position: Option<PersistedWindowPosition>,
     /// 普通窗口和贴边窗口共用的客户区逻辑尺寸。
     pub(crate) size: Option<PersistedWindowSize>,
+    /// 侧边标签面板的宽度，使用未经过界面缩放的逻辑像素。
+    pub(crate) tags_panel_width: f32,
     /// 当前保存的贴边状态；为空表示上次退出时没有贴边。
     pub(crate) edge: Option<PersistedEdgePosition>,
     pub(crate) gallery_sort: PersistedGallerySort,
@@ -142,6 +144,7 @@ impl Default for PersistedMainWindowState {
             last_search_engine_template: None,
             normal_position: None,
             size: None,
+            tags_panel_width: Self::DEFAULT_TAGS_PANEL_WIDTH,
             edge: None,
             gallery_sort: PersistedGallerySort::default(),
             quick_paste_tab: PersistedQuickPasteTab::default(),
@@ -151,6 +154,18 @@ impl Default for PersistedMainWindowState {
 }
 
 impl PersistedMainWindowState {
+    pub(crate) const DEFAULT_TAGS_PANEL_WIDTH: f32 = 184.0;
+    pub(crate) const MIN_TAGS_PANEL_WIDTH: f32 = 120.0;
+    pub(crate) const MAX_TAGS_PANEL_WIDTH: f32 = 360.0;
+
+    pub(crate) fn restored_tags_panel_width(&self) -> f32 {
+        if self.tags_panel_width.is_finite() {
+            self.tags_panel_width.clamp(Self::MIN_TAGS_PANEL_WIDTH, Self::MAX_TAGS_PANEL_WIDTH)
+        } else {
+            Self::DEFAULT_TAGS_PANEL_WIDTH
+        }
+    }
+
     pub(crate) fn restored_size(&self) -> PersistedWindowSize {
         self.size
             .filter(|size| size.is_valid())
@@ -342,6 +357,17 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn tags_panel_width_is_restored_with_valid_bounds() {
+        for (width, expected) in [
+            (80.0, 120.0), (240.0, 240.0), (500.0, 360.0),
+            (f32::NAN, 184.0), (f32::INFINITY, 184.0),
+        ] {
+            let state = PersistedMainWindowState { tags_panel_width: width, ..Default::default() };
+            assert_eq!(state.restored_tags_panel_width(), expected);
+        }
+    }
+
+    #[test]
     fn restored_window_size_rejects_collapsed_and_non_finite_sizes() {
         for size in [
             PersistedWindowSize { width: 360.0, height: 1.0 },
@@ -377,6 +403,7 @@ mod tests {
                     width: 480.0,
                     height: 640.0,
                 }),
+                tags_panel_width: 240.0,
                 edge: None,
                 gallery_sort: PersistedGallerySort::default(),
                 quick_paste_tab: Default::default(),
@@ -410,6 +437,7 @@ mod tests {
 
         assert_eq!(state.main_window.size, None);
         assert_eq!(state.main_window.edge, None);
+        assert_eq!(state.main_window.restored_tags_panel_width(), 184.0);
         assert!(state.main_window.recent_emojis.is_empty());
         assert!(state.main_window.recent_symbols.is_empty());
     }

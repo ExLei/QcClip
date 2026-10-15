@@ -791,7 +791,9 @@ impl MainWindow {
     fn can_auto_close_tags_panel(&self, window: &Window, cx: &Context<Self>) -> bool {
         let search_focused = self.tags_search_input.as_ref()
             .is_some_and(|input| input.focus_handle(cx).is_focused(window));
-        if search_focused || self.tags_panel_pinned || !self.tags_panel_open {
+        if search_focused || self.tags_panel_pinned || !self.tags_panel_open
+            || self.tags_panel_resize_start.is_some()
+        {
             return false;
         }
         let pointer_inside = window.is_window_hovered()

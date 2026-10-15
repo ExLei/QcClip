@@ -82,6 +82,9 @@ impl Render for MainWindow {
         );
         let titlebar_position = appearance.titlebar_position;
         let sidebar_layout = is_sidebar_layout(window);
+        if !sidebar_layout || !self.tags_panel_open {
+            self.finish_tags_panel_resize(cx);
+        }
         if !sidebar_layout {
             self.sidebar_collapsed = false;
         }

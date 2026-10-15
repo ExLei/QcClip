@@ -201,6 +201,8 @@ pub struct MainWindow {
     pub(crate) tags_match_all: bool,
     pub(crate) tags_panel_open: bool,
     pub(crate) tags_panel_pinned: bool,
+    pub(crate) tags_panel_width: f32,
+    pub(crate) tags_panel_resize_start: Option<(Pixels, f32)>,
     pub(crate) tags_panel_bounds: Option<gpui::Bounds<Pixels>>,
     pub(crate) tags_button_bounds: Option<gpui::Bounds<Pixels>>,
     pub(crate) tags: Vec<Tag>,
@@ -388,6 +390,7 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) -> Self {
         let persisted_state = state_runtime::state(cx);
+        let tags_panel_width = persisted_state.main_window.restored_tags_panel_width();
         let clipboard_listener_enabled = clipboard_monitor.is_some();
         Self {
             focus_handle: cx.focus_handle(),
@@ -413,6 +416,8 @@ impl MainWindow {
             tags_match_all: false,
             tags_panel_open: false,
             tags_panel_pinned: false,
+            tags_panel_width,
+            tags_panel_resize_start: None,
             tags_panel_bounds: None,
             tags_button_bounds: None,
             tags: Vec::new(),
