@@ -26,6 +26,8 @@
 
 搜索输入、滚动位置、加载任务和图像缓存等临时状态由窗口维护，不属于配置文件。
 
+标签面板中的“切换页面时清空选择”保存为 `config.json` 的 `clipboard.clearTagsOnTabSwitch`，默认关闭；开启后切换到历史或收藏页面时清空标签选择。
+
 ## 配置分组
 
 首发配置 schema 版本为 **1**。JSON 字段使用 camelCase，顶层版本字段为 `schemaVersion`。

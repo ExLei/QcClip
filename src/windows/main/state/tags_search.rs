@@ -235,6 +235,11 @@ impl MainWindow {
         self.list_smooth_scroll.reset();
         self.emoji_smooth_scroll.reset();
         self.symbol_smooth_scroll.reset();
+        if crate::config_runtime::clipboard_config(cx).clear_tags_on_tab_switch
+            && matches!(tab_id, TabId::Clipboard | TabId::Favorites)
+        {
+            self.selected_tag_ids.clear();
+        }
         self.active_tab = tab_id;
         self.persist_state(cx);
         self.refresh_history(cx);
@@ -827,6 +832,22 @@ impl MainWindow {
             self.refresh_history(cx);
         } else {
             cx.notify();
+        }
+    }
+
+    pub(crate) fn reset_tag_selection(&mut self, cx: &mut Context<Self>) {
+        if self.selected_tag_ids.is_empty() {
+            return;
+        }
+        self.selected_tag_ids.clear();
+        self.refresh_history(cx);
+    }
+
+    pub(crate) fn toggle_clear_tags_on_tab_switch(&mut self, cx: &mut Context<Self>) {
+        let mut clipboard = crate::config_runtime::clipboard_config(cx);
+        clipboard.clear_tags_on_tab_switch = !clipboard.clear_tags_on_tab_switch;
+        if let Err(error) = crate::config_runtime::set_clipboard_config(clipboard, cx) {
+            tracing::error!("保存切换页面时清空标签选择设置失败：{error}");
         }
     }
 

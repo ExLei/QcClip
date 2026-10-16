@@ -838,6 +838,7 @@ mod tests {
         let path = directory.path().join("config.json");
         let mut config = AppConfig::default();
         config.general.language = InterfaceLanguage::EnUs;
+        config.clipboard.clear_tags_on_tab_switch = true;
 
         persist_config(&path, &config).expect("配置保存失败");
 

@@ -194,6 +194,8 @@ fn action_button(
         "plus" => 0_u32,
         "settings" => 1_u32,
         "filter" => 2_u32,
+        "refresh" => 4_u32,
+        "versions-off" => 5_u32,
         _ => 3_u32,
     };
     let color = if active {
@@ -228,6 +230,14 @@ fn action_button(
     } else if name == "filter" {
         button = button.on_click(cx.listener(|this, _, _, cx| {
             this.toggle_tags_match_mode(cx);
+        }));
+    } else if name == "refresh" {
+        button = button.on_click(cx.listener(|this, _, _, cx| {
+            this.reset_tag_selection(cx);
+        }));
+    } else if name == "versions-off" {
+        button = button.on_click(cx.listener(|this, _, _, cx| {
+            this.toggle_clear_tags_on_tab_switch(cx);
         }));
     } else {
         button = button.on_click(cx.listener(|this, _, _, cx| {
@@ -603,6 +613,7 @@ pub fn render(
 
     let theme = cx.theme().colors;
     let tags_panel_pinned = main.tags_panel_pinned;
+    let clear_tags_on_tab_switch = config_runtime::clipboard_config(cx).clear_tags_on_tab_switch;
     let appearance = config_runtime::appearance_config(cx);
     let titlebar_position = appearance.titlebar_position;
     let material_enabled = appearance.window_material != WindowMaterial::Disabled;
@@ -834,6 +845,8 @@ pub fn render(
                         .flex_none()
                         .items_center()
                         .gap(ui_rem(2.0))
+                        .flex_wrap()
+                        .max_w_full()
                         .child(action_button(
                             "plus",
                             translator.translate("main.tags.new"),
@@ -856,6 +869,24 @@ pub fn render(
                                 "main.tags.switch_to_all"
                             }),
                             main.tags_match_all,
+                            theme,
+                            cx,
+                        ))
+                        .child(action_button(
+                            "refresh",
+                            translator.translate("main.tags.reset_selection"),
+                            false,
+                            theme,
+                            cx,
+                        ))
+                        .child(action_button(
+                            "versions-off",
+                            translator.translate(if clear_tags_on_tab_switch {
+                                "main.tags.clear_on_tab_switch_enabled"
+                            } else {
+                                "main.tags.clear_on_tab_switch_disabled"
+                            }),
+                            clear_tags_on_tab_switch,
                             theme,
                             cx,
                         ))

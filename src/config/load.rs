@@ -433,6 +433,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.confirm_favorite_removal,
             warnings,
         ),
+        clear_tags_on_tab_switch: read_field(
+            object,
+            "clearTagsOnTabSwitch",
+            "clipboard.clearTagsOnTabSwitch",
+            default.clear_tags_on_tab_switch,
+            warnings,
+        ),
         window_position: read_field(
             object,
             "windowPosition",
@@ -799,6 +806,7 @@ mod tests {
     fn empty_object_returns_complete_defaults() {
         let loaded = from_str("{}").expect("空配置对象应当可以加载");
 
+        assert!(!loaded.config.clipboard.clear_tags_on_tab_switch);
         assert_eq!(loaded.config.general.language, InterfaceLanguage::ZhCn);
         assert!(loaded.config.general.global_notification_enabled);
         assert_eq!(
