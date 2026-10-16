@@ -3,15 +3,18 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use atomic_write_file::AtomicWriteFile;
-use gpui::{App, AppContext, BorrowAppContext, Global};
+use gpui::{App, AppContext, BorrowAppContext, Global, Task};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
 
 use crate::windows::main::tabs::{SymbolCategoryId, TabId};
+
+const PREVIEW_STATE_SAVE_DELAY: Duration = Duration::from_millis(300);
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) enum PersistedQuickPasteTab {
@@ -120,8 +123,36 @@ pub(crate) struct PersistedMainWindowState {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
+pub(crate) struct PersistedPreviewWindowState {
+    /// 所有图片共用的正方形预览适配框边长，使用逻辑像素。
+    pub(crate) image_base_size: f32,
+}
+
+impl Default for PersistedPreviewWindowState {
+    fn default() -> Self {
+        Self { image_base_size: Self::DEFAULT_IMAGE_BASE_SIZE }
+    }
+}
+
+impl PersistedPreviewWindowState {
+    pub(crate) const DEFAULT_IMAGE_BASE_SIZE: f32 = 480.0;
+    pub(crate) const IMAGE_BASE_SIZE_MIN: f32 = 48.0;
+    pub(crate) const IMAGE_BASE_SIZE_MAX: f32 = 2400.0;
+
+    pub(crate) fn restored_image_base_size(&self) -> f32 {
+        if self.image_base_size.is_finite() {
+            self.image_base_size.clamp(Self::IMAGE_BASE_SIZE_MIN, Self::IMAGE_BASE_SIZE_MAX)
+        } else {
+            Self::DEFAULT_IMAGE_BASE_SIZE
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
 pub(crate) struct PersistedState {
     pub(crate) main_window: PersistedMainWindowState,
+    pub(crate) preview_window: PersistedPreviewWindowState,
     pub(crate) legacy_migration_prompt_dismissed: bool,
 }
 
@@ -177,6 +208,7 @@ impl Default for PersistedState {
     fn default() -> Self {
         Self {
             main_window: PersistedMainWindowState::default(),
+            preview_window: PersistedPreviewWindowState::default(),
             legacy_migration_prompt_dismissed: false,
         }
     }
@@ -201,6 +233,8 @@ pub(crate) enum StateError {
 pub(crate) struct StateRuntime {
     state: PersistedState,
     path: PathBuf,
+    pending_save: Option<Task<()>>,
+    dirty: bool,
 }
 
 impl Global for StateRuntime {}
@@ -214,16 +248,48 @@ impl StateRuntime {
                 warn!("创建状态文件失败：{error}");
             }
         }
-        cx.set_global(Self { state, path });
+        cx.set_global(Self { state, path, pending_save: None, dirty: false });
+        cx.on_app_quit(|cx| {
+            cx.update_global::<Self, _>(|runtime, _| {
+                if let Err(error) = runtime.flush_pending_save() {
+                    tracing::error!("退出时保存待写入状态失败：{error}");
+                }
+            });
+            async {}
+        })
+        .detach();
     }
 
     pub(crate) fn reload(path: impl Into<PathBuf>, cx: &mut App) {
         let path = path.into();
         let state = load_state(&path);
         cx.update_global::<Self, _>(|runtime, _| {
+            runtime.pending_save = None;
+            runtime.dirty = false;
             runtime.state = state.clone();
             runtime.path = path.clone();
         });
+    }
+
+    fn update_preview_image_base_size(&mut self, image_base_size: f32) -> bool {
+        let image_base_size = PersistedPreviewWindowState { image_base_size }.restored_image_base_size();
+        if self.state.preview_window.image_base_size == image_base_size {
+            return false;
+        }
+        self.state.preview_window.image_base_size = image_base_size;
+        self.dirty = true;
+        self.pending_save = None;
+        true
+    }
+
+    fn flush_pending_save(&mut self) -> Result<bool, StateError> {
+        self.pending_save = None;
+        if !self.dirty {
+            return Ok(false);
+        }
+        persist_state(&self.path, &self.state)?;
+        self.dirty = false;
+        Ok(true)
     }
 }
 
@@ -243,7 +309,11 @@ where
     }
 
     persist_state(&path, &state)?;
-    cx.update_global::<StateRuntime, _>(|runtime, _| runtime.state = state);
+    cx.update_global::<StateRuntime, _>(|runtime, _| {
+        runtime.state = state;
+        runtime.dirty = false;
+        runtime.pending_save = None;
+    });
     Ok(true)
 }
 
@@ -289,6 +359,27 @@ where
     if let Err(error) = set_state(state, cx) {
         tracing::error!("保存主窗口大小失败：{error}");
     }
+}
+
+pub(crate) fn set_preview_image_base_size(image_base_size: f32, cx: &mut App) {
+    let changed = cx.update_global::<StateRuntime, _>(|runtime, _| {
+        runtime.update_preview_image_base_size(image_base_size)
+    });
+    if !changed {
+        return;
+    }
+    let task = cx.spawn(async move |cx| {
+        cx.background_executor().timer(PREVIEW_STATE_SAVE_DELAY).await;
+        // 到期时保存最新状态，避免延迟任务覆盖期间更新的其他字段。
+        cx.update(|cx| {
+            cx.update_global::<StateRuntime, _>(|runtime, _| {
+                if let Err(error) = runtime.flush_pending_save() {
+                    tracing::error!("保存图片预览大小失败：{error}");
+                }
+            });
+        });
+    });
+    cx.update_global::<StateRuntime, _>(|runtime, _| runtime.pending_save = Some(task));
 }
 
 pub(crate) fn set_main_window_edge(
@@ -350,8 +441,8 @@ fn persist_state(path: &Path, state: &PersistedState) -> Result<(), StateError> 
 #[cfg(test)]
 mod tests {
     use super::{
-        PersistedGallerySort, PersistedMainWindowState, PersistedState, PersistedWindowPosition,
-        PersistedWindowSize, persist_state,
+        PersistedGallerySort, PersistedMainWindowState, PersistedPreviewWindowState, PersistedState,
+        PersistedWindowPosition, PersistedWindowSize, StateRuntime, load_state, persist_state,
     };
     use crate::windows::main::tabs::{SymbolCategoryId, TabId};
     use tempfile::tempdir;
@@ -384,6 +475,25 @@ mod tests {
     }
 
     #[test]
+    fn preview_size_updates_are_coalesced_until_flushed() {
+        let directory = tempdir().expect("无法创建临时目录");
+        let path = directory.path().join("state.json");
+        let state = PersistedState::default();
+        persist_state(&path, &state).expect("状态保存失败");
+        let mut runtime = StateRuntime { state, path, pending_save: None, dirty: false };
+
+        for size in [528.0, 576.0, 720.0] {
+            runtime.update_preview_image_base_size(size);
+        }
+        assert_eq!(runtime.state.preview_window.image_base_size, 720.0);
+        assert_eq!(load_state(&runtime.path).preview_window.image_base_size, 480.0);
+        runtime.state.main_window.active_tab = TabId::Emoji;
+        assert!(runtime.flush_pending_save().expect("待写入状态保存失败"));
+        assert_eq!(load_state(&runtime.path), runtime.state);
+        assert!(!runtime.flush_pending_save().expect("重复保存状态失败"));
+    }
+
+    #[test]
     fn persisted_state_can_be_loaded_by_json() {
         let directory = tempdir().expect("无法创建临时目录");
         let path = directory.path().join("state.json");
@@ -409,14 +519,14 @@ mod tests {
                 quick_paste_tab: Default::default(),
                 quick_paste_index: 0,
             },
+            preview_window: PersistedPreviewWindowState { image_base_size: 720.0 },
             ..Default::default()
         };
 
         persist_state(&path, &state).expect("状态保存失败");
-        let loaded: PersistedState =
-            serde_json::from_str(&std::fs::read_to_string(path).expect("无法读取状态文件"))
-                .expect("状态读取失败");
+        let loaded = load_state(&path);
         assert_eq!(loaded, state);
+        assert_eq!(loaded.preview_window.restored_image_base_size(), 720.0);
     }
 
     #[test]
@@ -440,5 +550,7 @@ mod tests {
         assert_eq!(state.main_window.restored_tags_panel_width(), 184.0);
         assert!(state.main_window.recent_emojis.is_empty());
         assert!(state.main_window.recent_symbols.is_empty());
+        assert_eq!(state.preview_window.restored_image_base_size(), 480.0);
     }
+
 }

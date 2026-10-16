@@ -27,6 +27,7 @@ use crate::{
         physical_client_bounds, work_area_for_physical_point,
     },
     services::image_preview::ImagePreviewService,
+    state_runtime::{self, PersistedPreviewWindowState},
     ui::{fonts::AppFontMetrics, html as html_preview, icon},
 };
 
@@ -39,12 +40,9 @@ const TEXT_SCROLL_STEP: f32 = 120.0;
 const TEXT_LINE_HEIGHT: f32 = 22.4;
 const TEXT_HORIZONTAL_PADDING: f32 = 24.0;
 const TEXT_VERTICAL_PADDING: f32 = 16.0;
-const IMAGE_SCALE_STEP: f32 = 0.1;
-const IMAGE_SCALE_MIN: f32 = 0.1;
-const IMAGE_SCALE_MAX: f32 = 5.0;
+const IMAGE_PREVIEW_SIZE_STEP: f32 = 48.0;
 const TEXT_MIN_WIDTH: f32 = 48.0;
 const TEXT_MIN_HEIGHT: f32 = 46.0;
-const IMAGE_PREVIEW_BASE_SIZE: f32 = 480.0;
 const PREVIEW_INFO_MAX_WIDTH: f32 = 960.0;
 const PREVIEW_INFO_MIN_WIDTH: f32 = 160.0;
 const PREVIEW_INFO_GAP: f32 = 8.0;
@@ -524,7 +522,8 @@ struct PreviewWindow {
     image_dimensions: Option<(u32, u32)>,
     image_byte_length: Option<u64>,
     image_source_path: Option<PathBuf>,
-    image_scale: f32,
+    image_base_size: f32,
+    image_base_size_limit: Option<f32>,
     html_images: HashMap<PathBuf, Arc<RenderImage>>,
     file_entries: Vec<PreviewFileEntry>,
     content_scrollable: bool,
@@ -564,7 +563,8 @@ impl PreviewWindow {
             image_dimensions: None,
             image_byte_length: None,
             image_source_path: None,
-            image_scale: 1.0,
+            image_base_size: PersistedPreviewWindowState::DEFAULT_IMAGE_BASE_SIZE,
+            image_base_size_limit: None,
             html_images: HashMap::new(),
             file_entries: Vec::new(),
             content_scrollable: false,
@@ -678,7 +678,8 @@ impl PreviewWindow {
             .map(|dimensions| (dimensions.width, dimensions.height));
         self.image_byte_length = None;
         self.image_source_path = None;
-        self.image_scale = 1.0;
+        self.image_base_size = state_runtime::state(cx).preview_window.restored_image_base_size();
+        self.image_base_size_limit = None;
         self.html_images.clear();
         self.file_entries.clear();
         self.content_scrollable = false;
@@ -952,7 +953,8 @@ impl PreviewWindow {
         self.image_dimensions = None;
         self.image_byte_length = None;
         self.image_source_path = None;
-        self.image_scale = 1.0;
+        self.image_base_size = state_runtime::state(cx).preview_window.restored_image_base_size();
+        self.image_base_size_limit = None;
         self.loading = false;
         self.error = None;
         self.content_scrollable = false;
@@ -976,10 +978,13 @@ impl PreviewWindow {
         }
         let Some(mode) = self.mode else { return };
         if mode == PreviewMode::Image {
-            let next = (self.image_scale + delta_y.signum() * IMAGE_SCALE_STEP)
-                .clamp(IMAGE_SCALE_MIN, IMAGE_SCALE_MAX);
-            self.image_scale = (next * 100.0).round() / 100.0;
-            cx.notify();
+            let Some(limit) = self.image_base_size_limit else { return };
+            let next = Self::next_image_base_size(self.image_base_size, limit, delta_y);
+            if next != self.image_base_size {
+                self.image_base_size = next;
+                state_runtime::set_preview_image_base_size(next, cx);
+                cx.notify();
+            }
             return;
         }
         if mode == PreviewMode::Text {
@@ -1018,6 +1023,7 @@ impl PreviewWindow {
         self.image = None;
         self.image_byte_length = None;
         self.image_source_path = None;
+        self.image_base_size_limit = None;
         self.html_images.clear();
         self.file_entries.clear();
         self.text_content = Arc::from("");
@@ -1312,12 +1318,23 @@ impl PreviewWindow {
         .max_h(px((max_height - TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).max(1.0)))
     }
 
+    fn next_image_base_size(current: f32, limit: f32, delta_y: f32) -> f32 {
+        let limit = limit.clamp(
+            PersistedPreviewWindowState::IMAGE_BASE_SIZE_MIN,
+            PersistedPreviewWindowState::IMAGE_BASE_SIZE_MAX,
+        );
+        // 从实际可显示的基准开始调整，避免已保存的过大尺寸造成反向缩小无反馈。
+        (current.min(limit) + delta_y.signum() * IMAGE_PREVIEW_SIZE_STEP)
+            .clamp(PersistedPreviewWindowState::IMAGE_BASE_SIZE_MIN, limit)
+    }
+
     fn image_display_size(
         &self,
         preview: &FormatPreview,
         max_width: f32,
         max_height: f32,
         scale_factor: f32,
+        image_base_size: f32,
     ) -> Option<Size<f32>> {
         let (width, height) = self.image_dimensions.or_else(|| {
             preview
@@ -1330,7 +1347,7 @@ impl PreviewWindow {
             max_width,
             max_height,
             scale_factor,
-            self.image_scale,
+            image_base_size,
         )
     }
 
@@ -1340,7 +1357,7 @@ impl PreviewWindow {
         max_width: f32,
         max_height: f32,
         scale_factor: f32,
-        image_scale: f32,
+        image_base_size: f32,
     ) -> Option<Size<f32>> {
         let display_scale = Self::resolve_image_display_scale(
             width,
@@ -1348,7 +1365,7 @@ impl PreviewWindow {
             max_width,
             max_height,
             scale_factor,
-            image_scale,
+            image_base_size,
         )?;
         let scale_factor = scale_factor.max(1.0);
         let width = width as f32 / scale_factor;
@@ -1362,7 +1379,7 @@ impl PreviewWindow {
         max_width: f32,
         max_height: f32,
         scale_factor: f32,
-        image_scale: f32,
+        image_base_size: f32,
     ) -> Option<f32> {
         let scale_factor = scale_factor.max(1.0);
         let width = width as f32 / scale_factor;
@@ -1370,9 +1387,9 @@ impl PreviewWindow {
         if width <= 0.0 || height <= 0.0 || max_width <= 0.0 || max_height <= 0.0 {
             return None;
         }
-        let base_width = max_width.min(IMAGE_PREVIEW_BASE_SIZE);
-        let base_height = max_height.min(IMAGE_PREVIEW_BASE_SIZE);
-        Some((base_width / width).min(base_height / height) * image_scale)
+        let base_width = max_width.min(image_base_size);
+        let base_height = max_height.min(image_base_size);
+        Some((base_width / width).min(base_height / height))
     }
 
     fn render_information(
@@ -1734,7 +1751,17 @@ impl Render for PreviewWindow {
         let image_size = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
             .flatten()
-            .and_then(|preview| self.image_display_size(preview, max_width, content_max_height, scale));
+            .and_then(|preview| self.image_display_size(
+                preview, max_width, content_max_height, scale, self.image_base_size,
+            ));
+        self.image_base_size_limit = (self.mode == Some(PreviewMode::Image))
+            .then(|| self.current_preview())
+            .flatten()
+            .and_then(|preview| self.image_display_size(
+                preview, max_width, content_max_height, scale,
+                PersistedPreviewWindowState::IMAGE_BASE_SIZE_MAX,
+            ))
+            .map(|size| size.width.max(size.height));
         let image_display_percentage = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
             .flatten()
@@ -1750,7 +1777,7 @@ impl Render for PreviewWindow {
                     max_width,
                     content_max_height,
                     scale,
-                    self.image_scale,
+                    self.image_base_size,
                 )
                 .map(|display_scale| display_scale * 100.0)
             });
@@ -2914,11 +2941,11 @@ mod tests {
     #[test]
     fn image_preview_uses_a_shared_logical_base_size() {
         assert_eq!(
-            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 1.0, 1.0),
+            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 1.0, 480.0),
             Some(gpui::size(480.0, 270.0))
         );
         assert_eq!(
-            PreviewWindow::resolve_image_display_size(160, 90, 1000.0, 1000.0, 1.0, 1.0),
+            PreviewWindow::resolve_image_display_size(160, 90, 1000.0, 1000.0, 1.0, 480.0),
             Some(gpui::size(480.0, 270.0))
         );
     }
@@ -2926,26 +2953,26 @@ mod tests {
     #[test]
     fn image_preview_percentage_reports_actual_logical_scale() {
         assert_eq!(
-            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 1.0, 1.0,)
+            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 1.0, 480.0)
                 .map(|scale| scale * 100.0),
             Some(25.0)
         );
         assert_eq!(
-            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 2.0, 1.0,)
+            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 2.0, 480.0)
                 .map(|scale| scale * 100.0),
             Some(50.0)
         );
         assert_eq!(
-            PreviewWindow::resolve_image_display_scale(160, 90, 1000.0, 1000.0, 1.0, 1.0)
+            PreviewWindow::resolve_image_display_scale(160, 90, 1000.0, 1000.0, 1.0, 480.0)
                 .map(|scale| scale * 100.0),
             Some(300.0)
         );
     }
 
     #[test]
-    fn image_preview_percentage_includes_zoom_factor() {
+    fn image_preview_percentage_uses_the_adjusted_base_size() {
         assert_eq!(
-            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 1.0, 2.0)
+            PreviewWindow::resolve_image_display_scale(1920, 1080, 1000.0, 1000.0, 1.0, 960.0)
                 .map(|scale| scale * 100.0),
             Some(50.0)
         );
@@ -2954,25 +2981,45 @@ mod tests {
     #[test]
     fn image_preview_base_size_is_limited_by_available_logical_space() {
         assert_eq!(
-            PreviewWindow::resolve_image_display_size(1000, 1000, 260.0, 1000.0, 1.0, 1.0),
+            PreviewWindow::resolve_image_display_size(1000, 1000, 260.0, 1000.0, 1.0, 480.0),
             Some(gpui::size(260.0, 260.0))
+        );
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(1000, 1000, 260.0, 1000.0, 1.0, 960.0),
+            Some(gpui::size(260.0, 260.0))
+        );
+        assert_eq!(
+            PreviewWindow::resolve_image_display_size(1000, 2000, 1000.0, 300.0, 1.0, 960.0),
+            Some(gpui::size(150.0, 300.0))
         );
     }
 
     #[test]
-    fn image_preview_zoom_scales_from_the_shared_base_size() {
+    fn image_preview_uses_the_adjusted_logical_base_size_on_high_dpi_displays() {
         assert_eq!(
-            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 2.0, 2.0),
+            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 2.0, 960.0),
             Some(gpui::size(960.0, 540.0))
         );
     }
 
     #[test]
-    fn image_preview_can_zoom_out_below_the_base_size() {
+    fn image_preview_can_use_a_base_size_below_the_default() {
         assert_eq!(
-            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 1.0, 0.1),
+            PreviewWindow::resolve_image_display_size(1920, 1080, 1000.0, 1000.0, 1.0, 48.0),
             Some(gpui::size(48.0, 27.0))
         );
+    }
+
+    #[test]
+    fn image_preview_zoom_stops_at_visible_limit_and_reverses_immediately() {
+        let mut base_size = 480.0;
+        for _ in 0..20 {
+            base_size = PreviewWindow::next_image_base_size(base_size, 700.0, 1.0);
+        }
+        assert_eq!(base_size, 700.0);
+        assert_eq!(PreviewWindow::next_image_base_size(base_size, 700.0, 1.0), 700.0);
+        assert_eq!(PreviewWindow::next_image_base_size(base_size, 700.0, -1.0), 652.0);
+        assert_eq!(PreviewWindow::next_image_base_size(2400.0, 700.0, -1.0), 652.0);
     }
 
     fn place_information(
