@@ -335,6 +335,16 @@ impl PreviewWindowService {
         });
     }
 
+    fn defer_hide(cx: &mut App) {
+        let generation = cx.global::<Self>().generation;
+        cx.defer(move |cx| {
+            // 旧预览的关闭回调不能取消重新进入后发起的新预览。
+            if cx.global::<Self>().generation == generation {
+                crate::windows::main::MainWindowService::cancel_hover_preview(cx);
+            }
+        });
+    }
+
     pub(crate) fn destroy(cx: &mut App) {
         cx.update_global::<Self, _>(|service, cx| {
             service.pending_show = None;
@@ -630,13 +640,13 @@ impl PreviewWindow {
                     && !main_window.contains(pointer)
                 {
                     preview.hide(window, cx);
-                    cx.defer(|cx| PreviewWindowService::hide(cx));
+                    PreviewWindowService::defer_hide(cx);
                     return;
                 }
 
                 if crate::platform::window::preview_foreground_event_pending() {
                     preview.hide(window, cx);
-                    cx.defer(|cx| PreviewWindowService::hide(cx));
+                    PreviewWindowService::defer_hide(cx);
                     return;
                 }
 

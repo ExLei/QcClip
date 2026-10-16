@@ -1867,8 +1867,11 @@ fn handle_row_hover(
             this.select_item(row_id);
             cx.notify();
         }
-        if !config_runtime::clipboard_config(cx).hover_preview_enabled {
+        if !config_runtime::hover_preview_enabled(cx) {
             this.cancel_hover_preview(cx);
+            return;
+        }
+        if this.preview_hover_source == Some(preview_source) {
             return;
         }
         if let Some(anchor) = preview_anchor.get() {
@@ -1886,6 +1889,61 @@ fn handle_row_hover(
     } else {
         this.hide_hover_preview(preview_source, cx);
     }
+}
+
+fn with_row_hover(
+    row: gpui::Stateful<gpui::Div>,
+    row_id: HistoryItemId,
+    preview_anchor: Rc<Cell<Option<PreviewAnchor>>>,
+    preview_item: ClipboardListItem,
+    preview_source: PreviewSource,
+    preview_priority: ClipboardDisplayPriority,
+    cx: &mut Context<MainWindow>,
+) -> gpui::Stateful<gpui::Div> {
+    let hover_anchor = preview_anchor.clone();
+    let hover_item = preview_item.clone();
+    let main_window = cx.entity().downgrade();
+    row.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
+        if !*hovered
+            || (window.is_window_hovered() && MenuService::hover_animation_allowed(cx))
+        {
+            handle_row_hover(
+                this, *hovered, row_id, &hover_anchor, &hover_item,
+                preview_source, preview_priority, window, cx,
+            );
+        }
+    }))
+    .on_mouse_move_all(move |event, phase, hitbox, window, cx| {
+        if phase != gpui::DispatchPhase::Capture
+            || event.pressed_button.is_some()
+            || cx.has_active_drag()
+            || !window.is_window_hovered()
+        {
+            return;
+        }
+        let hovered = hitbox.is_hovered(window);
+        let Some(main_window) = main_window.upgrade() else {
+            return;
+        };
+        let is_current_source = main_window.read(cx).preview_hover_source == Some(preview_source);
+        if hovered == is_current_source
+            || !MenuService::hover_animation_allowed(cx)
+            || !config_runtime::hover_preview_enabled(cx)
+        {
+            return;
+        }
+        let _ = main_window.update(cx, |this, cx| {
+            // 按当前命中结果恢复预览，不依赖 GPUI 是否再次发出悬停状态变化。
+            if hovered {
+                handle_row_hover(
+                    this, true, row_id, &preview_anchor, &preview_item,
+                    preview_source, preview_priority, window, cx,
+                );
+            } else {
+                this.hide_hover_preview(preview_source, cx);
+            }
+        });
+    })
 }
 
 fn render_row(
@@ -1963,10 +2021,6 @@ fn render_row(
     } else {
         PreviewSource::History(item.history_id)
     };
-    let row_hover_anchor = preview_anchor.clone();
-    let row_hover_item = preview_item.clone();
-    let card_hover_anchor = preview_anchor.clone();
-    let card_hover_item = preview_item.clone();
 
     if !focused && hover_allowed {
         let selection_window = main_window.clone();
@@ -2558,24 +2612,12 @@ fn render_row(
         .w_full()
         .flex_none()
         .group(row_group)
-        .on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
-            if MenuService::hover_animation_allowed(cx)
-                && (!*hovered || window.is_window_hovered())
-                && list_item_style == ListItemStyle::Seamless
-            {
-                handle_row_hover(
-                    this,
-                    *hovered,
-                    row_id,
-                    &row_hover_anchor,
-                    &row_hover_item,
-                    preview_source,
-                    preview_priority,
-                    window,
-                    cx,
-                );
-            }
-        }))
+        .when(list_item_style == ListItemStyle::Seamless, |row| {
+            with_row_hover(
+                row, row_id, preview_anchor.clone(), preview_item.clone(),
+                preview_source, preview_priority, cx,
+            )
+        })
         .child(row);
     if can_reorder {
         row = crate::windows::main::window_drag::exclude_from_window_drag(row, main_window.clone());
@@ -2610,23 +2652,12 @@ fn render_row(
             .px(px(CARD_HORIZONTAL_INSET))
             .py(metrics.card_vertical_inset)
             .group(hover_group)
-            .on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
-                if MenuService::hover_animation_allowed(cx)
-                    && (!*hovered || window.is_window_hovered())
-                {
-                    handle_row_hover(
-                        this,
-                        *hovered,
-                        row_id,
-                        &card_hover_anchor,
-                        &card_hover_item,
-                        preview_source,
-                        preview_priority,
-                        window,
-                        cx,
-                    );
-                }
-            }))
+            .map(|card| {
+                with_row_hover(
+                    card, row_id, preview_anchor, preview_item,
+                    preview_source, preview_priority, cx,
+                )
+            })
             .child(row);
         if can_reorder {
             let preview_size = preview_size.clone();

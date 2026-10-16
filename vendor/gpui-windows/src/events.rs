@@ -415,6 +415,25 @@ impl WindowsWindowInner {
                 .set(Some(callback));
         }
 
+        // 离开窗口时补发输入事件，清除元素悬停状态，确保重新进入同一项时能再次触发预览。
+        if let Some(mut callback) = self.state.callbacks.input.take() {
+            let pressed_button = [
+                (VK_LBUTTON, MouseButton::Left),
+                (VK_RBUTTON, MouseButton::Right),
+                (VK_MBUTTON, MouseButton::Middle),
+                (VK_XBUTTON1, MouseButton::Navigate(NavigationDirection::Back)),
+                (VK_XBUTTON2, MouseButton::Navigate(NavigationDirection::Forward)),
+            ]
+            .into_iter()
+            .find_map(|(key, button)| is_virtual_key_pressed(key).then_some(button));
+            // GetCapture 仅读取当前线程的捕获窗口，不涉及指针访问。
+            let has_capture = unsafe { !GetCapture().is_invalid() };
+            dispatch_mouse_leave(pressed_button, has_capture, current_modifiers(), |event| {
+                callback(event);
+            });
+            self.state.callbacks.input.set(Some(callback));
+        }
+
         Some(0)
     }
 
@@ -1714,6 +1733,80 @@ fn should_use_ime_cursor_position(ctx: HIMC, cursor_pos: usize) -> bool {
         && attrs[cursor_pos - 1] == (ATTR_INPUT as u8);
 
     at_cursor_is_input || before_cursor_is_input
+}
+
+fn dispatch_mouse_leave(
+    pressed_button: Option<MouseButton>,
+    has_capture: bool,
+    modifiers: Modifiers,
+    mut dispatch: impl FnMut(PlatformInput),
+) {
+    // 离开消息可能延迟到鼠标返回后才处理，使用窗口外坐标清除旧命中状态。
+    let position = point(px(-1.0), px(-1.0));
+    // GPUI 离开事件不会更新鼠标位置；按键或捕获期间禁止合成移动，以免干扰拖动。
+    if pressed_button.is_none() && !has_capture {
+        dispatch(PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers,
+        }));
+    }
+    dispatch(PlatformInput::MouseExited(MouseExitEvent {
+        position,
+        pressed_button,
+        modifiers,
+    }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dispatch_mouse_leave;
+    use core::prelude::v1::test;
+    use gpui::{Modifiers, MouseButton, NavigationDirection, PlatformInput, px};
+
+    #[test]
+    fn mouse_leave_while_pressing_a_button_does_not_interrupt_dragging() {
+        for button in [
+            MouseButton::Left, MouseButton::Right, MouseButton::Middle,
+            MouseButton::Navigate(NavigationDirection::Back),
+            MouseButton::Navigate(NavigationDirection::Forward),
+        ] {
+            for has_capture in [false, true] {
+                let mut events = Vec::new();
+                dispatch_mouse_leave(Some(button), has_capture, Modifiers::default(), |event| {
+                    events.push(event);
+                });
+                assert_eq!(events.len(), 1, "按键按下时不应合成移动事件");
+                let PlatformInput::MouseExited(exit) = &events[0] else {
+                    panic!("仍应发送鼠标离开事件");
+                };
+                assert_eq!(exit.pressed_button, Some(button), "应保留实际按键状态");
+            }
+        }
+    }
+
+    #[test]
+    fn mouse_leave_with_capture_does_not_generate_a_move() {
+        let mut events = Vec::new();
+        dispatch_mouse_leave(None, true, Modifiers::default(), |event| events.push(event));
+        assert!(matches!(events.as_slice(), [PlatformInput::MouseExited(_)]),
+            "鼠标被捕获时只应发送离开事件");
+    }
+
+    #[test]
+    fn mouse_leave_without_buttons_or_capture_clears_the_old_hit_position() {
+        let modifiers = Modifiers { control: true, ..Default::default() };
+        let mut events = Vec::new();
+        dispatch_mouse_leave(None, false, modifiers, |event| events.push(event));
+        let [PlatformInput::MouseMove(movement), PlatformInput::MouseExited(exit)] = events.as_slice() else {
+            panic!("普通离开时应先同步窗口外坐标，再发送离开事件");
+        };
+        assert!(movement.position.x < px(0.0) && movement.position.y < px(0.0),
+            "离开坐标必须位于窗口外，避免重新命中旧项");
+        assert_eq!(exit.position, movement.position);
+        assert_eq!(movement.modifiers, modifiers);
+        assert_eq!(exit.modifiers, modifiers);
+    }
 }
 
 #[inline]

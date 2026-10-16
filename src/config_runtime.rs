@@ -246,6 +246,10 @@ pub(crate) fn clipboard_config(cx: &App) -> ClipboardConfig {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.clipboard.clone())
 }
 
+pub(crate) fn hover_preview_enabled(cx: &App) -> bool {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.clipboard.hover_preview_enabled)
+}
+
 pub(crate) fn sound_config(cx: &App) -> SoundConfig {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.sound.clone())
 }
