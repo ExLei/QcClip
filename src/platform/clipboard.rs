@@ -9,6 +9,9 @@ use std::{
 
 use crate::domain::capture::CapturedClipboard;
 
+#[cfg(target_os = "windows")]
+mod transient;
+
 pub type ClipboardEventReceiver = Receiver<Result<CapturedClipboard, String>>;
 
 const SELF_WRITE_SUPPRESSION_TTL: Duration = Duration::from_secs(3);
@@ -136,7 +139,7 @@ mod windows_clipboard {
         ptr, slice,
         sync::mpsc::{self, Sender},
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use clipboard_rs::{
@@ -164,6 +167,7 @@ mod windows_clipboard {
         core::{PCWSTR, PWSTR},
     };
 
+    use super::transient::{ClipboardObservation, filter_events};
     use super::{ClipboardPayload, ClipboardWriteSuppressor};
     use crate::domain::capture::{
         CapturedClipboard, FormatKind, FormatRole, RawFormat, SourceApplication,
@@ -202,13 +206,19 @@ mod windows_clipboard {
                 .map_err(|error| SystemClipboardError::Initialize(error.to_string()))
         }
 
-        pub fn capture_current(&self) -> Result<CapturedClipboard, SystemClipboardError> {
+        pub fn capture_current(&self) -> Result<Option<CapturedClipboard>, SystemClipboardError> {
+            let native_formats = enumerate_native_formats()?;
+            if should_ignore_clipboard(&native_formats, |format_id| {
+                read_with_retry(|| read_native_buffer(format_id))
+            }) {
+                tracing::debug!("剪贴板忽略标记已跳过本次捕获");
+                return Ok(None);
+            }
             let source_application = source_application();
             let library_formats = self
                 .context
                 .available_formats()
                 .map_err(|error| SystemClipboardError::Enumerate(error.to_string()))?;
-            let native_formats = enumerate_native_formats()?;
             let mut formats = Vec::with_capacity(native_formats.len());
             for (order, native_format) in native_formats.into_iter().enumerate() {
                 let kind = classify_format(native_format.id, &native_format.name);
@@ -307,30 +317,35 @@ mod windows_clipboard {
                 None
             };
 
-            Ok(CapturedClipboard {
+            Ok(Some(CapturedClipboard {
                 formats,
                 primary_format_identity,
                 preview_candidate,
                 source_application,
-            })
+            }))
         }
     }
 
     struct ClipboardChangeHandler {
         source: WindowsClipboardSource,
-        sender: Sender<Result<CapturedClipboard, String>>,
+        sender: Sender<Result<ClipboardObservation, String>>,
         suppressor: ClipboardWriteSuppressor,
     }
 
     impl ClipboardHandler for ClipboardChangeHandler {
         fn on_clipboard_change(&mut self) {
-            if self.suppressor.suppress_event(clipboard_sequence_number()) {
-                return;
-            }
-            let result = self
-                .source
-                .capture_current()
-                .map_err(|error| error.to_string());
+            let recordable = !self.suppressor.suppress_event(clipboard_sequence_number());
+            let observed_at = Instant::now();
+            let result = match self.source.capture_current() {
+                // 自身写入仍参与还原比对，但不会进入历史记录或触发复制提示。
+                Ok(Some(captured)) => Ok(ClipboardObservation {
+                    captured,
+                    recordable,
+                    observed_at,
+                }),
+                Ok(None) => return,
+                Err(error) => Err(error.to_string()),
+            };
             if self.sender.send(result).is_err() {
                 tracing::debug!("剪贴板监听接收端已关闭");
             }
@@ -340,6 +355,7 @@ mod windows_clipboard {
     pub struct ClipboardMonitor {
         shutdown: Option<WatcherShutdown>,
         worker: Option<thread::JoinHandle<()>>,
+        filter_worker: Option<thread::JoinHandle<()>>,
     }
 
     impl ClipboardMonitor {
@@ -347,28 +363,51 @@ mod windows_clipboard {
             suppressor: ClipboardWriteSuppressor,
         ) -> Result<(Self, super::ClipboardEventReceiver), SystemClipboardError> {
             let source = WindowsClipboardSource::new()?;
+            let initial = match source.capture_current() {
+                Ok(initial) => initial,
+                Err(error) => {
+                    tracing::warn!(%error, "读取剪贴板初始内容失败，继续启动监听");
+                    None
+                }
+            };
             let (sender, receiver) = mpsc::channel();
+            let (observation_sender, observation_receiver) = mpsc::channel();
             let mut watcher =
                 ClipboardWatcherContext::new_with_interval(Duration::from_millis(100))
                     .map_err(|error| SystemClipboardError::Initialize(error.to_string()))?;
             let shutdown = watcher
                 .add_handler(ClipboardChangeHandler {
                     source,
-                    sender,
+                    sender: observation_sender,
                     suppressor,
                 })
                 .get_shutdown_channel();
-            let worker = thread::Builder::new()
+            let filter_worker = thread::Builder::new()
+                .name("qcclip-clipboard-filter".to_owned())
+                .spawn(move || {
+                    filter_events(observation_receiver, sender, initial);
+                    tracing::debug!("剪贴板瞬时内容过滤线程已退出");
+                })
+                .map_err(|error| SystemClipboardError::Initialize(error.to_string()))?;
+            let worker = match thread::Builder::new()
                 .name("qcclip-clipboard-watcher".to_owned())
                 .spawn(move || {
                     watcher.start_watch();
                     tracing::info!("剪贴板监听线程已退出");
-                })
-                .map_err(|error| SystemClipboardError::Initialize(error.to_string()))?;
+                }) {
+                Ok(worker) => worker,
+                Err(error) => {
+                    if filter_worker.join().is_err() {
+                        tracing::error!("剪贴板瞬时内容过滤线程异常退出");
+                    }
+                    return Err(SystemClipboardError::Initialize(error.to_string()));
+                }
+            };
             Ok((
                 Self {
                     shutdown: Some(shutdown),
                     worker: Some(worker),
+                    filter_worker: Some(filter_worker),
                 },
                 receiver,
             ))
@@ -384,6 +423,11 @@ mod windows_clipboard {
                 && worker.join().is_err()
             {
                 tracing::error!("剪贴板监听线程异常退出");
+            }
+            if let Some(worker) = self.filter_worker.take()
+                && worker.join().is_err()
+            {
+                tracing::error!("剪贴板瞬时内容过滤线程异常退出");
             }
         }
     }
@@ -556,6 +600,36 @@ mod windows_clipboard {
     struct NativeFormat {
         id: u32,
         name: String,
+    }
+
+    fn should_ignore_clipboard(
+        formats: &[NativeFormat],
+        mut read_buffer: impl FnMut(u32) -> Result<Vec<u8>, String>,
+    ) -> bool {
+        // 排除标记只需存在，即使没有可读取的数据也应跳过整次捕获。
+        if formats.iter().any(|format| {
+            format
+                .name
+                .eq_ignore_ascii_case("ExcludeClipboardContentFromMonitorProcessing")
+        }) {
+            return true;
+        }
+
+        formats
+            .iter()
+            .filter(|format| {
+                format
+                    .name
+                    .eq_ignore_ascii_case("CanIncludeInClipboardHistory")
+            })
+            .any(|format| match read_buffer(format.id) {
+                // Windows 使用小端 DWORD，后续字节可能是全局内存分配时的填充。
+                Ok(bytes) => bytes.get(..4).is_some_and(|value| value == [0; 4]),
+                Err(error) => {
+                    tracing::warn!(format_id = format.id, %error, "无法读取剪贴板历史控制标记，继续捕获");
+                    false
+                }
+            })
     }
 
     struct ClipboardGuard;
@@ -820,6 +894,75 @@ mod windows_clipboard {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        fn native_format(name: &str) -> NativeFormat {
+            NativeFormat {
+                id: 49_152,
+                name: name.to_owned(),
+            }
+        }
+
+        #[test]
+        fn exclusion_marker_skips_capture_without_reading_marker_data() {
+            for name in [
+                "ExcludeClipboardContentFromMonitorProcessing",
+                "excludeclipboardcontentfrommonitorprocessing",
+            ] {
+                let formats = [
+                    native_format("CanIncludeInClipboardHistory"),
+                    native_format(name),
+                ];
+                assert!(should_ignore_clipboard(&formats, |_| {
+                    panic!("排除标记存在时不应读取剪贴板数据")
+                }));
+            }
+        }
+
+        #[test]
+        fn history_marker_skips_capture_only_for_a_complete_zero_dword() {
+            let formats = [native_format("CanIncludeInClipboardHistory")];
+            for (bytes, should_ignore) in [
+                (vec![0; 4], true),
+                (vec![0, 0, 0, 0, 255], true),
+                (vec![1, 0, 0, 0], false),
+                (vec![0, 0, 0, 1], false),
+                (vec![0; 3], false),
+                (vec![], false),
+            ] {
+                assert_eq!(
+                    should_ignore_clipboard(&formats, |format_id| {
+                        assert_eq!(format_id, 49_152);
+                        Ok(bytes.clone())
+                    }),
+                    should_ignore,
+                    "历史控制标记值：{bytes:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn unreadable_history_marker_does_not_block_normal_capture() {
+            let formats = [native_format("CanIncludeInClipboardHistory")];
+            assert!(!should_ignore_clipboard(&formats, |_| {
+                Err("标记数据不可读取".to_owned())
+            }));
+        }
+
+        #[test]
+        fn normal_formats_and_cloud_only_restrictions_do_not_skip_capture() {
+            for formats in [
+                vec![],
+                vec![native_format("CF_UNICODETEXT")],
+                vec![
+                    native_format("CF_UNICODETEXT"),
+                    native_format("CanUploadToCloudClipboard"),
+                ],
+            ] {
+                assert!(!should_ignore_clipboard(&formats, |_| {
+                    panic!("不应读取与本地历史过滤无关的格式")
+                }));
+            }
+        }
 
         #[test]
         fn source_path_falls_back_to_foreground_application() {
