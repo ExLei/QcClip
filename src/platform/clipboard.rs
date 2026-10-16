@@ -163,10 +163,13 @@ mod windows_clipboard {
             },
             UI::{
                 Shell::{DragQueryFileW, HDROP},
-                WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId},
+                WindowsAndMessaging::{
+                    CreateWindowExW, DestroyWindow, GetForegroundWindow, GetWindowThreadProcessId,
+                    HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE,
+                },
             },
         },
-        core::{PCWSTR, PWSTR},
+        core::{PCWSTR, PWSTR, w},
     };
 
     use super::transient::{ClipboardObservation, filter_events};
@@ -206,7 +209,8 @@ mod windows_clipboard {
 
         pub fn capture_current(&self) -> Result<Option<CapturedClipboard>, SystemClipboardError> {
             // 枚举、原始格式和文件摘要共用一次打开，避免外部工具在读取中途替换内容。
-            let clipboard = ClipboardGuard::open().map_err(SystemClipboardError::Enumerate)?;
+            let clipboard =
+                ClipboardGuard::open_for_capture().map_err(SystemClipboardError::Enumerate)?;
             let native_formats = clipboard.formats();
             if should_ignore_clipboard(&native_formats, |format_id| {
                 clipboard.read_buffer(format_id)
@@ -603,14 +607,52 @@ mod windows_clipboard {
             })
     }
 
-    struct ClipboardGuard;
+    struct ClipboardReadWindow(HWND);
+
+    impl Drop for ClipboardReadWindow {
+        fn drop(&mut self) {
+            // SAFETY: 窗口由当前线程创建并销毁，且此时对应的剪贴板已关闭。
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    struct ClipboardGuard {
+        _window: Option<ClipboardReadWindow>,
+    }
 
     impl ClipboardGuard {
         fn open() -> Result<Self, String> {
+            Self::open_with_window(None)
+        }
+
+        fn open_for_capture() -> Result<Self, String> {
+            // SAFETY: 使用系统 STATIC 类创建消息窗口，不显示界面；生命周期由守卫管理。
+            let window = unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("STATIC"),
+                    w!("QcClip 剪贴板捕获"),
+                    WINDOW_STYLE::default(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(HWND_MESSAGE),
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .map_err(|error| format!("无法创建剪贴板捕获窗口：{error}"))?;
+            Self::open_with_window(Some(ClipboardReadWindow(window)))
+        }
+
+        fn open_with_window(window: Option<ClipboardReadWindow>) -> Result<Self, String> {
             let mut last_error = None;
             for attempt in 0..READ_ATTEMPTS {
-                match unsafe { OpenClipboard(None) } {
-                    Ok(()) => return Ok(Self),
+                // SAFETY: 非空窗口属于当前线程，避免同进程其他线程用空句柄重入并关闭剪贴板。
+                match unsafe { OpenClipboard(window.as_ref().map(|window| window.0)) } {
+                    Ok(()) => return Ok(Self { _window: window }),
                     Err(error) => last_error = Some(error.to_string()),
                 }
                 if attempt + 1 < READ_ATTEMPTS {
@@ -880,6 +922,36 @@ mod windows_clipboard {
                 id: 49_152,
                 name: name.to_owned(),
             }
+        }
+
+        #[test]
+        #[ignore = "访问系统剪贴板的只读集成测试，需单独运行"]
+        fn capture_guard_prevents_cross_thread_reopen_and_releases_its_window() {
+            use windows::Win32::{
+                System::DataExchange::GetOpenClipboardWindow, UI::WindowsAndMessaging::IsWindow,
+            };
+
+            let clipboard = ClipboardGuard::open_for_capture().expect("无法打开剪贴板进行只读测试");
+            let window = clipboard._window.as_ref().expect("捕获必须使用独立窗口").0;
+            // SAFETY: 仅查询当前打开窗口，不读取或修改剪贴板内容。
+            assert_eq!(unsafe { GetOpenClipboardWindow() }.unwrap(), window);
+            let reopened = thread::spawn(|| {
+                // SAFETY: 模拟同进程其他线程以空句柄打开剪贴板，不修改内容。
+                if unsafe { OpenClipboard(None) }.is_ok() {
+                    let _ = unsafe { CloseClipboard() };
+                    true
+                } else {
+                    false
+                }
+            })
+            .join()
+            .expect("只读测试线程异常退出");
+            assert!(!reopened, "捕获期间不应允许其他线程重入剪贴板");
+            assert_eq!(unsafe { GetOpenClipboardWindow() }.unwrap(), window);
+            drop(clipboard);
+            // SAFETY: 仅检查捕获结束后消息窗口是否已销毁。
+            assert!(!unsafe { IsWindow(Some(window)) }.as_bool());
+            let _next = ClipboardGuard::open().expect("捕获结束后应释放剪贴板");
         }
 
         #[test]
