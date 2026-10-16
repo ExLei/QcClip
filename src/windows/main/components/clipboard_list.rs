@@ -1708,8 +1708,8 @@ fn render_item_surface<T>(
             div()
                 .absolute()
                 .top_0()
-                .left_0()
-                .right_0()
+                .left(px(1.5))
+                .right(px(1.5))
                 .bottom_0()
                 .border(px(1.5))
                 .border_color(cx.theme().list_active_border),
