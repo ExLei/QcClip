@@ -17,7 +17,7 @@ use crate::{
     domain::{
         capture::FormatRole,
         clipboard::{
-            ClipboardListItem, ContentKind, FormatPreview, HistoryItemId,
+            ClipboardListItem, ContentKind, FormatPreview, HistoryItemId, ImagePreviewSource,
             select_user_visible_previews_with_priority,
         },
     },
@@ -45,8 +45,9 @@ const IMAGE_SCALE_MAX: f32 = 5.0;
 const TEXT_MIN_WIDTH: f32 = 48.0;
 const TEXT_MIN_HEIGHT: f32 = 46.0;
 const IMAGE_PREVIEW_BASE_SIZE: f32 = 480.0;
-const PREVIEW_HINT_HEIGHT: f32 = 24.0;
-const PREVIEW_HINT_GAP: f32 = 6.0;
+const PREVIEW_INFO_MAX_WIDTH: f32 = 960.0;
+const PREVIEW_INFO_MIN_WIDTH: f32 = 160.0;
+const PREVIEW_INFO_GAP: f32 = 8.0;
 const PREVIEW_MAX_HEIGHT_RATIO: f32 = 0.8;
 const PREVIEW_CORNER_RADIUS: f32 = 8.0;
 const FILE_ICON_SIZE: u16 = 32;
@@ -521,6 +522,8 @@ struct PreviewWindow {
     surface_bounds: Option<LogicalRect>,
     image: Option<Arc<RenderImage>>,
     image_dimensions: Option<(u32, u32)>,
+    image_byte_length: Option<u64>,
+    image_source_path: Option<PathBuf>,
     image_scale: f32,
     html_images: HashMap<PathBuf, Arc<RenderImage>>,
     file_entries: Vec<PreviewFileEntry>,
@@ -559,6 +562,8 @@ impl PreviewWindow {
             surface_bounds: None,
             image: None,
             image_dimensions: None,
+            image_byte_length: None,
+            image_source_path: None,
             image_scale: 1.0,
             html_images: HashMap::new(),
             file_entries: Vec::new(),
@@ -671,6 +676,8 @@ impl PreviewWindow {
             .current_preview()
             .and_then(|preview| preview.image_dimensions)
             .map(|dimensions| (dimensions.width, dimensions.height));
+        self.image_byte_length = None;
+        self.image_source_path = None;
         self.image_scale = 1.0;
         self.html_images.clear();
         self.file_entries.clear();
@@ -774,6 +781,8 @@ impl PreviewWindow {
                                     this.reveal_generation = this.reveal_generation.wrapping_add(1);
                                 }
                                 this.image_dimensions = dimensions;
+                                this.image_byte_length = loaded.byte_length;
+                                this.image_source_path = loaded.source_path;
                                 this.image = Some(loaded.image);
                             }
                             Err(error) => {
@@ -933,6 +942,7 @@ impl PreviewWindow {
         } else {
             modes[(index + 1) % modes.len()]
         };
+        self.generation = self.generation.wrapping_add(1);
         self.mode = Some(next);
         self.reset_text_list();
         self.content_size = None;
@@ -940,6 +950,8 @@ impl PreviewWindow {
         self.surface_bounds = None;
         self.image = None;
         self.image_dimensions = None;
+        self.image_byte_length = None;
+        self.image_source_path = None;
         self.image_scale = 1.0;
         self.loading = false;
         self.error = None;
@@ -1004,6 +1016,8 @@ impl PreviewWindow {
         self.content_size = None;
         self.surface_bounds = None;
         self.image = None;
+        self.image_byte_length = None;
+        self.image_source_path = None;
         self.html_images.clear();
         self.file_entries.clear();
         self.text_content = Arc::from("");
@@ -1064,49 +1078,6 @@ impl PreviewWindow {
                 div().flex_none().child(image_content).into_any_element()
             }
             Some(PreviewMode::File) => {
-                let file_count = self.file_entries.len();
-                let directory_count = self
-                    .file_entries
-                    .iter()
-                    .filter(|entry| entry.is_directory)
-                    .count();
-                let missing_count = self
-                    .file_entries
-                    .iter()
-                    .filter(|entry| !entry.exists)
-                    .count();
-                let total_size = self
-                    .file_entries
-                    .iter()
-                    .filter_map(|entry| entry.size)
-                    .sum::<u64>();
-                let summary = div()
-                    .min_h(ui_rem(34.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .border_b_1()
-                    .border_color(gpui::ColorExt::opacity(&theme.border, 0.6))
-                    .bg(gpui::ColorExt::opacity(&theme.background, 0.42))
-                    .px_3()
-                    .text_size(ui_rem(11.0))
-                    .text_color(theme.muted_foreground)
-                    .child(format!("项目 {file_count}"))
-                    .child(format!(
-                        "总计 {}",
-                        i18n::file_size(&translator, Some(total_size), false)
-                    ))
-                    .when(directory_count > 0, |this| {
-                        this.child(format!("目录 {directory_count}"))
-                    })
-                    .when(missing_count > 0, |this| {
-                        this.child(
-                            div()
-                                .text_color(theme.danger_foreground)
-                                .child(format!("缺失 {missing_count}")),
-                        )
-                    });
                 let rows = self
                     .file_entries
                     .iter()
@@ -1262,20 +1233,13 @@ impl PreviewWindow {
                     .flex_none()
                     .flex()
                     .flex_col()
-                    .child(summary)
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .max_h(px(max_height))
-                            .p_2()
-                            .id("preview-file-content")
-                            .overflow_y_scroll()
-                            .track_scroll(&self.file_scroll)
-                            .children(rows),
-                    )
+                    .gap_1()
+                    .max_h(px(max_height))
+                    .p_2()
+                    .id("preview-file-content")
+                    .overflow_y_scroll()
+                    .track_scroll(&self.file_scroll)
+                    .children(rows)
                     .into_any_element()
             }
             Some(PreviewMode::Html) => {
@@ -1411,20 +1375,135 @@ impl PreviewWindow {
         Some((base_width / width).min(base_height / height) * image_scale)
     }
 
-    fn render_hints(
+    fn render_information(
         &self,
-        theme: gpui_component::ThemeColor,
+        max_width: f32,
+        align_end: bool,
         image_display_percentage: Option<f32>,
-        translator: &i18n::Translator,
-    ) -> AnyElement {
-        let Some(mode) = self.mode else {
-            return div().into_any_element();
-        };
-        let mut hints = vec![translator.translate_with_args(
-            "main.preview.current_format",
-            &[("format", mode.label(translator))],
-        )];
-        let available_modes = self.previews.iter().filter_map(mode_for_preview).fold(
+        window: &Window,
+        cx: &App,
+    ) -> (AnyElement, Size<f32>) {
+        let theme = crate::window_material::excluded_window_theme(cx);
+        let translator = i18n::translator(cx);
+        let ui_scale = crate::ui::scale::window_scale(window);
+        let max_width = max_width.min(PREVIEW_INFO_MAX_WIDTH * ui_scale).max(1.0);
+        let font_size = ui_rem(11.0).to_pixels(window.rem_size());
+        let row_height = self
+            .font_metrics
+            .map(|metrics| metrics.line_height(font_size, px(22.0 * ui_scale)))
+            .map(f32::from)
+            .unwrap_or(22.0 * ui_scale);
+        let gap = 6.0 * ui_scale;
+        let chip_padding = 6.0 * ui_scale;
+        let mut rows = Vec::new();
+        if let Some(preview) = self.current_preview() {
+            if self.mode == Some(PreviewMode::Image) {
+                let file_image = preview.role() == FormatRole::FileList;
+                let byte_length = self.image_byte_length.or_else(|| {
+                    if file_image {
+                        None
+                    } else {
+                        image_source_byte_length(preview.image_source.as_ref())
+                    }
+                });
+                let size_label = if file_image { "file_size" } else { "raw_size" };
+                let size = byte_length
+                    .map(|bytes| {
+                        let formatted = i18n::file_size(&translator, Some(bytes), false);
+                        if bytes < 1024 {
+                            formatted
+                        } else {
+                            format!("{formatted} · {bytes} B")
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        if self.loading {
+                            translator.translate("main.preview.loading")
+                        } else {
+                            i18n::file_size(&translator, None, false)
+                        }
+                    });
+                rows.push((size_label, size));
+                if let Some((width, height)) = self.image_dimensions {
+                    let zoom = image_display_percentage
+                        .map(|value| format!(" · {value:.0}%"))
+                        .unwrap_or_default();
+                    rows.push(("dimensions", format!("{width} × {height} px{zoom}")));
+                }
+                if let Some(path) = &self.image_source_path {
+                    rows.push((
+                        "name",
+                        path.file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned(),
+                    ));
+                    rows.push(("path", path.to_string_lossy().into_owned()));
+                }
+            } else if self.mode == Some(PreviewMode::File) {
+                rows.push(("files", self.file_entries.len().to_string()));
+                let total_size = self
+                    .file_entries
+                    .iter()
+                    .filter_map(|entry| entry.size)
+                    .sum::<u64>();
+                rows.push((
+                    "known_size",
+                    i18n::file_size(&translator, Some(total_size), false),
+                ));
+            } else {
+                rows.push(("characters", preview.char_count.to_string()));
+                rows.push(("lines", preview.text.split('\n').count().to_string()));
+            }
+            let format = self
+                .image_source_path
+                .as_ref()
+                .and_then(|path| path.extension())
+                .and_then(|extension| extension.to_str())
+                .map(|extension| {
+                    format!(
+                        "{} · {}",
+                        extension.to_ascii_uppercase(),
+                        preview.format_name
+                    )
+                })
+                .unwrap_or_else(|| preview.format_name.clone());
+            rows.push(("format", format));
+        }
+        if let Some(item) = &self.item {
+            rows.push((
+                "source",
+                item.source_app_name
+                    .clone()
+                    .unwrap_or_else(|| translator.translate("main.source.unknown")),
+            ));
+            if let Some(time) = chrono::DateTime::from_timestamp_millis(item.last_seen_at) {
+                rows.push((
+                    "captured_at",
+                    time.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string(),
+                ));
+            }
+            rows.push(("paste_count", item.paste_count.to_string()));
+            let mut states = Vec::new();
+            if item.is_pinned {
+                states.push(translator.translate("main.preview.info.pinned"));
+            }
+            if item.favorite_id.is_some() {
+                states.push(translator.translate("main.preview.info.favorite"));
+            }
+            if !item.tag_ids.is_empty() {
+                states.push(translator.translate_with_args(
+                    "main.preview.info.tags",
+                    &[("count", item.tag_ids.len().to_string())],
+                ));
+            }
+            if !states.is_empty() {
+                rows.push(("status", states.join(" · ")));
+            }
+        }
+        let modes = self.previews.iter().filter_map(mode_for_preview).fold(
             Vec::new(),
             |mut modes, mode| {
                 if !modes.contains(&mode) {
@@ -1433,54 +1512,116 @@ impl PreviewWindow {
                 modes
             },
         );
-        if available_modes.len() > 1 {
-            hints.push(translator.translate_with_args(
-                "main.preview.available_formats",
-                &[("formats", available_modes
+        if modes.len() > 1 {
+            rows.push((
+                "available_formats",
+                modes
                     .iter()
-                    .map(|mode| mode.label(translator))
+                    .map(|mode| mode.label(&translator))
                     .collect::<Vec<_>>()
-                    .join(" / "))],
+                    .join(" / "),
             ));
-            hints.push(translator.translate("main.preview.switch_format_hint"));
         }
-        if mode == PreviewMode::Image {
+        let mut hints = Vec::new();
+        if self.mode == Some(PreviewMode::Image) {
             hints.push(translator.translate("main.preview.zoom_hint"));
-            hints.push(
-                image_display_percentage
-                    .map(|percentage| format!("{percentage:.0}%"))
-                    .unwrap_or_else(|| translator.translate("main.preview.loading")),
-            );
-        } else if self.content_scrollable {
+        }
+        if self.content_scrollable {
             hints.push(translator.translate("main.preview.scroll_hint"));
         }
-        div()
-            .flex()
+        if modes.len() > 1 {
+            hints.push(translator.translate("main.preview.switch_format_hint"));
+        }
+        let mut fields = Vec::new();
+        if let Some(mode) = self.mode {
+            fields.push((mode.label(&translator), false));
+        }
+        fields.extend(rows.into_iter().map(|(key, value)| {
+            (
+                format!(
+                    "{}：{value}",
+                    translator.translate(&format!("main.preview.info.{key}"))
+                ),
+                false,
+            )
+        }));
+        fields.extend(hints.into_iter().map(|hint| (hint, true)));
+        let mut style = window.text_style();
+        style.font_family = cx.theme().font_family.clone();
+        let field_widths = fields
+            .iter()
+            .map(|(text, _)| {
+                let line = window.text_system().shape_line(
+                    text.clone().into(),
+                    font_size,
+                    &[style.to_run(text.len())],
+                    None,
+                );
+                (f32::from(line.width).ceil() + chip_padding * 2.0 + 2.0)
+                    .min(420.0 * ui_scale)
+                    .min(max_width)
+            })
+            .collect::<Vec<_>>();
+        let natural_width =
+            field_widths.iter().sum::<f32>() + gap * field_widths.len().saturating_sub(1) as f32;
+        let width = natural_width.min(max_width);
+        let field_rows = information_row_ranges(&field_widths, width, gap);
+        let height =
+            row_height * field_rows.len() as f32 + gap * field_rows.len().saturating_sub(1) as f32;
+        let content =
+            div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .gap(px(gap))
+                .children(field_rows.into_iter().map(|range| {
+                    div()
+                        .h(px(row_height))
+                        .flex_none()
+                        .flex()
+                        .gap(px(gap))
+                        .when(align_end, |this| this.justify_end())
+                        .children(range.map(|index| {
+                            let (text, hint) = &fields[index];
+                            div()
+                                .w(px(field_widths[index]))
+                                .h(px(row_height))
+                                .flex_none()
+                                .px(px(chip_padding))
+                                .rounded(px(4.0 * ui_scale))
+                                .border_1()
+                                .border_color(gpui::ColorExt::opacity(
+                                    &theme.border,
+                                    0.75,
+                                ))
+                                .bg(gpui::ColorExt::opacity(
+                                    &theme.background,
+                                    0.92,
+                                ))
+                                .text_color(if *hint {
+                                    theme.muted_foreground
+                                } else {
+                                    theme.foreground
+                                })
+                                .truncate()
+                                .child(text.clone())
+                        }))
+                }));
+        let strip = div()
+            .id("preview-information")
+            .w(px(width))
+            .h(px(height))
             .flex_none()
-            .items_center()
-            .gap_2()
-            .children(hints.into_iter().enumerate().map(|(index, hint)| {
-                div()
-                    .id(("preview-hint", index as u64))
-                    .px_2()
-                    .py_0p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(gpui::ColorExt::opacity(
-                        &theme.border,
-                        if index == 0 { 0.75 } else { 0.5 },
-                    ))
-                    .bg(gpui::ColorExt::opacity(
-                        &theme.background,
-                        if index == 0 { 0.92 } else { 0.74 },
-                    ))
-                    .text_size(ui_rem(11.0))
-                    .text_color(theme.foreground)
-                    .child(hint)
-                    .into_any_element()
-            }))
-            .into_any_element()
+            .text_color(theme.foreground)
+            .text_size(ui_rem(11.0))
+            .line_height(px(row_height))
+            .overflow_hidden()
+            .child(content)
+            .into_any_element();
+        (strip, size(width, height))
     }
+
+
 }
 
 impl Drop for PreviewWindow {
@@ -1621,14 +1762,13 @@ impl Render for PreviewWindow {
         } else {
             self.content_size
         };
-        let preview_top = preview_size
-            .map(|(width, height)| {
-                preview_rect_for_placement(placement, width, height, work_area).top
-            })
-            .or_else(|| self.surface_bounds.map(|bounds| bounds.top));
-        let hint_top = resolve_preview_hint_top(preview_top, work_area.top);
+        let visible_preview_size = preview_size.map(|(width, height)| {
+            let height = if self.mode == Some(PreviewMode::Image) { height } else { height.min(max_height) };
+            (width.min(max_width), height)
+        });
+        let placement = choose_preview_placement(pointer, work_area, main_rect, visible_preview_size);
         let connector_target_rect = self.surface_bounds.or_else(|| {
-            preview_size.map(|(width, height)| {
+            visible_preview_size.map(|(width, height)| {
                 preview_rect_for_placement(placement, width, height, work_area)
             })
         });
@@ -1765,8 +1905,7 @@ impl Render for PreviewWindow {
             .when(self.mode != Some(PreviewMode::Image), |this| {
                 this.bg(gpui::ColorExt::opacity(&theme.background, 0.90))
             })
-            .child(surface_content)
-            .child(surface_bounds_measure);
+            .child(surface_content);
         let surface = if animations_enabled {
             surface
                 .with_animation(
@@ -1795,7 +1934,12 @@ impl Render for PreviewWindow {
         } else {
             surface.into_any_element()
         };
-        let surface = div().flex_none().child(surface);
+        // 在无边框的外层测量，避免把内容边缘当成预览外框边缘。
+        let surface = div()
+            .relative()
+            .flex_none()
+            .child(surface)
+            .child(surface_bounds_measure);
         let surface = if animations_enabled {
             surface
                 .with_animation(
@@ -1808,56 +1952,12 @@ impl Render for PreviewWindow {
         } else {
             surface.into_any_element()
         };
-        let overlay = div()
-            .relative()
-            .flex()
-            .flex_col()
-            .when(
-                matches!(
-                    placement.side,
-                    PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
-                ),
-                |this| this.items_end(),
-            )
-            .when(
-                !matches!(
-                    placement.side,
-                    PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
-                ),
-                |this| this.items_start(),
-            )
-            .max_w(px(max_width))
-            .child(surface)
-            .child(
-                div()
-                    .absolute()
-                    .top(px(hint_top))
-                    .left_0()
-                    .right_0()
-                    .h(px(PREVIEW_HINT_HEIGHT))
-                    .flex()
-                    .when(
-                        matches!(
-                            placement.side,
-                            PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
-                        ),
-                        |this| this.justify_end(),
-                    )
-                    .when(
-                        !matches!(
-                            placement.side,
-                            PreviewPlacementSide::Left | PreviewPlacementSide::PointerLeft
-                        ),
-                        |this| this.justify_start(),
-                    )
-                    .child(self.render_hints(theme, image_display_percentage, &i18n::translator(cx))),
-            );
         let preview = deferred(
             anchored()
                 .position(point(px(placement.position.x), px(placement.position.y)))
                 .anchor(placement.anchor)
                 .snap_to_window()
-                .child(overlay),
+                .child(surface),
         )
         .priority(1);
         let connector = connector_source_rect
@@ -1873,12 +1973,51 @@ impl Render for PreviewWindow {
             })
             .unwrap_or_else(|| div().into_any_element());
         let connector = deferred(connector).priority(2);
+        let information = self.surface_bounds.and_then(|preview_rect| {
+            let ui_scale = crate::ui::scale::window_scale(window);
+            let gap = PREVIEW_INFO_GAP * ui_scale;
+            // 使用实际视口和预览边界，信息条不再经过 anchored 的自动翻转。
+            let viewport = window.viewport_size();
+            let viewport = LogicalRect {
+                left: 0.0,
+                top: 0.0,
+                width: f32::from(viewport.width),
+                height: f32::from(viewport.height),
+            };
+            let (align_end, areas) = information_areas(preview_rect, main_rect, viewport, gap);
+            for area in areas {
+                let width = information_max_width(preview_rect, area, align_end).floor();
+                if width < (PREVIEW_INFO_MIN_WIDTH * ui_scale).min(viewport.width) {
+                    continue;
+                }
+                let (strip, strip_size) =
+                    self.render_information(width, align_end, image_display_percentage, window, cx);
+                let Some(rect) = information_rect(preview_rect, area, strip_size, align_end) else {
+                    continue;
+                };
+                return Some(
+                    deferred(
+                        div()
+                            .absolute()
+                            .left(px(rect.left))
+                            .top(px(rect.top))
+                            .w(px(rect.width))
+                            .h(px(rect.height))
+                            .overflow_hidden()
+                            .child(strip),
+                    )
+                    .priority(3),
+                );
+            }
+            None
+        });
         div()
             .font_family(cx.theme().font_family.clone())
             .line_height(gpui::relative(f32::from(self.text_line_height) / f32::from(font_size)))
             .relative()
             .size_full()
-            .when(self.visible, |this| this.child(preview).child(connector))
+            .when(self.visible, |this| this.child(preview).child(connector)
+                .when_some(information, |this, information| this.child(information)))
             .into_any_element()
     }
 }
@@ -2142,15 +2281,147 @@ fn interpolate_reveal_size(start: f32, target: f32, progress: f32) -> f32 {
     start + (target - start) * progress
 }
 
-fn resolve_preview_hint_top(preview_top: Option<f32>, work_area_top: f32) -> f32 {
-    let Some(preview_top) = preview_top else {
-        return 0.0;
-    };
-    if preview_top - PREVIEW_HINT_HEIGHT - PREVIEW_HINT_GAP >= work_area_top {
-        -(PREVIEW_HINT_HEIGHT + PREVIEW_HINT_GAP)
-    } else {
-        0.0
+fn image_source_byte_length(source: Option<&ImagePreviewSource>) -> Option<u64> {
+    match source? {
+        ImagePreviewSource::Inline { bytes } => Some(bytes.len() as u64),
+        ImagePreviewSource::External { byte_length, .. } => Some(*byte_length),
     }
+}
+
+fn information_row_ranges(widths: &[f32], available: f32, gap: f32) -> Vec<Range<usize>> {
+    let available = available.max(1.0);
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut used = 0.0;
+    for (index, width) in widths.iter().enumerate() {
+        let width = width.min(available);
+        let next = if index == start {
+            width
+        } else {
+            used + gap + width
+        };
+        if index > start && next > available + 0.01 {
+            rows.push(start..index);
+            start = index;
+            used = width;
+        } else {
+            used = next;
+        }
+    }
+    if start < widths.len() {
+        rows.push(start..widths.len());
+    }
+    rows
+}
+
+fn information_areas(
+    preview: LogicalRect,
+    main: Option<LogicalRect>,
+    viewport: LogicalRect,
+    gap: f32,
+) -> (bool, Vec<LogicalRect>) {
+    let align_end = main.is_some_and(|main| preview.right() <= main.left);
+    let outside = |rect: LogicalRect| {
+        [
+            LogicalRect {
+                left: rect.right() + gap,
+                width: viewport.right() - rect.right() - gap,
+                ..viewport
+            },
+            LogicalRect {
+                width: rect.left - gap - viewport.left,
+                ..viewport
+            },
+            LogicalRect {
+                top: rect.bottom() + gap,
+                height: viewport.bottom() - rect.bottom() - gap,
+                ..viewport
+            },
+            LogicalRect {
+                height: rect.top - gap - viewport.top,
+                ..viewport
+            },
+        ]
+    };
+    let safe_areas = if let Some(main) = main {
+        let mut areas = outside(main);
+        let preferred = if preview.left >= main.right() {
+            0
+        } else if preview.right() <= main.left {
+            1
+        } else if preview.top >= main.bottom() {
+            2
+        } else {
+            3
+        };
+        areas.swap(0, preferred);
+        areas
+            .into_iter()
+            .filter_map(|area| intersect_logical_rect(area, viewport))
+            .collect::<Vec<_>>()
+    } else {
+        vec![viewport]
+    };
+    let [right, left, bottom, top] = outside(preview);
+    let sides = if align_end {
+        [left, right]
+    } else {
+        [right, left]
+    };
+    let mut areas = Vec::new();
+    // 先尝试上下长条，再向侧面翻转；所有主窗口外的空位都放不下时才叠加预览。
+    for safe in &safe_areas {
+        for free in [top, bottom, sides[0], sides[1]] {
+            if let Some(area) = intersect_logical_rect(*safe, free) {
+                areas.push(area);
+            }
+        }
+    }
+    areas.extend(safe_areas);
+    (align_end, areas)
+}
+
+fn information_max_width(preview: LogicalRect, area: LogicalRect, align_end: bool) -> f32 {
+    let edge = if align_end {
+        preview.right()
+    } else {
+        preview.left
+    };
+    if edge >= area.left && edge <= area.right() {
+        if align_end {
+            edge - area.left
+        } else {
+            area.right() - edge
+        }
+    } else {
+        area.width
+    }
+}
+
+fn information_rect(
+    preview: LogicalRect,
+    area: LogicalRect,
+    strip_size: Size<f32>,
+    align_end: bool,
+) -> Option<LogicalRect> {
+    if strip_size.width > information_max_width(preview, area, align_end)
+        || strip_size.height > area.height
+    {
+        return None;
+    }
+    let left = if align_end {
+        preview.right() - strip_size.width
+    } else {
+        preview.left
+    };
+    Some(LogicalRect {
+        left: left.clamp(area.left, area.right() - strip_size.width),
+        top: preview
+            .top
+            .clamp(area.top, area.bottom() - strip_size.height),
+        width: strip_size.width,
+        height: strip_size.height,
+    })
 }
 
 fn choose_preview_placement(
@@ -2418,7 +2689,9 @@ mod tests {
     use super::{
         LogicalRect, PreviewPlacementSide, PreviewWindow, choose_preview_placement,
         interpolate_reveal_size, intersect_logical_rect, preview_reveal_start_size,
-        resolve_best_connector, resolve_preview_hint_top, resolve_preview_max_height,
+        image_source_byte_length, information_areas, information_max_width, information_rect,
+        information_row_ranges,
+        resolve_best_connector, resolve_preview_max_height,
         resolve_preview_max_width, text_line_ranges,
     };
     use gpui::{Anchor, point};
@@ -2446,8 +2719,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_max_height_is_ninety_percent_of_work_area() {
-        assert_eq!(resolve_preview_max_height(1080.0), 972.0);
+    fn preview_max_height_is_eighty_percent_of_work_area() {
+        assert_eq!(resolve_preview_max_height(1080.0), 864.0);
     }
 
     #[test]
@@ -2702,23 +2975,342 @@ mod tests {
         );
     }
 
-    #[test]
-    fn preview_hint_is_above_the_surface_when_top_space_is_available() {
-        assert_eq!(resolve_preview_hint_top(Some(80.0), 0.0), -30.0);
+    fn place_information(
+        preview: LogicalRect,
+        main: Option<LogicalRect>,
+        viewport: LogicalRect,
+        strip_size: gpui::Size<f32>,
+    ) -> Option<LogicalRect> {
+        let (align_end, areas) = information_areas(preview, main, viewport, 8.0);
+        areas
+            .into_iter()
+            .find_map(|area| information_rect(preview, area, strip_size, align_end))
+    }
+
+    fn assert_information_is_clear(
+        rect: LogicalRect,
+        preview: LogicalRect,
+        main: Option<LogicalRect>,
+        work: LogicalRect,
+    ) {
+        assert!(rect.left >= work.left && rect.top >= work.top);
+        assert!(rect.right() <= work.right() && rect.bottom() <= work.bottom());
+        assert!(intersect_logical_rect(rect, preview).is_none());
+        assert!(main.is_none_or(|main| intersect_logical_rect(rect, main).is_none()));
     }
 
     #[test]
-    fn preview_hint_stays_inside_the_surface_at_the_work_area_top() {
-        assert_eq!(resolve_preview_hint_top(Some(29.0), 0.0), 0.0);
-        assert_eq!(resolve_preview_hint_top(Some(30.0), 10.0), 0.0);
+    fn information_flips_below_preview_at_top_screen_edge() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 800.0,
+        };
+        let preview = LogicalRect {
+            left: 450.0,
+            top: 0.0,
+            width: 480.0,
+            height: 300.0,
+        };
+        let main = Some(LogicalRect {
+            left: 20.0,
+            top: 0.0,
+            width: 400.0,
+            height: 700.0,
+        });
+        let strip = place_information(preview, main, work, gpui::size(320.0, 220.0))
+            .expect("应找到信息位置");
+        assert_eq!(strip.left, preview.left);
+        assert_eq!(strip.top, preview.bottom() + 8.0);
+        assert_information_is_clear(strip, preview, main, work);
     }
 
     #[test]
-    fn preview_hint_is_inside_until_the_external_position_fits() {
-        assert_eq!(resolve_preview_hint_top(Some(29.0), 0.0), 0.0);
-        assert_eq!(resolve_preview_hint_top(Some(60.0), 0.0), -30.0);
+    fn information_flips_outwards_when_vertical_space_is_insufficient() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1400.0,
+            height: 800.0,
+        };
+        let preview = LogicalRect {
+            left: 430.0,
+            top: 50.0,
+            width: 480.0,
+            height: 700.0,
+        };
+        let main = Some(LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 400.0,
+            height: 800.0,
+        });
+        let strip = place_information(preview, main, work, gpui::size(320.0, 220.0))
+            .expect("右侧应有信息位置");
+        assert_eq!(strip.left, preview.right() + 8.0);
+        assert_information_is_clear(strip, preview, main, work);
     }
 
+    #[test]
+    fn left_preview_information_uses_actual_side_and_aligns_towards_main() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let preview = LogicalRect {
+            left: 120.0,
+            top: 300.0,
+            width: 480.0,
+            height: 400.0,
+        };
+        let main = Some(LogicalRect {
+            left: 618.0,
+            top: 200.0,
+            width: 600.0,
+            height: 600.0,
+        });
+        let (align_end, _) = information_areas(preview, main, work, 8.0);
+        assert!(align_end);
+        let strip = place_information(preview, main, work, gpui::size(580.0, 80.0))
+            .expect("左侧预览应有信息位置");
+        assert_eq!(strip.right(), preview.right());
+        assert_eq!(strip.bottom(), preview.top - 8.0);
+        assert_information_is_clear(strip, preview, main, work);
+    }
+
+    #[test]
+    fn right_preview_information_stays_on_the_right_in_the_reported_layout() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let preview = LogicalRect {
+            left: 887.0,
+            top: 300.0,
+            width: 460.0,
+            height: 400.0,
+        };
+        let main = Some(LogicalRect {
+            left: 537.0,
+            top: 100.0,
+            width: 333.0,
+            height: 800.0,
+        });
+        let (align_end, _) = information_areas(preview, main, work, 8.0);
+        assert!(!align_end);
+        let strip = place_information(preview, main, work, gpui::size(742.0, 120.0))
+            .expect("主窗口右侧有足够空间");
+        assert_eq!(strip.left, preview.left);
+        assert_eq!(strip.bottom(), preview.top - 8.0);
+        assert_information_is_clear(strip, preview, main, work);
+    }
+
+    #[test]
+    fn information_at_fractional_viewport_edge_keeps_its_computed_position() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1535.25,
+            height: 864.0,
+        };
+        let preview = LogicalRect {
+            left: 793.375,
+            top: 300.0,
+            width: 460.0,
+            height: 400.0,
+        };
+        let main = Some(LogicalRect {
+            left: 443.375,
+            top: 0.0,
+            width: 332.0,
+            height: 800.0,
+        });
+        let (_, areas) = information_areas(preview, main, work, 8.0);
+        let strip = information_rect(
+            preview,
+            areas[0],
+            gpui::size(information_max_width(preview, areas[0], false).floor(), 120.0),
+            false,
+        )
+        .expect("小数视口边缘应能放置信息");
+        assert_eq!(strip.left, preview.left);
+        assert!(strip.right() <= work.right());
+        assert_information_is_clear(strip, preview, main, work);
+    }
+
+    #[test]
+    fn information_reflows_instead_of_shifting_a_left_preview_alignment() {
+        let preview = LogicalRect {
+            left: 100.25,
+            top: 300.0,
+            width: 480.0,
+            height: 300.0,
+        };
+        let area = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 590.25,
+            height: 292.0,
+        };
+        let width = information_max_width(preview, area, true);
+        assert_eq!(width, preview.right());
+        assert!(information_rect(preview, area, gpui::size(area.width, 80.0), true).is_none());
+        let strip = information_rect(preview, area, gpui::size(width.floor(), 80.0), true)
+            .expect("左侧应先收窄换行再保持右边缘对齐");
+        assert_eq!(strip.right(), preview.right());
+    }
+
+    #[test]
+    fn information_searches_other_free_areas_before_overlaying_preview() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1200.0,
+            height: 800.0,
+        };
+        let preview = LogicalRect {
+            left: 300.0,
+            top: 350.0,
+            width: 700.0,
+            height: 300.0,
+        };
+        let main = Some(LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 700.0,
+            height: 330.0,
+        });
+        let strip = place_information(preview, main, work, gpui::size(320.0, 220.0))
+            .expect("主窗口右上方应有空位");
+        assert!(strip.bottom() <= preview.top - 8.0);
+        assert_information_is_clear(strip, preview, main, work);
+    }
+
+    #[test]
+    fn information_fallback_only_overlays_preview_and_never_main() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 600.0,
+        };
+        let preview = LogicalRect {
+            left: 418.0,
+            top: 0.0,
+            width: 582.0,
+            height: 600.0,
+        };
+        let main = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 400.0,
+            height: 600.0,
+        };
+        let strip = place_information(preview, Some(main), work, gpui::size(560.0, 100.0))
+            .expect("主窗口右侧应有回退位置");
+        assert!(intersect_logical_rect(strip, preview).is_some());
+        assert!(intersect_logical_rect(strip, main).is_none());
+        let strip = place_information(work, None, work, gpui::size(320.0, 220.0))
+            .expect("没有主窗口时可叠加预览");
+        assert!(intersect_logical_rect(strip, work).is_some());
+        assert!(place_information(work, Some(work), work, gpui::size(400.0, 80.0)).is_none());
+    }
+
+    #[test]
+    fn information_width_is_limited_to_main_window_free_area_for_reflow() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1000.0,
+            height: 600.0,
+        };
+        let preview = LogicalRect {
+            left: 718.0,
+            top: 0.0,
+            width: 282.0,
+            height: 600.0,
+        };
+        let main = Some(LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 700.0,
+            height: 600.0,
+        });
+        let (align_end, areas) = information_areas(preview, main, work, 8.0);
+        assert!(place_information(preview, main, work, gpui::size(960.0, 80.0)).is_none());
+        assert!(areas.iter().all(|area| area.width <= 292.0));
+        let strip = areas.into_iter()
+            .find_map(|area| information_rect(preview, area, gpui::size(282.0, 200.0), align_end))
+            .expect("换行后的信息应在主窗口外显示");
+        assert_eq!(strip.left, preview.left);
+        assert!(intersect_logical_rect(strip, main.unwrap()).is_none());
+    }
+
+    #[test]
+    fn information_areas_handle_negative_desktop_coordinates() {
+        let work = LogicalRect {
+            left: -1000.0,
+            top: -100.0,
+            width: 1400.0,
+            height: 800.0,
+        };
+        let preview = LogicalRect {
+            left: -500.0,
+            top: -50.0,
+            width: 480.0,
+            height: 700.0,
+        };
+        let main = Some(LogicalRect {
+            left: 0.0,
+            top: -100.0,
+            width: 400.0,
+            height: 800.0,
+        });
+        let strip = place_information(preview, main, work, gpui::size(320.0, 220.0))
+            .expect("左侧应有信息位置");
+        assert_eq!(strip.right(), preview.left - 8.0);
+        assert_information_is_clear(strip, preview, main, work);
+    }
+
+    #[test]
+    fn information_wraps_only_when_the_horizontal_row_is_full() {
+        let fields = [100.0, 180.0, 80.0];
+        assert_eq!(information_row_ranges(&fields, 500.0, 6.0), vec![0..3]);
+        assert_eq!(
+            information_row_ranges(&fields, 300.0, 6.0),
+            vec![0..2, 2..3]
+        );
+        assert_eq!(
+            information_row_ranges(&fields, 180.0, 6.0),
+            vec![0..1, 1..2, 2..3]
+        );
+        assert_eq!(
+            information_row_ranges(&[500.0, 50.0], 180.0, 6.0),
+            vec![0..1, 1..2]
+        );
+        assert!(information_row_ranges(&[], 180.0, 6.0).is_empty());
+    }
+
+    #[test]
+    fn original_image_size_is_available_before_decoding() {
+        use crate::domain::clipboard::ImagePreviewSource;
+        let inline = ImagePreviewSource::Inline {
+            bytes: vec![0; 1234].into(),
+        };
+        let external = ImagePreviewSource::External {
+            sha256: [0; 32],
+            byte_length: 5678,
+            relative_path: "image.bin.zst".into(),
+        };
+        assert_eq!(image_source_byte_length(Some(&inline)), Some(1234));
+        assert_eq!(image_source_byte_length(Some(&external)), Some(5678));
+        assert_eq!(image_source_byte_length(None), None);
+    }
     #[test]
     fn connector_source_is_clipped_to_the_visible_main_window_area() {
         let item = LogicalRect {

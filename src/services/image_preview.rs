@@ -50,6 +50,9 @@ const MAX_LOCAL_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
 pub struct LoadedImagePreview {
     pub image: Arc<RenderImage>,
     pub dimensions: Option<ImageDimensions>,
+    /// 图片原始数据大小；文件列表使用实际图片文件大小，不使用路径列表大小。
+    pub byte_length: Option<u64>,
+    pub source_path: Option<PathBuf>,
 }
 
 /// 只读取图片解码器的头部信息，不生成像素缓冲区。
@@ -123,7 +126,12 @@ impl ImagePreviewService {
         let bytes = self.load_source_bytes(source)?;
         let dimensions = dimensions_hint.or_else(|| probe_image_dimensions(&bytes, format_key));
         let image = decode_image(&bytes, format_key, max_size)?;
-        Ok(LoadedImagePreview { image, dimensions })
+        Ok(LoadedImagePreview {
+            image,
+            dimensions,
+            byte_length: Some(bytes.len() as u64),
+            source_path: None,
+        })
     }
 
     /// 读取剪贴板文件列表中的路径；真正的文件元数据和图标由列表视图按行高懒加载前几项。
@@ -275,6 +283,8 @@ impl ImagePreviewService {
                     return Ok(LoadedImagePreview {
                         image,
                         dimensions: probe_image_dimensions(&bytes, ""),
+                        byte_length: Some(bytes.len() as u64),
+                        source_path: Some(path),
                     });
                 }
                 Err(error) => {
@@ -431,7 +441,10 @@ fn decode_file_with_wic(
         )
     }
     .map_err(ImagePreviewError::Wic)?;
-    decode_wic_decoder(&factory, &decoder, max_size)
+    let mut loaded = decode_wic_decoder(&factory, &decoder, max_size)?;
+    loaded.byte_length = fs::metadata(path).ok().map(|metadata| metadata.len());
+    loaded.source_path = Some(path.to_path_buf());
+    Ok(loaded)
 }
 
 #[cfg(target_os = "windows")]
@@ -473,7 +486,9 @@ fn decode_bytes_with_wic(
     }
     .map_err(ImagePreviewError::Wic)?;
 
-    decode_wic_decoder(&factory, &decoder, max_size)
+    let mut loaded = decode_wic_decoder(&factory, &decoder, max_size)?;
+    loaded.byte_length = Some(bytes.len() as u64);
+    Ok(loaded)
 }
 
 #[cfg(target_os = "windows")]
@@ -521,6 +536,8 @@ fn decode_wic_decoder(
     Ok(LoadedImagePreview {
         image: Arc::new(RenderImage::new(vec![image::Frame::new(bgra_image)])),
         dimensions: (width > 0 && height > 0).then_some(ImageDimensions { width, height }),
+        byte_length: None,
+        source_path: None,
     })
 }
 
@@ -782,7 +799,7 @@ mod tests {
         PngEncoder::new(&mut image_bytes)
             .write_image(&[255; 4 * 4 * 2], 4, 2, ExtendedColorType::Rgba8)
             .expect("无法生成测试 PNG");
-        fs::write(&path, image_bytes).expect("无法写入测试图片");
+        fs::write(&path, &image_bytes).expect("无法写入测试图片");
 
         let blob_store =
             crate::services::storage::RawBlobStore::new(directory.path().join("blobs"))
@@ -802,6 +819,38 @@ mod tests {
                 height: 2,
             })
         );
+        assert_eq!(loaded.byte_length, Some(image_bytes.len() as u64));
+        assert_eq!(loaded.source_path.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn raw_image_size_uses_original_payload_for_inline_and_external_sources() {
+        let directory = tempfile::tempdir().expect("无法创建原始图片测试目录");
+        let store = crate::services::storage::RawBlobStore::new(directory.path().join("blobs"))
+            .expect("无法创建测试 blob 存储");
+        let mut bmp = Vec::new();
+        BmpEncoder::new(&mut bmp)
+            .write_image(&vec![128; 128 * 128 * 3], 128, 128, ExtendedColorType::Rgb8)
+            .expect("无法生成测试 BMP");
+        let bytes = &bmp[14..];
+        let pending = store.write_pending(bytes).expect("无法暂存原始图片");
+        let blob = store.commit_pending(&pending).expect("无法保存原始图片");
+        let service = ImagePreviewService::new(store);
+        for source in [
+            ImagePreviewSource::Inline { bytes: bytes.into() },
+            ImagePreviewSource::External {
+                sha256: *blob.sha256(),
+                byte_length: blob.byte_length(),
+                relative_path: blob.relative_path().to_string_lossy().into_owned(),
+            },
+        ] {
+            let loaded = service
+                .load_with_dimensions(&source, FormatKind::Image, "CF_DIB", (16, 16))
+                .expect("无法加载原始图片预览");
+            assert_eq!(loaded.byte_length, Some(bytes.len() as u64));
+            assert!(loaded.source_path.is_none());
+            assert_eq!(loaded.dimensions, Some(ImageDimensions { width: 128, height: 128 }));
+        }
     }
 
     #[cfg(target_os = "windows")]
