@@ -16,7 +16,7 @@
   "settings.item_display.time": "复制时间",
   "settings.item_display.length": "字数 / 图片尺寸 / 文件数量",
   "settings.item_display.source": "来源应用图标",
-  "settings.item_display.shortcut": "快捷粘贴序号",
+  "settings.item_display.shortcut": "条目序号",
   "settings.personalization.app_font": "应用字体",
   "settings.personalization.app_font_description": "选择应用界面字体，修改后立即生效。",
   "settings.personalization.app_font_default": "跟随主题（默认）",

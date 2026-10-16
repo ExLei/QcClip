@@ -128,12 +128,12 @@ struct ListItemDragPreview {
 }
 
 impl Render for ListItemDragPreview {
-    fn render(&mut self, _: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.render_preview {
             return div().into_any_element();
         }
 
-        render_drag_preview(&self.drag, &self.html_images, &self.drag.item.shortcut, cx)
+        render_drag_preview(&self.drag, &self.html_images, &self.drag.item.shortcut, window, cx)
     }
 }
 
@@ -576,6 +576,7 @@ fn render_rows(
                                     load_animation,
                                     list_width,
                                     hover_allowed,
+                                    window,
                                     cx,
                                 )
                             }
@@ -1402,6 +1403,7 @@ fn render_item_surface<T>(
     hover_actions: Option<(AnyElement, usize)>,
     selection_window: Option<Entity<MainWindow>>,
     hover_allowed: bool,
+    window: &Window,
     cx: &mut Context<T>,
 ) -> gpui::Div {
     let translator = i18n::translator(cx);
@@ -1454,12 +1456,24 @@ fn render_item_surface<T>(
     let show_shortcut = display.toolbar_visibility != ItemRegionVisibility::Hidden
         && display.enabled(ItemDisplayField::Shortcut) && !shortcut_number.is_empty();
     let identity_count = usize::from(show_source) + usize::from(show_shortcut);
-    let identity_width = ui_rem(20.0 * identity_count as f32);
-    let toolbar_width = 20.0 * (action_count + identity_count) as f32;
+    let unit_width = metrics.rem_size * (20.0 / 16.0);
+    let shortcut_width = if show_shortcut {
+        let mut text_style = window.text_style();
+        text_style.font_family = cx.theme().font_family.clone();
+        let line = window.text_system().shape_line(
+            shortcut_number.clone().into(), metrics.rem_size * 0.75,
+            &[text_style.to_run(shortcut_number.len())], None,
+        );
+        (line.width + metrics.rem_size * (8.0 / 16.0)).max(unit_width)
+    } else {
+        px(0.0)
+    };
+    let identity_width = unit_width * usize::from(show_source) as f32 + shortcut_width;
+    let toolbar_width = unit_width * action_count as f32 + identity_width;
     let has_toolbar = action_count + identity_count > 0;
     let mut identity = div()
         .h_full()
-        .w(if display.toolbar_visibility.is_visible(selected) { identity_width } else { ui_rem(0.0) })
+        .when(!display.toolbar_visibility.is_visible(selected), |this| this.w_0())
         .flex_none()
         .flex()
         .items_center()
@@ -1472,12 +1486,12 @@ fn render_item_surface<T>(
             &translator,
         )))
         .when(show_shortcut, |this| this.child(
-            div().h_full().w(ui_rem(20.0)).flex_none()
+            div().h_full().min_w(ui_rem(20.0)).px(ui_rem(4.0)).flex_none()
                 .flex().items_center().justify_center()
-                .text_xs().text_color(theme.primary).child(shortcut_number),
+                .whitespace_nowrap().text_xs().text_color(theme.primary).child(shortcut_number),
         ));
     if hover_allowed && display.toolbar_visibility == ItemRegionVisibility::Active {
-        identity = identity.group_hover(row_hover_group.clone(), |style| style.w(identity_width));
+        identity = identity.group_hover(row_hover_group.clone(), |style| style.w_auto());
     }
     let mut info_bar = div()
         .absolute()
@@ -1598,7 +1612,7 @@ fn render_item_surface<T>(
         .h(metrics.meta_row_height)
         .w_full()
         .min_w_0()
-        .when(has_toolbar, |this| this.pr(ui_rem((toolbar_width - 10.0).max(0.0))))
+        .when(has_toolbar, |this| this.pr((toolbar_width - metrics.rem_size * (10.0 / 16.0)).max(px(0.0))))
         .flex_none()
         .flex()
         .items_center()
@@ -1755,6 +1769,7 @@ fn render_drag_preview(
     drag: &ListItemDrag,
     html_images: &HashMap<PathBuf, Arc<RenderImage>>,
     shortcut: &str,
+    window: &Window,
     cx: &mut Context<ListItemDragPreview>,
 ) -> AnyElement {
     let Some(preview_size) = drag.preview_size.get() else {
@@ -1786,6 +1801,7 @@ fn render_drag_preview(
         None,
         None,
         false,
+        window,
         cx,
     );
     let surface = if drag.list_item_style == ListItemStyle::Card {
@@ -1966,6 +1982,7 @@ fn render_row(
     load_animation: Option<ListItemLoadAnimation>,
     load_offset: Pixels,
     hover_allowed: bool,
+    window: &Window,
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     let list_item_load_enabled =
@@ -2009,6 +2026,7 @@ fn render_row(
         hover_actions,
         Some(main_window.clone()),
         hover_allowed,
+        window,
         cx,
     );
     let target_is_pinned = item.is_pinned;

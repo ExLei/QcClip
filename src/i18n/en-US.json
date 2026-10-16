@@ -16,7 +16,7 @@
   "settings.item_display.time": "Copy time",
   "settings.item_display.length": "Characters / image size / file count",
   "settings.item_display.source": "Source application icon",
-  "settings.item_display.shortcut": "Quick-paste number",
+  "settings.item_display.shortcut": "Item number",
   "settings.personalization.app_font": "App font",
   "settings.personalization.app_font_description": "Choose the interface font. Changes apply immediately.",
   "settings.personalization.app_font_default": "Follow theme (default)",
