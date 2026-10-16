@@ -88,7 +88,8 @@ impl Database {
         let database = Self { path };
         let initialize = if database.path.exists() {
             let connection = database.open_connection(true, false)?;
-            let version: i32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))
+            let version: i32 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(|source| DatabaseError::Inspect { source })?;
             if version == 0 {
                 let tables: i64 = connection.query_row(
@@ -123,7 +124,8 @@ impl Database {
     }
 
     pub(crate) fn connect(&self) -> Result<DatabaseConnection, DatabaseError> {
-        let operation = data_runtime::begin_operation().map_err(|_| DatabaseError::DataSwitching)?;
+        let operation =
+            data_runtime::begin_operation().map_err(|_| DatabaseError::DataSwitching)?;
         let connection = self.open_connection(true, false)?;
         migrations::validate_schema(&connection)?;
         self.validate_connection(&connection)?;
@@ -137,7 +139,10 @@ impl Database {
         } else {
             connection
         };
-        Ok(DatabaseConnection { connection, _operation: operation })
+        Ok(DatabaseConnection {
+            connection,
+            _operation: operation,
+        })
     }
 
     pub(crate) fn connect_write(&self) -> Result<DatabaseConnection, DatabaseError> {
@@ -155,9 +160,11 @@ impl Database {
     }
 
     pub(crate) fn maintenance_supported(connection: &Connection) -> Result<bool, DatabaseError> {
-        let version: i32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))
+        let version: i32 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|source| DatabaseError::Inspect { source })?;
-        let read_only = connection.is_readonly(rusqlite::MAIN_DB)
+        let read_only = connection
+            .is_readonly(rusqlite::MAIN_DB)
             .map_err(|source| DatabaseError::Inspect { source })?;
         Ok(version == CURRENT_SCHEMA_VERSION && !read_only)
     }
@@ -166,7 +173,11 @@ impl Database {
         &self.path
     }
 
-    fn open_connection(&self, read_only: bool, initialize: bool) -> Result<Connection, DatabaseError> {
+    fn open_connection(
+        &self,
+        read_only: bool,
+        initialize: bool,
+    ) -> Result<Connection, DatabaseError> {
         let flags = if read_only {
             OpenFlags::SQLITE_OPEN_READ_ONLY
         } else if initialize {
@@ -174,13 +185,18 @@ impl Database {
         } else {
             OpenFlags::SQLITE_OPEN_READ_WRITE
         };
-        let connection = Connection::open_with_flags(&self.path, flags)
-            .map_err(|source| DatabaseError::Open { path: self.path.clone(), source })?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
-        ).map_err(|source| DatabaseError::Configure { source })?;
+        let connection = Connection::open_with_flags(&self.path, flags).map_err(|source| {
+            DatabaseError::Open {
+                path: self.path.clone(),
+                source,
+            }
+        })?;
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")
+            .map_err(|source| DatabaseError::Configure { source })?;
         if initialize {
-            connection.pragma_update(None, "journal_mode", "WAL")
+            connection
+                .pragma_update(None, "journal_mode", "WAL")
                 .map_err(|source| DatabaseError::Configure { source })?;
         }
         Ok(connection)
@@ -193,12 +209,14 @@ impl Database {
         }
         if !info.journal_mode.eq_ignore_ascii_case("wal") {
             return Err(DatabaseError::Validation(format!(
-                "日志模式应为 WAL，实际为 {}", info.journal_mode,
+                "日志模式应为 WAL，实际为 {}",
+                info.journal_mode,
             )));
         }
         if info.busy_timeout_millis != 5_000 {
             return Err(DatabaseError::Validation(format!(
-                "忙碌超时应为 5000 毫秒，实际为 {} 毫秒", info.busy_timeout_millis,
+                "忙碌超时应为 5000 毫秒，实际为 {} 毫秒",
+                info.busy_timeout_millis,
             )));
         }
         Ok(())

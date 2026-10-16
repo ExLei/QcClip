@@ -128,9 +128,8 @@ impl NewGalleryGroupForm {
         }
         let name = self.name_input.read(cx).value().trim().to_owned();
         if name.is_empty() {
-            self.submit_error = Some(
-                i18n::translator(cx).translate("main.form.gallery_group.error.empty_name"),
-            );
+            self.submit_error =
+                Some(i18n::translator(cx).translate("main.form.gallery_group.error.empty_name"));
             cx.notify();
             return;
         }
@@ -202,7 +201,8 @@ impl NewGalleryGroupForm {
                 this.update(cx, |this, cx| {
                     this.is_deleting = false;
                     cx.notify();
-                }).ok();
+                })
+                .ok();
                 return;
             }
             let group_id = group.id.clone();
@@ -214,7 +214,8 @@ impl NewGalleryGroupForm {
                             on_deleted(group_id, cx);
                         }
                         window.remove_window();
-                    }).ok();
+                    })
+                    .ok();
                 }
                 Err(error) => {
                     this.update(cx, |this, cx| {
@@ -222,10 +223,12 @@ impl NewGalleryGroupForm {
                         this.is_deleting = false;
                         this.submit_error = Some(error);
                         cx.notify();
-                    }).ok();
+                    })
+                    .ok();
                 }
             }
-        }).detach();
+        })
+        .detach();
     }
 }
 
@@ -250,9 +253,8 @@ impl Render for NewGalleryGroupForm {
             .or(self.existing_icon_path.as_ref())
             .and_then(|path| path.file_name())
             .map(|name| name.to_string_lossy().into_owned());
-        let icon_label = icon_name.unwrap_or_else(|| {
-            translator.translate("main.form.gallery_group.choose_icon")
-        });
+        let icon_label = icon_name
+            .unwrap_or_else(|| translator.translate("main.form.gallery_group.choose_icon"));
         let submit_error = self.submit_error.clone();
         let is_submitting = self.is_submitting;
         let is_busy = is_submitting || self.is_deleting;
@@ -314,10 +316,7 @@ impl Render for NewGalleryGroupForm {
             .bg(theme.background)
             .text_color(theme.foreground)
             .track_focus(&focus_handle)
-            .child(dialog_header(
-                translator.translate(title_key),
-                theme,
-            ))
+            .child(dialog_header(translator.translate(title_key), theme))
             .child(dialog_body(
                 div()
                     .flex()

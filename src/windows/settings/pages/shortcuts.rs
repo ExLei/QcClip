@@ -1,14 +1,12 @@
 use crate::ui::scale::ui_rem;
 
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, ScrollAnchor};
 
 use super::super::{
     SettingsWindowView, ShortcutCategory,
-    components::{
-        compact_setting_row, settings_error_row, settings_fused_dropdown,
-    },
+    components::{compact_setting_row, settings_error_row, settings_fused_dropdown},
 };
 use crate::{
     config::{
@@ -20,12 +18,18 @@ use crate::{
 };
 use gpui::{Entity, FocusHandle, KeyDownEvent, SharedString, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconNamed, InteractiveElementExt as _, Sizable as _, checkbox::Checkbox,
-    h_flex, kbd::Kbd, switch::Switch, tab::{Tab, TabBar}, tooltip::Tooltip, v_flex,
-};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::slider::Slider;
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Icon, IconNamed, InteractiveElementExt as _, Sizable as _,
+    checkbox::Checkbox,
+    h_flex,
+    kbd::Kbd,
+    switch::Switch,
+    tab::{Tab, TabBar},
+    tooltip::Tooltip,
+    v_flex,
+};
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_shortcuts(
@@ -134,7 +138,8 @@ impl SettingsWindowView {
                             save_error.clone()
                         });
                     view.update(cx, |view, cx| {
-                        view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
+                        view.shortcut_error =
+                            notify_settings_error(SettingsPage::Shortcuts, error, cx);
                         cx.notify();
                     });
                 }
@@ -577,21 +582,28 @@ impl SettingsWindowView {
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let config = config_runtime::shortcuts_config(cx).middle_mouse;
-        let mut items = vec![DropdownItem::option(
-            DropdownItemId::new("none"),
-            translator.translate("settings.shortcuts.middle_mouse.none"),
-        ).selected(config.modifier.is_none())];
+        let mut items = vec![
+            DropdownItem::option(
+                DropdownItemId::new("none"),
+                translator.translate("settings.shortcuts.middle_mouse.none"),
+            )
+            .selected(config.modifier.is_none()),
+        ];
         items.extend(QuickPasteShortcutModifier::ALL.into_iter().map(|modifier| {
             DropdownItem::option(
                 DropdownItemId::new(modifier.code()),
                 translator.translate(modifier.label_key()),
-            ).selected(config.modifier == Some(modifier))
+            )
+            .selected(config.modifier == Some(modifier))
         }));
         let view = cx.entity();
         let modifier_view = view.clone();
         let selector = settings_fused_dropdown(
             "settings-shortcuts-middle-mouse",
-            config.modifier.map(|modifier| modifier.code()).unwrap_or("none"),
+            config
+                .modifier
+                .map(|modifier| modifier.code())
+                .unwrap_or("none"),
             items,
             translator.translate("settings.shortcuts.middle_mouse.button"),
             Vec::new(),
@@ -632,54 +644,85 @@ impl SettingsWindowView {
             .py_2()
             .border_b_1()
             .border_color(theme.border)
-            .child(self.highlight_element(
-                theme,
-                enabled_title.clone(),
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .min_h(ui_rem(36.0))
-                    .flex_wrap()
-                    .justify_between()
-                    .gap_4()
-                    .px_4()
-                    .child(div().min_w(ui_rem(180.0)).flex_1().pl_2()
-                        .text_sm().text_color(theme.muted_foreground).child(enabled_title))
-                    .child(h_flex().flex_shrink_0().gap_2().child(selector).child(enabled)),
-            ))
-            .child(self.highlight_element(
-                theme,
-                threshold_title.clone(),
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .min_h(ui_rem(28.0))
-                    .flex_wrap()
-                    .justify_between()
-                    .gap_4()
-                    .px_4()
-                    .child(h_flex()
-                        .id("settings-shortcuts-middle-mouse-threshold-label")
-                        .min_w(ui_rem(180.0))
-                        .flex_1()
-                        .pl_2()
-                        .gap_2()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(threshold_title)
-                        .child(div().opacity(0.7).child("10–1000 ms"))
-                        .tooltip(move |window, cx| Tooltip::new(description.clone()).build(window, cx)))
-                    .child(h_flex()
-                        .w(ui_rem(248.0))
-                        .flex_shrink_0()
-                        .gap_3()
-                        .when(!config.enabled, |this| this.opacity(0.5))
-                        .child(Slider::new(&self.middle_mouse_threshold_slider)
-                            .disabled(!config.enabled).flex_1())
-                        .child(div().w(ui_rem(62.0)).text_xs().text_right()
-                            .text_color(theme.muted_foreground)
-                            .child(format!("{} ms", config.hold_threshold_ms)))),
-            ))
+            .child(
+                self.highlight_element(
+                    theme,
+                    enabled_title.clone(),
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .min_h(ui_rem(36.0))
+                        .flex_wrap()
+                        .justify_between()
+                        .gap_4()
+                        .px_4()
+                        .child(
+                            div()
+                                .min_w(ui_rem(180.0))
+                                .flex_1()
+                                .pl_2()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(enabled_title),
+                        )
+                        .child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .gap_2()
+                                .child(selector)
+                                .child(enabled),
+                        ),
+                ),
+            )
+            .child(
+                self.highlight_element(
+                    theme,
+                    threshold_title.clone(),
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .min_h(ui_rem(28.0))
+                        .flex_wrap()
+                        .justify_between()
+                        .gap_4()
+                        .px_4()
+                        .child(
+                            h_flex()
+                                .id("settings-shortcuts-middle-mouse-threshold-label")
+                                .min_w(ui_rem(180.0))
+                                .flex_1()
+                                .pl_2()
+                                .gap_2()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(threshold_title)
+                                .child(div().opacity(0.7).child("10–1000 ms"))
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(description.clone()).build(window, cx)
+                                }),
+                        )
+                        .child(
+                            h_flex()
+                                .w(ui_rem(248.0))
+                                .flex_shrink_0()
+                                .gap_3()
+                                .when(!config.enabled, |this| this.opacity(0.5))
+                                .child(
+                                    Slider::new(&self.middle_mouse_threshold_slider)
+                                        .disabled(!config.enabled)
+                                        .flex_1(),
+                                )
+                                .child(
+                                    div()
+                                        .w(ui_rem(62.0))
+                                        .text_xs()
+                                        .text_right()
+                                        .text_color(theme.muted_foreground)
+                                        .child(format!("{} ms", config.hold_threshold_ms)),
+                                ),
+                        ),
+                ),
+            )
             .into_any_element()
     }
 }
@@ -689,10 +732,12 @@ fn save_middle_mouse_config(
     config: crate::config::MiddleMouseShortcutConfig,
     cx: &mut gpui::App,
 ) {
-    let error = hotkey::set_middle_mouse_config(config, cx).err().map(|error| {
-        tracing::error!("保存鼠标中键呼出设置失败：{error}");
-        i18n::translator(cx).translate("settings.shortcuts.save_error")
-    });
+    let error = hotkey::set_middle_mouse_config(config, cx)
+        .err()
+        .map(|error| {
+            tracing::error!("保存鼠标中键呼出设置失败：{error}");
+            i18n::translator(cx).translate("settings.shortcuts.save_error")
+        });
     view.update(cx, |view, cx| {
         view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
         cx.notify();
@@ -790,9 +835,7 @@ fn quick_paste_1_to_9_row(
         .large()
         .checked(config.enabled)
         .accessibility_label(translator.translate("settings.shortcuts.quick_paste_1_to_9.enabled"))
-        .tooltip(translator.translate(
-            "settings.shortcuts.quick_paste_1_to_9.enabled.tooltip",
-        ))
+        .tooltip(translator.translate("settings.shortcuts.quick_paste_1_to_9.enabled.tooltip"))
         .on_click(move |checked, _, cx| {
             let mut next = config;
             next.enabled = *checked;
@@ -809,30 +852,30 @@ fn quick_paste_1_to_9_row(
         });
     let include_pinned_error = save_error;
     let include_pinned_view = view.clone();
-    let include_pinned_checkbox = Checkbox::new(
-        "settings-shortcuts-quick-paste-1-to-9-include-pinned",
-    )
-        .checked(config.include_pinned)
-        .accessibility_label(translator.translate(
-            "settings.shortcuts.quick_paste_1_to_9.include_pinned",
-        ))
-        .tooltip(translator.translate(
-            "settings.shortcuts.quick_paste_1_to_9.include_pinned.tooltip",
-        ))
-        .on_click(move |checked, _, cx| {
-            let mut next = config;
-            next.include_pinned = *checked;
-            let error = hotkey::set_quick_paste_index_config(next, cx)
-                .err()
-                .map(|error| {
-                    tracing::error!("保存快捷粘贴 1~9 置顶项选项失败：{error}");
-                    include_pinned_error.clone()
+    let include_pinned_checkbox =
+        Checkbox::new("settings-shortcuts-quick-paste-1-to-9-include-pinned")
+            .checked(config.include_pinned)
+            .accessibility_label(
+                translator.translate("settings.shortcuts.quick_paste_1_to_9.include_pinned"),
+            )
+            .tooltip(
+                translator
+                    .translate("settings.shortcuts.quick_paste_1_to_9.include_pinned.tooltip"),
+            )
+            .on_click(move |checked, _, cx| {
+                let mut next = config;
+                next.include_pinned = *checked;
+                let error = hotkey::set_quick_paste_index_config(next, cx)
+                    .err()
+                    .map(|error| {
+                        tracing::error!("保存快捷粘贴 1~9 置顶项选项失败：{error}");
+                        include_pinned_error.clone()
+                    });
+                include_pinned_view.update(cx, |view, cx| {
+                    view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
+                    cx.notify();
                 });
-            include_pinned_view.update(cx, |view, cx| {
-                view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
-                cx.notify();
             });
-        });
     let switches = h_flex()
         .gap_2()
         .items_center()
@@ -1090,7 +1133,8 @@ fn shortcut_recorder(
     } else if quick_paste {
         "quickPaste"
     } else {
-        id.map(SessionShortcutId::code).unwrap_or("toggleMainWindow")
+        id.map(SessionShortcutId::code)
+            .unwrap_or("toggleMainWindow")
     };
     let clear_error_text = save_error.clone();
     let clear_button = if binding.is_some() {
@@ -1110,9 +1154,7 @@ fn shortcut_recorder(
                         None if toggle_clipboard_monitor => {
                             hotkey::set_toggle_clipboard_monitor_shortcut(None, cx)
                         }
-                        None if plain_text_paste => {
-                            hotkey::set_plain_text_paste_shortcut(None, cx)
-                        }
+                        None if plain_text_paste => hotkey::set_plain_text_paste_shortcut(None, cx),
                         None if quick_paste => hotkey::set_quick_paste_shortcut(None, cx),
                         None => hotkey::set_toggle_main_window_shortcut(None, cx),
                     };
@@ -1121,7 +1163,8 @@ fn shortcut_recorder(
                         clear_error_text.clone()
                     });
                     view_for_clear.update(cx, |view, cx| {
-                        view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
+                        view.shortcut_error =
+                            notify_settings_error(SettingsPage::Shortcuts, error, cx);
                         cx.notify();
                     });
                 })
@@ -1233,10 +1276,7 @@ fn shortcut_recorder(
             window.focus(&focus_handle, cx);
         });
 
-    let recorder_row = h_flex()
-        .gap_2()
-        .child(recorder)
-        .child(reset_button);
+    let recorder_row = h_flex().gap_2().child(recorder).child(reset_button);
 
     if id.is_none()
         && !open_settings
@@ -1266,9 +1306,7 @@ fn shortcut_recorder(
                 translator,
                 recording,
             ))
-            .when_some(restore_button, |this, button| {
-                this.child(button)
-            })
+            .when_some(restore_button, |this, button| this.child(button))
             .into_any_element()
     } else {
         recorder_row.into_any_element()
@@ -1460,10 +1498,12 @@ fn restore_system_win_v_button(
             cx.stop_propagation();
             let title = translator.translate("settings.shortcuts.win_v_restore.title");
             let detail = translator.translate("settings.shortcuts.win_v_restore.detail");
-            let cancel =
-                gpui::PromptButton::cancel(translator.translate("settings.shortcuts.win_v_restore.cancel"));
-            let confirm =
-                gpui::PromptButton::ok(translator.translate("settings.shortcuts.win_v_restore.confirm"));
+            let cancel = gpui::PromptButton::cancel(
+                translator.translate("settings.shortcuts.win_v_restore.cancel"),
+            );
+            let confirm = gpui::PromptButton::ok(
+                translator.translate("settings.shortcuts.win_v_restore.confirm"),
+            );
             let answer = window.prompt(
                 gpui::PromptLevel::Warning,
                 &title,
@@ -1482,7 +1522,11 @@ fn restore_system_win_v_button(
                 if let Err(error) = reset_result {
                     tracing::error!("恢复默认快捷键失败：{error}");
                     let _ = view.update(cx, |view, cx| {
-                        view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, Some(save_error.clone()), cx);
+                        view.shortcut_error = notify_settings_error(
+                            SettingsPage::Shortcuts,
+                            Some(save_error.clone()),
+                            cx,
+                        );
                         cx.notify();
                     });
                     return;
@@ -1498,7 +1542,8 @@ fn restore_system_win_v_button(
                         restore_error.clone()
                     });
                     let _ = view.update(cx, |view, cx| {
-                        view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
+                        view.shortcut_error =
+                            notify_settings_error(SettingsPage::Shortcuts, error, cx);
                         view.recording_shortcut = false;
                         view.recording_open_settings = false;
                         view.recording_toggle_clipboard_monitor = false;

@@ -397,10 +397,7 @@ fn single_select_indicator(
     }
 }
 
-fn bounds_for_indicator(
-    bounds: &[(f32, f32)],
-    selected_index: usize,
-) -> Option<(Pixels, Pixels)> {
+fn bounds_for_indicator(bounds: &[(f32, f32)], selected_index: usize) -> Option<(Pixels, Pixels)> {
     let (left, width) = *bounds.get(selected_index)?;
     Some((px(left), px(width)))
 }

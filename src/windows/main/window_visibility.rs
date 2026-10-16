@@ -46,7 +46,8 @@ pub(crate) fn initialize_edge_hide_enabled(cx: &mut App) {
         let Some(persisted_edge) = persisted_edge else {
             return Ok::<Option<window_state::EdgeAttachment>, String>(None);
         };
-        let Some(attachment) = window_drag::restore_persisted_edge(window, Some(persisted_edge), cx)?
+        let Some(attachment) =
+            window_drag::restore_persisted_edge(window, Some(persisted_edge), cx)?
         else {
             return Ok(None);
         };
@@ -111,8 +112,8 @@ pub(crate) fn apply_imported_window_state(cx: &mut App) {
 
 pub(crate) fn set_edge_hide_enabled(enabled: bool, cx: &mut App) {
     if enabled {
-        let (window, should_restore_normal_bounds, normal_bounds) =
-            cx.read_global::<MainWindowService, _>(|service, _| {
+        let (window, should_restore_normal_bounds, normal_bounds) = cx
+            .read_global::<MainWindowService, _>(|service, _| {
                 (
                     service.window,
                     service.window_state.edge_attachment().is_none()
@@ -143,18 +144,17 @@ pub(crate) fn set_edge_hide_enabled(enabled: bool, cx: &mut App) {
                     window_drag::native_move_started,
                     window_drag::native_move_finished,
                 )?;
-                let attachment_result = match window_drag::restore_persisted_edge(
-                    window,
-                    persisted_edge,
-                    cx,
-                ) {
-                    Ok(Some(attachment)) => Ok(Some(attachment)),
-                    Ok(None) => window_drag::attach_if_near_edge(window, cx),
-                    Err(error) => {
-                        tracing::error!("恢复主窗口贴边位置失败，将按当前窗口位置贴边：{error}");
-                        window_drag::attach_if_near_edge(window, cx)
-                    }
-                };
+                let attachment_result =
+                    match window_drag::restore_persisted_edge(window, persisted_edge, cx) {
+                        Ok(Some(attachment)) => Ok(Some(attachment)),
+                        Ok(None) => window_drag::attach_if_near_edge(window, cx),
+                        Err(error) => {
+                            tracing::error!(
+                                "恢复主窗口贴边位置失败，将按当前窗口位置贴边：{error}"
+                            );
+                            window_drag::attach_if_near_edge(window, cx)
+                        }
+                    };
                 match attachment_result {
                     Ok(Some(attachment)) => Ok(Some(attachment)),
                     Ok(None) => {
@@ -307,10 +307,7 @@ pub(crate) fn refresh_edge_hide_position(cx: &mut App) {
     }
 }
 
-fn synchronize_attached_edge_window(
-    attachment: window_state::EdgeAttachment,
-    cx: &mut App,
-) {
+fn synchronize_attached_edge_window(attachment: window_state::EdgeAttachment, cx: &mut App) {
     let (window, visible) = cx.read_global::<MainWindowService, _>(|service, _| {
         (service.window, service.window_state.is_logically_visible())
     });
@@ -376,21 +373,16 @@ pub(crate) fn position_initial_window(
         }
 
         let current_bounds = platform_window::physical_client_bounds(window)?;
-        let initial_converter =
-            platform_window::CoordinateConverter::new(window.scale_factor());
+        let initial_converter = platform_window::CoordinateConverter::new(window.scale_factor());
         let initial_bounds = platform_window::PhysicalClientBounds {
             left: current_bounds.left,
             top: current_bounds.top,
-            right: current_bounds
-                .left
-                .saturating_add(initial_converter.logical_to_physical_i32(
-                    f32::from(initial_logical_size.width),
-                )),
-            bottom: current_bounds
-                .top
-                .saturating_add(initial_converter.logical_to_physical_i32(
-                    f32::from(initial_logical_size.height),
-                )),
+            right: current_bounds.left.saturating_add(
+                initial_converter.logical_to_physical_i32(f32::from(initial_logical_size.width)),
+            ),
+            bottom: current_bounds.top.saturating_add(
+                initial_converter.logical_to_physical_i32(f32::from(initial_logical_size.height)),
+            ),
         };
         let position = config_runtime::clipboard_config(cx).window_position;
         let remembered = state_runtime::state(cx).main_window.normal_position;
@@ -434,9 +426,8 @@ pub(crate) fn hide_initial_window(
     initially_visible: bool,
     cx: &mut App,
 ) -> Result<(), String> {
-    let attachment = cx.read_global::<MainWindowService, _>(|service, _| {
-        service.window_state.edge_attachment()
-    });
+    let attachment =
+        cx.read_global::<MainWindowService, _>(|service, _| service.window_state.edge_attachment());
     if let Some(attachment) = attachment {
         let hidden = hidden_bounds(
             attachment,
@@ -484,10 +475,7 @@ pub(crate) fn hide_initial_window(
     Ok(())
 }
 
-pub(crate) fn attach_edge_and_remember(
-    attachment: window_state::EdgeAttachment,
-    cx: &mut App,
-) {
+pub(crate) fn attach_edge_and_remember(attachment: window_state::EdgeAttachment, cx: &mut App) {
     cx.update_global::<MainWindowService, _>(|service, _| {
         service.window_state.attach_edge(attachment);
     });
@@ -503,18 +491,13 @@ pub(crate) fn persist_edge_position(attachment: window_state::EdgeAttachment, cx
         return;
     };
     let converter = platform_window::CoordinateConverter::new(display.scale_factor);
-    let offset = match attachment.side {
-        window_state::EdgeSide::Left | window_state::EdgeSide::Right => {
-            converter.physical_to_logical(
-                attachment.client_bounds.top as f32 - display.bounds.y,
-            )
-        }
-        window_state::EdgeSide::Top | window_state::EdgeSide::Bottom => {
-            converter.physical_to_logical(
-                attachment.client_bounds.left as f32 - display.bounds.x,
-            )
-        }
-    };
+    let offset =
+        match attachment.side {
+            window_state::EdgeSide::Left | window_state::EdgeSide::Right => converter
+                .physical_to_logical(attachment.client_bounds.top as f32 - display.bounds.y),
+            window_state::EdgeSide::Top | window_state::EdgeSide::Bottom => converter
+                .physical_to_logical(attachment.client_bounds.left as f32 - display.bounds.x),
+        };
     let Some(display_key) = display.display_key else {
         return;
     };
@@ -548,18 +531,17 @@ pub(crate) fn set_visibility(
         stored_normal_bounds,
         stored_normal_logical_size,
         fixed,
-    ) =
-        cx.read_global::<MainWindowService, _>(|service, _| {
-            (
-                service.window,
-                service.window_state.edge_attachment(),
-                service.window_state.is_logically_visible(),
-                service.window_state.is_visibility_transition_active(),
-                service.window_state.normal_bounds(),
-                service.window_state.normal_logical_size(),
-                service.window_state.is_fixed(),
-            )
-        });
+    ) = cx.read_global::<MainWindowService, _>(|service, _| {
+        (
+            service.window,
+            service.window_state.edge_attachment(),
+            service.window_state.is_logically_visible(),
+            service.window_state.is_visibility_transition_active(),
+            service.window_state.normal_bounds(),
+            service.window_state.normal_logical_size(),
+            service.window_state.is_fixed(),
+        )
+    });
     if !visible && !can_hide_window(fixed, source) {
         return Ok(());
     }
@@ -576,10 +558,8 @@ pub(crate) fn set_visibility(
         MainWindowService::cancel_hover_preview(cx);
     }
 
-    let animation_enabled = config_runtime::animation_enabled(
-        cx,
-        crate::config::AnimationKind::WindowVisibility,
-    );
+    let animation_enabled =
+        config_runtime::animation_enabled(cx, crate::config::AnimationKind::WindowVisibility);
     let show_edge = config_runtime::clipboard_config(cx).edge_hide_show_edge;
     let (current_bounds, reveal_size, window_scale_factor, window_logical_size) = window
         .update(cx, |_, window, _| {
@@ -691,11 +671,12 @@ pub(crate) fn set_visibility(
                     // 避免旧输入会话的失焦处理覆盖本次显示的自动聚焦。
                     window.on_next_frame(move |window, _| {
                         window.on_next_frame(move |window, cx| {
-                            let should_handle = cx.read_global::<MainWindowService, _>(|service, _| {
-                                service.window_state.is_logically_visible()
-                                    && service.window_state.visibility_transition_generation()
-                                        == generation
-                            });
+                            let should_handle =
+                                cx.read_global::<MainWindowService, _>(|service, _| {
+                                    service.window_state.is_logically_visible()
+                                        && service.window_state.visibility_transition_generation()
+                                            == generation
+                                });
                             if should_handle {
                                 MainWindowService::handle_window_shown(window, cx);
                             }
@@ -758,9 +739,9 @@ pub(crate) fn set_visibility(
         Ok(target) => target,
         Err(error) => {
             let _ = window.update(cx, |_, window, cx| {
-                if let Err(restore_error) = restore_visibility_after_animation_failure(
-                    window, current_visible, cx,
-                ) {
+                if let Err(restore_error) =
+                    restore_visibility_after_animation_failure(window, current_visible, cx)
+                {
                     tracing::error!("窗口动画准备失败后恢复窗口失败：{restore_error}");
                 }
             });
@@ -871,9 +852,9 @@ fn schedule_visibility_animation_frame(
             Err(error) => {
                 tracing::error!("窗口显示/隐藏动画执行失败：{error}");
                 let previous_visible = !animation_show(animation);
-                if let Err(restore_error) = restore_visibility_after_animation_failure(
-                    window, previous_visible, cx,
-                ) {
+                if let Err(restore_error) =
+                    restore_visibility_after_animation_failure(window, previous_visible, cx)
+                {
                     tracing::error!("窗口动画失败后恢复窗口失败：{restore_error}");
                 }
                 cx.update_global::<MainWindowService, _>(|service, _| {
@@ -1017,7 +998,11 @@ fn restore_visibility_after_animation_failure(
     }
     platform_window::set_window_opacity(
         window,
-        if attachment.is_some() || visible { 1.0 } else { 0.0 },
+        if attachment.is_some() || visible {
+            1.0
+        } else {
+            0.0
+        },
     )?;
     platform_window::set_window_shadow_visible(
         window,
@@ -1100,10 +1085,7 @@ fn interpolate_i32(from: i32, to: i32, progress: f32) -> i32 {
 }
 
 fn client_height(bounds: platform_window::PhysicalClientBounds) -> i32 {
-    bounds
-        .bottom
-        .saturating_sub(bounds.top)
-        .max(1)
+    bounds.bottom.saturating_sub(bounds.top).max(1)
 }
 
 fn collapsed_bounds(
@@ -1137,22 +1119,22 @@ pub(crate) fn record_normal_position_after_drag(cx: &mut App) {
 }
 
 fn record_normal_position(cx: &mut App) {
-    let (window, should_record) = cx.read_global::<MainWindowService, _>(
-        |service, _| {
-            (
-                service.window,
-                service.window_state.edge_attachment().is_none()
-                    && service.window_state.can_record_window_geometry(),
-            )
-        },
-    );
+    let (window, should_record) = cx.read_global::<MainWindowService, _>(|service, _| {
+        (
+            service.window,
+            service.window_state.edge_attachment().is_none()
+                && service.window_state.can_record_window_geometry(),
+        )
+    });
     if !should_record {
         return;
     }
     let Some(window) = window else {
         return;
     };
-    let result = window.update(cx, |_, window, cx| record_normal_position_from_window(window, cx));
+    let result = window.update(cx, |_, window, cx| {
+        record_normal_position_from_window(window, cx)
+    });
     match result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::error!("记录主窗口位置失败：{error}"),
@@ -1234,9 +1216,8 @@ fn normal_bounds_for_position(
 ) -> (platform_window::PhysicalClientBounds, f32) {
     let cursor = platform_window::physical_cursor_position()
         .or_else(|| input::pointer_snapshot().map(|snapshot| snapshot.position));
-    let cursor_display = cursor.and_then(|cursor| {
-        platform_window::display_for_physical_point(cx, cursor)
-    });
+    let cursor_display =
+        cursor.and_then(|cursor| platform_window::display_for_physical_point(cx, cursor));
 
     if position == ClipboardWindowPosition::Remember {
         let Some(remembered) = remembered else {
@@ -1389,9 +1370,8 @@ fn clamp_position(position: f32, screen_start: f32, screen_end: f32, size: f32) 
 }
 
 pub(crate) fn sync_mouse_leave_state(cx: &mut App) {
-    let attachment = cx.read_global::<MainWindowService, _>(|service, _| {
-        service.window_state.edge_attachment()
-    });
+    let attachment =
+        cx.read_global::<MainWindowService, _>(|service, _| service.window_state.edge_attachment());
     let (visible, pointer_inside) = MainWindowService::session_shortcut_scope(cx);
     let edge_mouse_inside = attachment.is_some_and(|attachment| {
         input::pointer_snapshot().is_some_and(|snapshot| {
@@ -1493,19 +1473,18 @@ pub(crate) fn handle_mouse_move(position: Point<f32>, cx: &mut App) {
         mouse_leave_state,
         reveal_suppressed,
         reveal_blocked,
-    ) = cx
-        .read_global::<MainWindowService, _>(|service, _| {
-            (
-                service.window,
-                service.window_state.drag_state(),
-                service.window_state.is_fixed(),
-                service.window_state.edge_attachment(),
-                service.window_state.is_logically_visible(),
-                service.window_state.mouse_leave_state(),
-                service.window_state.edge_reveal_suppressed(),
-                service.window_state.edge_reveal_blocked(),
-            )
-        });
+    ) = cx.read_global::<MainWindowService, _>(|service, _| {
+        (
+            service.window,
+            service.window_state.drag_state(),
+            service.window_state.is_fixed(),
+            service.window_state.edge_attachment(),
+            service.window_state.is_logically_visible(),
+            service.window_state.mouse_leave_state(),
+            service.window_state.edge_reveal_suppressed(),
+            service.window_state.edge_reveal_blocked(),
+        )
+    });
     if drag_state != window_state::DragState::Idle
         || attachment.is_none()
         || window_drag::native_move_in_progress()
@@ -1524,12 +1503,13 @@ pub(crate) fn handle_mouse_move(position: Point<f32>, cx: &mut App) {
     let trigger_size = window
         .and_then(|window| {
             window
-                .update(cx, |_, window, _| physical_edge_trigger_size(window.scale_factor()))
+                .update(cx, |_, window, _| {
+                    physical_edge_trigger_size(window.scale_factor())
+                })
                 .ok()
         })
         .unwrap_or_else(|| physical_edge_trigger_size(1.0));
-    let in_reveal_region =
-        point_in_edge_trigger_region(position, attachment, trigger_size);
+    let in_reveal_region = point_in_edge_trigger_region(position, attachment, trigger_size);
     let reveal_suppressed =
         sync_edge_reveal_suppressed(in_reveal_region, visible, reveal_suppressed, cx);
 
@@ -1557,9 +1537,10 @@ pub(crate) fn handle_mouse_move(position: Point<f32>, cx: &mut App) {
     }
 
     let scrollbar_pressed = cx.read_global::<MainWindowService, _>(|service, cx| {
-        service.main_view.as_ref().is_some_and(|view| {
-            view.read(cx).heat_scrollbar.drag_origin.is_some()
-        })
+        service
+            .main_view
+            .as_ref()
+            .is_some_and(|view| view.read(cx).heat_scrollbar.drag_origin.is_some())
     });
     if point_in_client_bounds(position, attachment.client_bounds) {
         if mouse_leave_state != window_state::MouseLeaveState::Armed {
@@ -1913,14 +1894,32 @@ mod tests {
         let bounds = attachment().client_bounds;
         let mut scrollbar = super::super::state::HeatScrollbarState::default();
         let outside_positions = [
-            Point { x: bounds.left as f32 - 1.0, y: 300.0 },
-            Point { x: bounds.right as f32 + 1.0, y: 300.0 },
-            Point { x: 1700.0, y: bounds.top as f32 - 1.0 },
-            Point { x: 1700.0, y: bounds.bottom as f32 + 1.0 },
+            Point {
+                x: bounds.left as f32 - 1.0,
+                y: 300.0,
+            },
+            Point {
+                x: bounds.right as f32 + 1.0,
+                y: 300.0,
+            },
+            Point {
+                x: 1700.0,
+                y: bounds.top as f32 - 1.0,
+            },
+            Point {
+                x: 1700.0,
+                y: bounds.bottom as f32 + 1.0,
+            },
         ];
         let should_hide = |position, scrollbar: &super::super::state::HeatScrollbarState| {
-            should_hide_for_pointer(position, bounds, false,
-                window_state::MouseLeaveState::Armed, false, scrollbar.drag_origin.is_some())
+            should_hide_for_pointer(
+                position,
+                bounds,
+                false,
+                window_state::MouseLeaveState::Armed,
+                false,
+                scrollbar.drag_origin.is_some(),
+            )
         };
         for position in outside_positions {
             assert!(should_hide(position, &scrollbar));
@@ -1939,7 +1938,13 @@ mod tests {
         for position in outside_positions {
             assert!(should_hide(position, &scrollbar));
         }
-        assert!(!should_hide(Point { x: 1700.0, y: 300.0 }, &scrollbar));
+        assert!(!should_hide(
+            Point {
+                x: 1700.0,
+                y: 300.0
+            },
+            &scrollbar
+        ));
     }
 
     #[test]
@@ -2074,7 +2079,10 @@ mod tests {
             (360.0, 520.0),
             ClipboardWindowPosition::MouseNearby,
             platform_window::CoordinateConverter::new(1.0).logical_display_bounds(screen),
-            Point { x: 1800.0, y: 200.0 },
+            Point {
+                x: 1800.0,
+                y: 200.0,
+            },
         );
         assert_eq!((left_down.left, left_down.top), (1432.0, 208.0));
 
@@ -2082,7 +2090,10 @@ mod tests {
             (360.0, 520.0),
             ClipboardWindowPosition::MouseNearby,
             platform_window::CoordinateConverter::new(1.0).logical_display_bounds(screen),
-            Point { x: 1800.0, y: 1000.0 },
+            Point {
+                x: 1800.0,
+                y: 1000.0,
+            },
         );
         assert_eq!((left_up.left, left_up.top), (1432.0, 472.0));
     }

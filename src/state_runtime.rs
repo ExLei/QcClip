@@ -130,7 +130,9 @@ pub(crate) struct PersistedPreviewWindowState {
 
 impl Default for PersistedPreviewWindowState {
     fn default() -> Self {
-        Self { image_base_size: Self::DEFAULT_IMAGE_BASE_SIZE }
+        Self {
+            image_base_size: Self::DEFAULT_IMAGE_BASE_SIZE,
+        }
     }
 }
 
@@ -141,7 +143,8 @@ impl PersistedPreviewWindowState {
 
     pub(crate) fn restored_image_base_size(&self) -> f32 {
         if self.image_base_size.is_finite() {
-            self.image_base_size.clamp(Self::IMAGE_BASE_SIZE_MIN, Self::IMAGE_BASE_SIZE_MAX)
+            self.image_base_size
+                .clamp(Self::IMAGE_BASE_SIZE_MIN, Self::IMAGE_BASE_SIZE_MAX)
         } else {
             Self::DEFAULT_IMAGE_BASE_SIZE
         }
@@ -191,7 +194,8 @@ impl PersistedMainWindowState {
 
     pub(crate) fn restored_tags_panel_width(&self) -> f32 {
         if self.tags_panel_width.is_finite() {
-            self.tags_panel_width.clamp(Self::MIN_TAGS_PANEL_WIDTH, Self::MAX_TAGS_PANEL_WIDTH)
+            self.tags_panel_width
+                .clamp(Self::MIN_TAGS_PANEL_WIDTH, Self::MAX_TAGS_PANEL_WIDTH)
         } else {
             Self::DEFAULT_TAGS_PANEL_WIDTH
         }
@@ -248,7 +252,12 @@ impl StateRuntime {
                 warn!("创建状态文件失败：{error}");
             }
         }
-        cx.set_global(Self { state, path, pending_save: None, dirty: false });
+        cx.set_global(Self {
+            state,
+            path,
+            pending_save: None,
+            dirty: false,
+        });
         cx.on_app_quit(|cx| {
             cx.update_global::<Self, _>(|runtime, _| {
                 if let Err(error) = runtime.flush_pending_save() {
@@ -272,7 +281,8 @@ impl StateRuntime {
     }
 
     fn update_preview_image_base_size(&mut self, image_base_size: f32) -> bool {
-        let image_base_size = PersistedPreviewWindowState { image_base_size }.restored_image_base_size();
+        let image_base_size =
+            PersistedPreviewWindowState { image_base_size }.restored_image_base_size();
         if self.state.preview_window.image_base_size == image_base_size {
             return false;
         }
@@ -302,8 +312,8 @@ where
     C: BorrowMut<App>,
 {
     let app: &App = Borrow::borrow(&*cx);
-    let (current, path) =
-        app.read_global::<StateRuntime, _>(|runtime, _| (runtime.state.clone(), runtime.path.clone()));
+    let (current, path) = app
+        .read_global::<StateRuntime, _>(|runtime, _| (runtime.state.clone(), runtime.path.clone()));
     if current == state {
         return Ok(false);
     }
@@ -329,10 +339,7 @@ pub(crate) fn set_last_search_engine_template(template: Option<String>, cx: &mut
     }
 }
 
-pub(crate) fn set_main_window_normal_position(
-    position: PersistedWindowPosition,
-    cx: &mut App,
-) {
+pub(crate) fn set_main_window_normal_position(position: PersistedWindowPosition, cx: &mut App) {
     let mut state = state(cx);
     if state.main_window.normal_position == Some(position) {
         return;
@@ -369,7 +376,9 @@ pub(crate) fn set_preview_image_base_size(image_base_size: f32, cx: &mut App) {
         return;
     }
     let task = cx.spawn(async move |cx| {
-        cx.background_executor().timer(PREVIEW_STATE_SAVE_DELAY).await;
+        cx.background_executor()
+            .timer(PREVIEW_STATE_SAVE_DELAY)
+            .await;
         // 到期时保存最新状态，避免延迟任务覆盖期间更新的其他字段。
         cx.update(|cx| {
             cx.update_global::<StateRuntime, _>(|runtime, _| {
@@ -382,10 +391,7 @@ pub(crate) fn set_preview_image_base_size(image_base_size: f32, cx: &mut App) {
     cx.update_global::<StateRuntime, _>(|runtime, _| runtime.pending_save = Some(task));
 }
 
-pub(crate) fn set_main_window_edge(
-    position: Option<PersistedEdgePosition>,
-    cx: &mut App,
-) {
+pub(crate) fn set_main_window_edge(position: Option<PersistedEdgePosition>, cx: &mut App) {
     let mut state = state(cx);
     if state.main_window.edge == position {
         return;
@@ -418,8 +424,8 @@ fn load_state(path: &Path) -> PersistedState {
 }
 
 fn persist_state(path: &Path, state: &PersistedState) -> Result<(), StateError> {
-    let _operation = crate::services::data_runtime::begin_operation()
-        .map_err(|_| StateError::DataSwitching)?;
+    let _operation =
+        crate::services::data_runtime::begin_operation().map_err(|_| StateError::DataSwitching)?;
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -441,8 +447,9 @@ fn persist_state(path: &Path, state: &PersistedState) -> Result<(), StateError> 
 #[cfg(test)]
 mod tests {
     use super::{
-        PersistedGallerySort, PersistedMainWindowState, PersistedPreviewWindowState, PersistedState,
-        PersistedWindowPosition, PersistedWindowSize, StateRuntime, load_state, persist_state,
+        PersistedGallerySort, PersistedMainWindowState, PersistedPreviewWindowState,
+        PersistedState, PersistedWindowPosition, PersistedWindowSize, StateRuntime, load_state,
+        persist_state,
     };
     use crate::windows::main::tabs::{SymbolCategoryId, TabId};
     use tempfile::tempdir;
@@ -450,10 +457,16 @@ mod tests {
     #[test]
     fn tags_panel_width_is_restored_with_valid_bounds() {
         for (width, expected) in [
-            (80.0, 120.0), (240.0, 240.0), (500.0, 360.0),
-            (f32::NAN, 184.0), (f32::INFINITY, 184.0),
+            (80.0, 120.0),
+            (240.0, 240.0),
+            (500.0, 360.0),
+            (f32::NAN, 184.0),
+            (f32::INFINITY, 184.0),
         ] {
-            let state = PersistedMainWindowState { tags_panel_width: width, ..Default::default() };
+            let state = PersistedMainWindowState {
+                tags_panel_width: width,
+                ..Default::default()
+            };
             assert_eq!(state.restored_tags_panel_width(), expected);
         }
     }
@@ -461,16 +474,37 @@ mod tests {
     #[test]
     fn restored_window_size_rejects_collapsed_and_non_finite_sizes() {
         for size in [
-            PersistedWindowSize { width: 360.0, height: 1.0 },
-            PersistedWindowSize { width: 360.0, height: 149.0 },
-            PersistedWindowSize { width: f32::NAN, height: 520.0 },
-            PersistedWindowSize { width: 360.0, height: f32::INFINITY },
+            PersistedWindowSize {
+                width: 360.0,
+                height: 1.0,
+            },
+            PersistedWindowSize {
+                width: 360.0,
+                height: 149.0,
+            },
+            PersistedWindowSize {
+                width: f32::NAN,
+                height: 520.0,
+            },
+            PersistedWindowSize {
+                width: 360.0,
+                height: f32::INFINITY,
+            },
         ] {
-            let state = PersistedMainWindowState { size: Some(size), ..Default::default() };
+            let state = PersistedMainWindowState {
+                size: Some(size),
+                ..Default::default()
+            };
             assert_eq!(state.restored_size(), PersistedWindowSize::DEFAULT);
         }
-        let size = PersistedWindowSize { width: 480.0, height: 640.0 };
-        let state = PersistedMainWindowState { size: Some(size), ..Default::default() };
+        let size = PersistedWindowSize {
+            width: 480.0,
+            height: 640.0,
+        };
+        let state = PersistedMainWindowState {
+            size: Some(size),
+            ..Default::default()
+        };
         assert_eq!(state.restored_size(), size);
     }
 
@@ -480,13 +514,21 @@ mod tests {
         let path = directory.path().join("state.json");
         let state = PersistedState::default();
         persist_state(&path, &state).expect("状态保存失败");
-        let mut runtime = StateRuntime { state, path, pending_save: None, dirty: false };
+        let mut runtime = StateRuntime {
+            state,
+            path,
+            pending_save: None,
+            dirty: false,
+        };
 
         for size in [528.0, 576.0, 720.0] {
             runtime.update_preview_image_base_size(size);
         }
         assert_eq!(runtime.state.preview_window.image_base_size, 720.0);
-        assert_eq!(load_state(&runtime.path).preview_window.image_base_size, 480.0);
+        assert_eq!(
+            load_state(&runtime.path).preview_window.image_base_size,
+            480.0
+        );
         runtime.state.main_window.active_tab = TabId::Emoji;
         assert!(runtime.flush_pending_save().expect("待写入状态保存失败"));
         assert_eq!(load_state(&runtime.path), runtime.state);
@@ -519,7 +561,9 @@ mod tests {
                 quick_paste_tab: Default::default(),
                 quick_paste_index: 0,
             },
-            preview_window: PersistedPreviewWindowState { image_base_size: 720.0 },
+            preview_window: PersistedPreviewWindowState {
+                image_base_size: 720.0,
+            },
             ..Default::default()
         };
 
@@ -552,5 +596,4 @@ mod tests {
         assert!(state.main_window.recent_symbols.is_empty());
         assert_eq!(state.preview_window.restored_image_base_size(), 480.0);
     }
-
 }

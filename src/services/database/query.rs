@@ -215,9 +215,11 @@ pub(super) fn collect_order_snapshot(
         snapshot.ids.push(row.get(0)?);
         if include_heat {
             let count: i64 = row.get(1)?;
-            snapshot.paste_counts.push(u64::try_from(count).map_err(|_| {
-                HistoryQueryError::InvalidNonNegativeValue("paste_count".to_owned())
-            })?);
+            snapshot
+                .paste_counts
+                .push(u64::try_from(count).map_err(|_| {
+                    HistoryQueryError::InvalidNonNegativeValue("paste_count".to_owned())
+                })?);
         }
     }
     Ok(snapshot)
@@ -452,8 +454,12 @@ pub(super) fn load_preview_options(
             preview.html_content =
                 load_html_content_source(source, html_content_char_limit, blob_store)?;
             image_sources.push(None);
-        } else if supported_storage && load_image_sources
-            && matches!(preview.format_kind, FormatKind::Image | FormatKind::FileList)
+        } else if supported_storage
+            && load_image_sources
+            && matches!(
+                preview.format_kind,
+                FormatKind::Image | FormatKind::FileList
+            )
         {
             image_sources.push(load_image_preview_source(source)?);
         } else {
@@ -464,7 +470,10 @@ pub(super) fn load_preview_options(
     if load_image_sources {
         let all = previews.clone();
         for (preview, image_source) in previews.iter_mut().zip(image_sources) {
-            if matches!(preview.format_kind, FormatKind::Image | FormatKind::FileList) {
+            if matches!(
+                preview.format_kind,
+                FormatKind::Image | FormatKind::FileList
+            ) {
                 preview.image_source = image_source;
             }
         }

@@ -132,7 +132,8 @@ fn tray_event_action(event: TrayIconEvent) -> Option<TrayEventAction> {
 fn open_menu(position: MenuPosition, cx: &mut App) {
     let translator = i18n::translator(cx);
     let version_item = version_menu_item(cx);
-    let checking = cx.try_global::<crate::services::updates::UpdateService>()
+    let checking = cx
+        .try_global::<crate::services::updates::UpdateService>()
         .is_some_and(|service| service.checking);
     let menu = MenuModel::new(vec![
         MenuItem::action(
@@ -142,11 +143,13 @@ fn open_menu(position: MenuPosition, cx: &mut App) {
         .with_icon(MenuIcon::svg("app-window.svg")),
         MenuItem::action(
             MenuActionId::new(TOGGLE_CLIPBOARD_MONITOR_ACTION),
-            translator.translate(if crate::windows::main::MainWindowService::clipboard_listener_active(cx) {
-                "tray.menu.clipboard_monitor.enabled"
-            } else {
-                "tray.menu.clipboard_monitor.disabled"
-            }),
+            translator.translate(
+                if crate::windows::main::MainWindowService::clipboard_listener_active(cx) {
+                    "tray.menu.clipboard_monitor.enabled"
+                } else {
+                    "tray.menu.clipboard_monitor.disabled"
+                },
+            ),
         )
         .with_icon(MenuIcon::svg("clipboard.svg")),
         MenuItem::action(
@@ -167,8 +170,13 @@ fn open_menu(position: MenuPosition, cx: &mut App) {
         MenuItem::separator(),
         MenuItem::action(
             MenuActionId::new(CHECK_UPDATES_ACTION),
-            translator.translate(if checking { "updates.status.checking" } else { "updates.check" }),
-        ).with_icon(MenuIcon::svg("refresh.svg")),
+            translator.translate(if checking {
+                "updates.status.checking"
+            } else {
+                "updates.check"
+            }),
+        )
+        .with_icon(MenuIcon::svg("refresh.svg")),
         MenuItem::action(
             MenuActionId::new(RESTART_ACTION),
             translator.translate("tray.menu.restart"),
@@ -187,31 +195,51 @@ fn open_menu(position: MenuPosition, cx: &mut App) {
 
 fn version_menu_item(cx: &App) -> MenuItem {
     if let Some(release) = crate::services::updates::UpdateService::available(cx) {
-        MenuItem::action(MenuActionId::new(OPEN_RELEASE_ACTION),
-            i18n::translator(cx).translate_with_args("updates.found", &[("version", release.version_label())]))
-            .centered().success()
+        MenuItem::action(
+            MenuActionId::new(OPEN_RELEASE_ACTION),
+            i18n::translator(cx)
+                .translate_with_args("updates.found", &[("version", release.version_label())]),
+        )
+        .centered()
+        .success()
     } else {
-        MenuItem::action(MenuActionId::new(OPEN_RELEASE_ACTION),
-            format!("QcClip v{}", env!("CARGO_PKG_VERSION"))).centered().disabled()
+        MenuItem::action(
+            MenuActionId::new(OPEN_RELEASE_ACTION),
+            format!("QcClip v{}", env!("CARGO_PKG_VERSION")),
+        )
+        .centered()
+        .disabled()
     }
 }
 
 pub(crate) fn refresh_update_menu(menu: &mut MenuModel, cx: &App) -> bool {
     let Some(index) = menu.items().iter().position(|item| {
-        item.id.as_ref().is_some_and(|id| id.as_str() == OPEN_RELEASE_ACTION)
-    }) else { return false; };
+        item.id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == OPEN_RELEASE_ACTION)
+    }) else {
+        return false;
+    };
     if let Some(item) = menu.item_mut(index) {
         *item = version_menu_item(cx);
     }
-    let checking = cx.global::<crate::services::updates::UpdateService>().checking;
+    let checking = cx
+        .global::<crate::services::updates::UpdateService>()
+        .checking;
     let check_index = menu.items().iter().position(|item| {
-        item.id.as_ref().is_some_and(|id| id.as_str() == CHECK_UPDATES_ACTION)
+        item.id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == CHECK_UPDATES_ACTION)
     });
     if let Some(item) = check_index.and_then(|index| menu.item_mut(index)) {
         item.enabled = !checking;
-        item.label = i18n::translator(cx).translate(
-            if checking { "updates.status.checking" } else { "updates.check" },
-        ).into();
+        item.label = i18n::translator(cx)
+            .translate(if checking {
+                "updates.status.checking"
+            } else {
+                "updates.check"
+            })
+            .into();
     }
     true
 }
@@ -240,7 +268,11 @@ fn handle_menu_action(action: MenuActionId, cx: &mut App) {
                 ),
                 Err(error) => {
                     tracing::error!("切换全局快捷键失败：{error}");
-                    ("notification.global_hotkeys.failed.title", error, NotificationLevel::Error)
+                    (
+                        "notification.global_hotkeys.failed.title",
+                        error,
+                        NotificationLevel::Error,
+                    )
                 }
             };
             NotificationService::show_message_for(

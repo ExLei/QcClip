@@ -11,12 +11,8 @@ use gpui_component::{ActiveTheme as _, ThemeColor};
 use crate::platform::window as platform_window;
 
 use super::{
-    animation::{
-        MenuEntranceDirection, MenuPopupEntrance, animated_content_bounds,
-    },
-    layout::{
-        MENU_SCREEN_MARGIN, MenuRect, fit_rect_to_screen, max_menu_height,
-    },
+    animation::{MenuEntranceDirection, MenuPopupEntrance, animated_content_bounds},
+    layout::{MENU_SCREEN_MARGIN, MenuRect, fit_rect_to_screen, max_menu_height},
     model::{DropdownAnchor, DropdownItem, DropdownModel},
     service::{DropdownSelectHandler, MenuService, open_popup_window},
     window::menu_surface,
@@ -114,7 +110,9 @@ impl DropdownMenuView {
             &self.scroll_handle,
             1.0,
         )
-        .when_some(self.menu.font_family.clone(), |this, family| this.font_family(family))
+        .when_some(self.menu.font_family.clone(), |this, family| {
+            this.font_family(family)
+        })
         .into_any_element()
         .layout_as_root(
             size(AvailableSpace::MinContent, AvailableSpace::MinContent),
@@ -199,7 +197,12 @@ impl DropdownMenuView {
                 .px(gpui::rems(3.0 / 13.0))
                 .flex()
                 .items_center()
-                .child(div().h(gpui::rems(1.0 / 13.0)).w_full().bg(cx.theme().border))
+                .child(
+                    div()
+                        .h(gpui::rems(1.0 / 13.0))
+                        .w_full()
+                        .bg(cx.theme().border),
+                )
                 .into_any_element();
         }
 
@@ -266,9 +269,10 @@ impl Render for DropdownMenuView {
         let scale_factor = self.display_scale_factor(window);
         let max_height = logical_dropdown_max_height(window, cx, scale_factor, self.target_display);
         let content_bounds = placement.content_bounds;
-        let width = self.rendered_content_width.get().unwrap_or_else(|| {
-            f32::from(measured_size.width)
-        });
+        let width = self
+            .rendered_content_width
+            .get()
+            .unwrap_or_else(|| f32::from(measured_size.width));
         let height = content_bounds.height / scale_factor;
         let window_bounds = self.entrance.current_bounds().unwrap_or(content_bounds);
         let left = (content_bounds.x - window_bounds.x) / scale_factor;
@@ -293,7 +297,9 @@ impl Render for DropdownMenuView {
                             &self.scroll_handle,
                             width,
                         )
-                        .when_some(self.menu.font_family.clone(), |this, family| this.font_family(family))
+                        .when_some(self.menu.font_family.clone(), |this, family| {
+                            this.font_family(family)
+                        })
                         .w(px(width))
                         .h(px(height)),
                     ),
@@ -355,12 +361,17 @@ fn dropdown_measurement_item(item: &DropdownItem) -> AnyElement {
         .px(gpui::rems(DROPDOWN_ITEM_PADDING_X / 13.0))
         .py(gpui::rems(DROPDOWN_ITEM_PADDING_Y / 13.0))
         .child(
-            div().h_full().flex().items_center().px(gpui::rems(9.0 / 13.0)).child(
-                div()
-                    .flex_none()
-                    .whitespace_nowrap()
-                    .child(item.label.clone()),
-            ),
+            div()
+                .h_full()
+                .flex()
+                .items_center()
+                .px(gpui::rems(9.0 / 13.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .child(item.label.clone()),
+                ),
         )
         .into_any_element()
 }

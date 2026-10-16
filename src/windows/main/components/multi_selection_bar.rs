@@ -1,8 +1,8 @@
 use crate::ui::scale::ui_rem;
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
-    Styled, div,
+    AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, div,
 };
 use gpui_component::{ActiveTheme as _, tooltip::Tooltip};
 
@@ -34,10 +34,7 @@ pub fn render(
             translator.translate("main.multi_selection.remove_favorites"),
         )
     } else {
-        (
-            "trash",
-            translator.translate("main.multi_selection.delete"),
-        )
+        ("trash", translator.translate("main.multi_selection.delete"))
     };
     let button = |id: &'static str, icon_name: &'static str, label: String| {
         let button = div()
@@ -102,33 +99,23 @@ pub fn render(
                         .child(shortcut_hint),
                 ),
         )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .children([
-                    button(
-                        "multi-selection-paste",
-                        "clipboard-list",
-                        translator.translate("main.multi_selection.paste"),
-                    ),
-                    button(
-                        "multi-selection-copy",
-                        "copy-plus",
-                        translator.translate("main.multi_selection.copy"),
-                    ),
-                    button(
-                        "multi-selection-delete",
-                        delete_icon,
-                        delete_label,
-                    ),
-                    button(
-                        "multi-selection-clear",
-                        "cancel",
-                        translator.translate("main.multi_selection.deselect_all"),
-                    ),
-                ]),
-        )
+        .child(div().flex().items_center().gap_1().children([
+            button(
+                "multi-selection-paste",
+                "clipboard-list",
+                translator.translate("main.multi_selection.paste"),
+            ),
+            button(
+                "multi-selection-copy",
+                "copy-plus",
+                translator.translate("main.multi_selection.copy"),
+            ),
+            button("multi-selection-delete", delete_icon, delete_label),
+            button(
+                "multi-selection-clear",
+                "cancel",
+                translator.translate("main.multi_selection.deselect_all"),
+            ),
+        ]))
         .into_any_element()
 }

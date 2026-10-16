@@ -3,9 +3,10 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use super::{
-    default_window_material_opacity, AppConfig, ApplicationFilterConfig, AppearanceConfig, ClipboardConfig,
-    CURRENT_SCHEMA_VERSION, GeneralConfig, HistoryConfig, NotificationConfig, QuickPasteConfig,
-    SessionShortcutConfig, SessionShortcutId, ShortcutsConfig, SoundConfig, SoundEffectConfig,
+    AppConfig, AppearanceConfig, ApplicationFilterConfig, CURRENT_SCHEMA_VERSION, ClipboardConfig,
+    GeneralConfig, HistoryConfig, NotificationConfig, QuickPasteConfig, SessionShortcutConfig,
+    SessionShortcutId, ShortcutsConfig, SoundConfig, SoundEffectConfig,
+    default_window_material_opacity,
 };
 
 #[derive(Debug, Error)]
@@ -33,8 +34,12 @@ pub fn from_str(content: &str) -> Result<LoadedConfig, ConfigLoadError> {
 
     let general = read_group(root, "general", &mut warnings, read_general);
     let clipboard = read_group(root, "clipboard", &mut warnings, read_clipboard);
-    let application_filter =
-        read_group(root, "applicationFilter", &mut warnings, read_application_filter);
+    let application_filter = read_group(
+        root,
+        "applicationFilter",
+        &mut warnings,
+        read_application_filter,
+    );
     let history = read_group(root, "history", &mut warnings, read_history);
     let quick_paste = read_group(root, "quickPaste", &mut warnings, read_quick_paste);
     let sound = read_group(root, "sound", &mut warnings, read_sound);
@@ -63,10 +68,34 @@ pub fn from_str(content: &str) -> Result<LoadedConfig, ConfigLoadError> {
 fn read_updates(object: &Map<String, Value>, warnings: &mut Vec<String>) -> super::UpdateConfig {
     let default = super::UpdateConfig::default();
     super::UpdateConfig {
-        frequency: read_field(object, "frequency", "updates.frequency", default.frequency, warnings),
-        notification_enabled: read_field(object, "notificationEnabled", "updates.notificationEnabled", default.notification_enabled, warnings),
-        proxy_mode: read_field(object, "proxyMode", "updates.proxyMode", default.proxy_mode, warnings),
-        proxy_url: read_field(object, "proxyUrl", "updates.proxyUrl", default.proxy_url, warnings),
+        frequency: read_field(
+            object,
+            "frequency",
+            "updates.frequency",
+            default.frequency,
+            warnings,
+        ),
+        notification_enabled: read_field(
+            object,
+            "notificationEnabled",
+            "updates.notificationEnabled",
+            default.notification_enabled,
+            warnings,
+        ),
+        proxy_mode: read_field(
+            object,
+            "proxyMode",
+            "updates.proxyMode",
+            default.proxy_mode,
+            warnings,
+        ),
+        proxy_url: read_field(
+            object,
+            "proxyUrl",
+            "updates.proxyUrl",
+            default.proxy_url,
+            warnings,
+        ),
     }
 }
 
@@ -76,7 +105,13 @@ fn read_application_filter(
 ) -> ApplicationFilterConfig {
     let default = ApplicationFilterConfig::default();
     ApplicationFilterConfig {
-        enabled: read_field(object, "enabled", "applicationFilter.enabled", default.enabled, warnings),
+        enabled: read_field(
+            object,
+            "enabled",
+            "applicationFilter.enabled",
+            default.enabled,
+            warnings,
+        ),
         disable_clipboard_monitor: read_field(
             object,
             "disableClipboardMonitor",
@@ -198,14 +233,47 @@ fn read_general(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Gene
     }
 }
 
-fn read_notifications(object: &Map<String, Value>, warnings: &mut Vec<String>) -> NotificationConfig {
+fn read_notifications(
+    object: &Map<String, Value>,
+    warnings: &mut Vec<String>,
+) -> NotificationConfig {
     let default = NotificationConfig::default();
     NotificationConfig {
-        startup: read_field(object, "startup", "general.notifications.startup", default.startup, warnings),
-        clipboard_preview: read_field(object, "clipboardPreview", "general.notifications.clipboardPreview", default.clipboard_preview, warnings),
-        feature_status: read_field(object, "featureStatus", "general.notifications.featureStatus", default.feature_status, warnings),
-        operation_result: read_field(object, "operationResult", "general.notifications.operationResult", default.operation_result, warnings),
-        attention: read_field(object, "attention", "general.notifications.attention", default.attention, warnings),
+        startup: read_field(
+            object,
+            "startup",
+            "general.notifications.startup",
+            default.startup,
+            warnings,
+        ),
+        clipboard_preview: read_field(
+            object,
+            "clipboardPreview",
+            "general.notifications.clipboardPreview",
+            default.clipboard_preview,
+            warnings,
+        ),
+        feature_status: read_field(
+            object,
+            "featureStatus",
+            "general.notifications.featureStatus",
+            default.feature_status,
+            warnings,
+        ),
+        operation_result: read_field(
+            object,
+            "operationResult",
+            "general.notifications.operationResult",
+            default.operation_result,
+            warnings,
+        ),
+        attention: read_field(
+            object,
+            "attention",
+            "general.notifications.attention",
+            default.attention,
+            warnings,
+        ),
     }
 }
 
@@ -232,10 +300,18 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
     AppearanceConfig {
         mode: read_field(object, "mode", "appearance.mode", default.mode, warnings),
         ui_scale_percent: read_field(
-            object, "uiScalePercent", "appearance.uiScalePercent", default.ui_scale_percent, warnings,
+            object,
+            "uiScalePercent",
+            "appearance.uiScalePercent",
+            default.ui_scale_percent,
+            warnings,
         ),
         app_font_family: read_field(
-            object, "appFontFamily", "appearance.appFontFamily", default.app_font_family, warnings,
+            object,
+            "appFontFamily",
+            "appearance.appFontFamily",
+            default.app_font_family,
+            warnings,
         ),
         light_theme: read_field(
             object,
@@ -344,10 +420,34 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
         item_display: read_group(object, "itemDisplay", warnings, |object, warnings| {
             let default = super::ItemDisplayConfig::default();
             super::ItemDisplayConfig {
-                info_visibility: read_field(object, "infoVisibility", "appearance.itemDisplay.infoVisibility", default.info_visibility, warnings),
-                toolbar_visibility: read_field(object, "toolbarVisibility", "appearance.itemDisplay.toolbarVisibility", default.toolbar_visibility, warnings),
-                actions_visibility: read_field(object, "actionsVisibility", "appearance.itemDisplay.actionsVisibility", default.actions_visibility, warnings),
-                fields: read_field(object, "fields", "appearance.itemDisplay.fields", default.fields, warnings),
+                info_visibility: read_field(
+                    object,
+                    "infoVisibility",
+                    "appearance.itemDisplay.infoVisibility",
+                    default.info_visibility,
+                    warnings,
+                ),
+                toolbar_visibility: read_field(
+                    object,
+                    "toolbarVisibility",
+                    "appearance.itemDisplay.toolbarVisibility",
+                    default.toolbar_visibility,
+                    warnings,
+                ),
+                actions_visibility: read_field(
+                    object,
+                    "actionsVisibility",
+                    "appearance.itemDisplay.actionsVisibility",
+                    default.actions_visibility,
+                    warnings,
+                ),
+                fields: read_field(
+                    object,
+                    "fields",
+                    "appearance.itemDisplay.fields",
+                    default.fields,
+                    warnings,
+                ),
             }
         }),
     }
@@ -474,7 +574,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
 fn read_sound(object: &Map<String, Value>, warnings: &mut Vec<String>) -> SoundConfig {
     let default = SoundConfig::default();
     SoundConfig {
-        enabled: read_field(object, "enabled", "sound.enabled", default.enabled, warnings),
+        enabled: read_field(
+            object,
+            "enabled",
+            "sound.enabled",
+            default.enabled,
+            warnings,
+        ),
         paste: read_sound_effect(object, "paste", "sound.paste", default.paste, warnings),
         copy: read_sound_effect(object, "copy", "sound.copy", default.copy, warnings),
         quick_paste_scroll: read_sound_effect(
@@ -642,12 +748,7 @@ fn read_shortcuts(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Sh
             &default,
             warnings,
         ),
-        next_tab: read_session_shortcut(
-            object,
-            SessionShortcutId::NextTab,
-            &default,
-            warnings,
-        ),
+        next_tab: read_session_shortcut(object, SessionShortcutId::NextTab, &default, warnings),
         toggle_window_fixed: read_session_shortcut(
             object,
             SessionShortcutId::ToggleWindowFixed,
@@ -735,10 +836,22 @@ mod tests {
     #[test]
     fn note_display_setting_round_trips_and_defaults_to_disabled() {
         let mut config = super::super::AppConfig::default();
-        assert!(!super::from_str("{}").unwrap().config.appearance.only_show_notes);
+        assert!(
+            !super::from_str("{}")
+                .unwrap()
+                .config
+                .appearance
+                .only_show_notes
+        );
         config.appearance.only_show_notes = true;
         let json = serde_json::to_string(&config).unwrap();
-        assert!(super::from_str(&json).unwrap().config.appearance.only_show_notes);
+        assert!(
+            super::from_str(&json)
+                .unwrap()
+                .config
+                .appearance
+                .only_show_notes
+        );
         let invalid = super::from_str(r#"{"appearance":{"onlyShowNotes":"invalid"}}"#).unwrap();
         assert!(!invalid.config.appearance.only_show_notes);
         assert_eq!(invalid.warnings.len(), 1);
@@ -755,11 +868,16 @@ mod tests {
             proxy_url: "http://127.0.0.1:7890".to_owned(),
         };
         let encoded = serde_json::to_string(&config).unwrap();
-        assert_eq!(super::from_str(&encoded).unwrap().config.updates, config.updates);
+        assert_eq!(
+            super::from_str(&encoded).unwrap().config.updates,
+            config.updates
+        );
         let never = super::from_str(r#"{"updates":{"frequency":"never"}}"#).unwrap();
         assert_eq!(never.config.updates.frequency, UpdateFrequency::Never);
         assert!(never.warnings.is_empty());
-        let loaded = super::from_str(r#"{"updates":{"frequency":"invalid","notificationEnabled":false}}"#).unwrap();
+        let loaded =
+            super::from_str(r#"{"updates":{"frequency":"invalid","notificationEnabled":false}}"#)
+                .unwrap();
         assert_eq!(loaded.config.updates.frequency, UpdateFrequency::Daily);
         assert!(!loaded.config.updates.notification_enabled);
         assert!(!loaded.warnings.is_empty());
@@ -768,14 +886,14 @@ mod tests {
     use super::{ConfigLoadError, from_str};
     use crate::config::{
         AppearanceMode, CardItemGap, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
-        ClipboardWindowPosition, InterfaceLanguage, ListItemHeight, ListItemStyle,
-        ShortcutBinding, SoundPreset, TitlebarPosition, WindowMaterial,
+        ClipboardWindowPosition, InterfaceLanguage, ListItemHeight, ListItemStyle, ShortcutBinding,
+        SoundPreset, TitlebarPosition, WindowMaterial,
     };
 
     #[test]
     fn sound_enabled_defaults_and_preserves_effects_when_disabled() {
-        let old = from_str(r#"{"sound":{"copy":{"preset":"disabled"}}}"#)
-            .expect("无法加载旧音效配置");
+        let old =
+            from_str(r#"{"sound":{"copy":{"preset":"disabled"}}}"#).expect("无法加载旧音效配置");
         assert!(old.config.sound.enabled);
         assert_eq!(old.config.sound.copy.preset, SoundPreset::Disabled);
         assert!(old.warnings.is_empty());
@@ -786,11 +904,17 @@ mod tests {
             ))
             .expect("无法加载音效总开关配置");
             assert_eq!(loaded.config.sound.enabled, enabled);
-            assert_eq!(loaded.config.sound.paste.preset, SoundPreset::External("提示.wav".to_owned()));
+            assert_eq!(
+                loaded.config.sound.paste.preset,
+                SoundPreset::External("提示.wav".to_owned())
+            );
             assert_eq!(loaded.config.sound.paste.volume, 35);
             assert_eq!(loaded.config.sound.copy.preset, SoundPreset::Disabled);
             let saved = serde_json::to_string(&loaded.config).expect("无法保存音效配置");
-            assert_eq!(from_str(&saved).expect("无法重新加载音效配置").config, loaded.config);
+            assert_eq!(
+                from_str(&saved).expect("无法重新加载音效配置").config,
+                loaded.config
+            );
             assert!(loaded.warnings.is_empty());
         }
 
@@ -821,7 +945,10 @@ mod tests {
             TitlebarPosition::Top
         );
         assert!(loaded.config.appearance.animations.window_visibility);
-        assert_eq!(loaded.config.appearance.window_material, WindowMaterial::Disabled);
+        assert_eq!(
+            loaded.config.appearance.window_material,
+            WindowMaterial::Disabled
+        );
         assert_eq!(
             loaded.config.appearance.list_item_style,
             ListItemStyle::Card
@@ -919,7 +1046,10 @@ mod tests {
         assert!(invalid.config.appearance.only_show_notes);
         assert_eq!(invalid.warnings.len(), 1);
         let json = serde_json::to_string(&default.config).expect("无法序列化缩放配置");
-        assert_eq!(from_str(&json).expect("无法重新加载缩放配置").config, default.config);
+        assert_eq!(
+            from_str(&json).expect("无法重新加载缩放配置").config,
+            default.config
+        );
     }
 
     #[test]
@@ -933,9 +1063,15 @@ mod tests {
         ] {
             let loaded = from_str(&format!(r#"{{"appearance":{{"appFontFamily":{value}}}}}"#))
                 .expect("无法加载字体配置");
-            assert_eq!(loaded.config.appearance.app_font_family.as_deref(), expected);
+            assert_eq!(
+                loaded.config.appearance.app_font_family.as_deref(),
+                expected
+            );
             let json = serde_json::to_string(&loaded.config).expect("无法保存字体配置");
-            assert_eq!(from_str(&json).expect("无法重新加载字体配置").config, loaded.config);
+            assert_eq!(
+                from_str(&json).expect("无法重新加载字体配置").config,
+                loaded.config
+            );
         }
         let invalid = from_str(r#"{"appearance":{"appFontFamily":123,"onlyShowNotes":true}}"#)
             .expect("无法加载字段级容错配置");
@@ -1144,18 +1280,30 @@ mod tests {
     #[test]
     fn middle_mouse_old_config_defaults_and_new_config_round_trips() {
         let old = from_str(r#"{"shortcuts":{"openSettings":null}}"#).unwrap();
-        assert_eq!(old.config.shortcuts.middle_mouse, super::super::MiddleMouseShortcutConfig::default());
+        assert_eq!(
+            old.config.shortcuts.middle_mouse,
+            super::super::MiddleMouseShortcutConfig::default()
+        );
         assert!(old.warnings.is_empty());
 
-        let loaded = from_str(r#"{"shortcuts":{"middleMouse":{
+        let loaded = from_str(
+            r#"{"shortcuts":{"middleMouse":{
             "enabled":true,"modifier":"control-shift","holdThresholdMs":350
-        }}}"#).unwrap();
+        }}}"#,
+        )
+        .unwrap();
         let config = loaded.config.shortcuts.middle_mouse;
         assert!(config.enabled);
-        assert_eq!(config.modifier, Some(super::super::QuickPasteShortcutModifier::ControlShift));
+        assert_eq!(
+            config.modifier,
+            Some(super::super::QuickPasteShortcutModifier::ControlShift)
+        );
         assert_eq!(config.hold_threshold_ms, 350);
         let saved = serde_json::to_string(&loaded.config).unwrap();
-        assert_eq!(from_str(&saved).unwrap().config.shortcuts.middle_mouse, config);
+        assert_eq!(
+            from_str(&saved).unwrap().config.shortcuts.middle_mouse,
+            config
+        );
     }
 
     #[test]
@@ -1163,8 +1311,12 @@ mod tests {
         for (input, expected) in [(0, 10), (10, 10), (1000, 1000), (1001, 1000)] {
             let loaded = from_str(&format!(
                 r#"{{"shortcuts":{{"middleMouse":{{"holdThresholdMs":{input}}}}}}}"#,
-            )).unwrap();
-            assert_eq!(loaded.config.shortcuts.middle_mouse.hold_threshold_ms, expected);
+            ))
+            .unwrap();
+            assert_eq!(
+                loaded.config.shortcuts.middle_mouse.hold_threshold_ms,
+                expected
+            );
         }
     }
 

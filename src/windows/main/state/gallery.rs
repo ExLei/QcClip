@@ -117,7 +117,11 @@ impl MainWindow {
     }
 
     pub(crate) fn remove_image_library_group(&mut self, group_id: &str, cx: &mut Context<Self>) {
-        let Some(index) = self.gallery_groups.iter().position(|group| group.id == group_id) else {
+        let Some(index) = self
+            .gallery_groups
+            .iter()
+            .position(|group| group.id == group_id)
+        else {
             return;
         };
         let group = self.gallery_groups.remove(index);
@@ -139,7 +143,9 @@ impl MainWindow {
             self.symbol_smooth_scroll.reset();
             self.gallery_scroll_handle = VirtualListScrollHandle::new();
             self.clear_gallery_image_cache();
-            let next_group = self.gallery_groups.get(index)
+            let next_group = self
+                .gallery_groups
+                .get(index)
                 .or_else(|| self.gallery_groups.last())
                 .map(|group| group.id.clone());
             if let Some(id) = next_group {
@@ -287,9 +293,8 @@ impl MainWindow {
             }
             let service = self.image_preview_service.clone();
             let load_path = path.clone();
-            let task = cx.background_spawn(async move {
-                service.load_local_path(&load_path, (48, 48))
-            });
+            let task =
+                cx.background_spawn(async move { service.load_local_path(&load_path, (48, 48)) });
             cx.spawn(async move |this, cx| {
                 let result = task.await;
                 if let Some(this) = this.upgrade() {
@@ -397,9 +402,8 @@ impl MainWindow {
         self.gallery_images_loading = false;
         self.gallery_scroll_handle = VirtualListScrollHandle::new();
         self.clear_gallery_image_cache();
-        self.pending_gallery_image_drops.extend(
-            std::mem::take(&mut self.loaded_gallery_group_icons).into_values(),
-        );
+        self.pending_gallery_image_drops
+            .extend(std::mem::take(&mut self.loaded_gallery_group_icons).into_values());
         self.gallery_group_icon_loading.clear();
         self.gallery_group_icon_failures.clear();
         self.gallery_drop_hovering = false;
@@ -440,9 +444,8 @@ impl MainWindow {
             let generation = self.gallery_images_generation;
             let service = self.image_preview_service.clone();
             let load_path = path.clone();
-            let task = cx.background_spawn(async move {
-                service.load_local_path(&load_path, (256, 256))
-            });
+            let task =
+                cx.background_spawn(async move { service.load_local_path(&load_path, (256, 256)) });
             cx.spawn(async move |this, cx| {
                 let result = task.await;
                 if let Some(this) = this.upgrade() {
@@ -495,9 +498,8 @@ impl MainWindow {
         let generation = self.gallery_images_generation;
         let service = self.image_preview_service.clone();
         let load_path = path.clone();
-        let task = cx.background_spawn(async move {
-            service.load_animated_gif(&load_path, (256, 256))
-        });
+        let task =
+            cx.background_spawn(async move { service.load_animated_gif(&load_path, (256, 256)) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             if let Some(this) = this.upgrade() {
@@ -623,9 +625,10 @@ impl MainWindow {
             return;
         };
         let service = self.image_library.clone();
-        let task = cx.background_spawn(async move {
-            service.move_image(&source_group, &target_group, &path)
-        });
+        let task =
+            cx.background_spawn(
+                async move { service.move_image(&source_group, &target_group, &path) },
+            );
         cx.spawn(async move |this, cx| match task.await {
             Ok(()) => {
                 if let Some(this) = this.upgrade() {
@@ -668,5 +671,4 @@ impl MainWindow {
         })
         .detach();
     }
-
 }

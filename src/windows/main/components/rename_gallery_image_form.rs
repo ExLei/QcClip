@@ -52,9 +52,8 @@ impl RenameGalleryImageForm {
         }
         let name = self.name_input.read(cx).value().trim().to_owned();
         if name.is_empty() {
-            self.submit_error = Some(
-                i18n::translator(cx).translate("main.form.gallery_image.error.empty_name"),
-            );
+            self.submit_error =
+                Some(i18n::translator(cx).translate("main.form.gallery_image.error.empty_name"));
             cx.notify();
             return;
         }
@@ -92,9 +91,18 @@ impl Render for RenameGalleryImageForm {
                     .flex()
                     .flex_col()
                     .gap(ui_rem(8.0))
-                    .child(Input::new(&self.name_input).w_full().disabled(is_submitting))
+                    .child(
+                        Input::new(&self.name_input)
+                            .w_full()
+                            .disabled(is_submitting),
+                    )
                     .when_some(submit_error, |this, message| {
-                        this.child(div().text_size(ui_rem(11.0)).text_color(theme.red).child(message))
+                        this.child(
+                            div()
+                                .text_size(ui_rem(11.0))
+                                .text_color(theme.red)
+                                .child(message),
+                        )
                     })
                     .child(dialog_footer(
                         vec![

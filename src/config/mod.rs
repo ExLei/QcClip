@@ -1,12 +1,14 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub mod load;
 mod item_display;
+pub mod load;
 mod notification;
 mod tab_bar;
 
+pub use item_display::{
+    ItemDisplayConfig, ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility,
+};
 pub use notification::{NotificationConfig, NotificationKind};
-pub use item_display::{ItemDisplayConfig, ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility};
 pub use tab_bar::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -1552,9 +1554,7 @@ impl AnimationKind {
             Self::ListItemReorder => "settings.personalization.animation.list_item_reorder",
             Self::SmoothScroll => "settings.personalization.animation.smooth_scroll",
             Self::TagItemReorder => "settings.personalization.animation.tag_item_reorder",
-            Self::TagIndicatorHover => {
-                "settings.personalization.animation.tag_indicator_hover"
-            }
+            Self::TagIndicatorHover => "settings.personalization.animation.tag_indicator_hover",
             Self::FloatingToolbar => "settings.personalization.animation.floating_toolbar",
             Self::SettingsPageTransition => {
                 "settings.personalization.animation.settings_page_transition"
@@ -1575,24 +1575,16 @@ impl AnimationKind {
             }
             Self::MenuPopup => "settings.personalization.animation.menu_popup_description",
             Self::QuickPaste => "settings.personalization.animation.quick_paste_description",
-            Self::PreviewWindow => {
-                "settings.personalization.animation.preview_window_description"
-            }
+            Self::PreviewWindow => "settings.personalization.animation.preview_window_description",
             Self::ThemeTransition => {
                 "settings.personalization.animation.theme_transition_description"
             }
-            Self::ListItemHover => {
-                "settings.personalization.animation.list_item_hover_description"
-            }
-            Self::ListItemLoad => {
-                "settings.personalization.animation.list_item_load_description"
-            }
+            Self::ListItemHover => "settings.personalization.animation.list_item_hover_description",
+            Self::ListItemLoad => "settings.personalization.animation.list_item_load_description",
             Self::ListItemReorder => {
                 "settings.personalization.animation.list_item_reorder_description"
             }
-            Self::SmoothScroll => {
-                "settings.personalization.animation.smooth_scroll_description"
-            }
+            Self::SmoothScroll => "settings.personalization.animation.smooth_scroll_description",
             Self::TagItemReorder => {
                 "settings.personalization.animation.tag_item_reorder_description"
             }
@@ -1608,15 +1600,11 @@ impl AnimationKind {
             Self::IconHoverScale => {
                 "settings.personalization.animation.icon_hover_scale_description"
             }
-            Self::Notification => {
-                "settings.personalization.animation.notification_description"
-            }
+            Self::Notification => "settings.personalization.animation.notification_description",
             Self::SingleSelectIndicator => {
                 "settings.personalization.animation.single_select_indicator_description"
             }
-            Self::ListActions => {
-                "settings.personalization.animation.list_actions_description"
-            }
+            Self::ListActions => "settings.personalization.animation.list_actions_description",
         }
     }
 }
@@ -1627,13 +1615,18 @@ pub const UI_SCALE_PRESETS: [u16; 8] = [80, 90, 100, 110, 125, 150, 175, 200];
 
 impl AppearanceConfig {
     pub fn ui_scale(&self) -> f32 {
-        f32::from(self.ui_scale_percent.clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX)) / 100.0
+        f32::from(
+            self.ui_scale_percent
+                .clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX),
+        ) / 100.0
     }
 
     pub(crate) fn normalized(mut self) -> Self {
         let default = Self::default();
         self.tab_bar.normalize();
-        self.ui_scale_percent = self.ui_scale_percent.clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX);
+        self.ui_scale_percent = self
+            .ui_scale_percent
+            .clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX);
         self.app_font_family = self.app_font_family.and_then(|family| {
             let family = family.trim();
             (!family.is_empty()).then(|| family.to_owned())
@@ -1666,16 +1659,14 @@ impl AppearanceConfig {
         } else {
             BACKGROUND_IMAGE_BLUR_DEFAULT
         };
-        self.window_material_brightness = self
-            .window_material_brightness
-            .and_then(|brightness| {
-                brightness
-                    .is_finite()
-                    .then(|| {
-                        brightness
-                            .clamp(WINDOW_MATERIAL_BRIGHTNESS_MIN, WINDOW_MATERIAL_BRIGHTNESS_MAX)
-                    })
-            });
+        self.window_material_brightness = self.window_material_brightness.and_then(|brightness| {
+            brightness.is_finite().then(|| {
+                brightness.clamp(
+                    WINDOW_MATERIAL_BRIGHTNESS_MIN,
+                    WINDOW_MATERIAL_BRIGHTNESS_MAX,
+                )
+            })
+        });
         self
     }
 }
@@ -1686,8 +1677,8 @@ mod tests {
         ADAPTIVE_MAX_LINES_DEFAULT, ADAPTIVE_MAX_LINES_MAX, AppConfig, AppearanceConfig,
         AppearanceMode, CardItemGap, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
         ClipboardWindowPosition, InterfaceLanguage, ListItemHeight, ListItemStyle,
-        QuickPasteConfig, SoundPreset, TitlebarPosition,
-        WINDOW_MATERIAL_OPACITY_DEFAULT, WINDOW_MATERIAL_OPACITY_MAX, WindowMaterial,
+        QuickPasteConfig, SoundPreset, TitlebarPosition, WINDOW_MATERIAL_OPACITY_DEFAULT,
+        WINDOW_MATERIAL_OPACITY_MAX, WindowMaterial,
     };
 
     #[test]
@@ -1874,5 +1865,4 @@ mod tests {
         assert!(!ListItemHeight::Small.shows_meta());
         assert!(!ListItemHeight::ExtraSmall.shows_meta());
     }
-
 }

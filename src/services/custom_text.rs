@@ -129,7 +129,9 @@ impl CustomTextService {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing = load_formats(&transaction, &self.blob_store, item_id)?;
         if existing.is_empty() {
-            return Err(CustomTextError::InvalidItem(format!("内容 ID {item_id} 不存在")));
+            return Err(CustomTextError::InvalidItem(format!(
+                "内容 ID {item_id} 不存在"
+            )));
         }
         let state: String = transaction.query_row(
             "SELECT capture_state FROM clipboard_items WHERE id = ?1",
@@ -238,7 +240,11 @@ impl CustomTextService {
             .query_row(
                 "SELECT id FROM clipboard_formats
                  WHERE item_id = ?1 AND format_namespace = ?2 AND format_key = ?3",
-                params![item_id, CUSTOM_TEXT_FORMAT_NAMESPACE, CUSTOM_TEXT_FORMAT_KEY],
+                params![
+                    item_id,
+                    CUSTOM_TEXT_FORMAT_NAMESPACE,
+                    CUSTOM_TEXT_FORMAT_KEY
+                ],
                 |row| row.get(0),
             )
             .optional()?;
@@ -541,11 +547,8 @@ impl CustomTextService {
             .application_icon_store
             .resolve(&connection, &source_application);
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let source_app_icon_id = upsert_application_icon(
-            &transaction,
-            prepared_icon.as_ref(),
-            timestamp,
-        )?;
+        let source_app_icon_id =
+            upsert_application_icon(&transaction, prepared_icon.as_ref(), timestamp)?;
         transaction.execute(
             "INSERT INTO clipboard_items (
                 uuid, origin_kind, hash_version, content_hash, content_kind,
@@ -567,14 +570,7 @@ impl CustomTextService {
             .as_ref()
             .map(|blob| upsert_binary_blob(&transaction, blob, timestamp))
             .transpose()?;
-        insert_custom_format(
-            &transaction,
-            item_id,
-            &bytes,
-            &preview,
-            timestamp,
-            blob_id,
-        )?;
+        insert_custom_format(&transaction, item_id, &bytes, &preview, timestamp, blob_id)?;
         transaction.execute(
             "UPDATE clipboard_items
              SET capture_state = 'ready', format_count = 1, total_bytes = ?1
@@ -717,7 +713,9 @@ fn parse_capture_state(value: String) -> Result<FormatCaptureState, CustomTextEr
         "generated" => Ok(FormatCaptureState::Generated),
         "unsupported" => Ok(FormatCaptureState::Unsupported),
         "failed" => Ok(FormatCaptureState::Failed),
-        _ => Err(CustomTextError::InvalidFormat(format!("未知捕获状态“{value}”"))),
+        _ => Err(CustomTextError::InvalidFormat(format!(
+            "未知捕获状态“{value}”"
+        ))),
     }
 }
 
@@ -727,7 +725,9 @@ fn parse_restore_state(value: String) -> Result<RestoreState, CustomTextError> {
         "restorable" => Ok(RestoreState::Restorable),
         "not_restorable" => Ok(RestoreState::NotRestorable),
         "not_applicable" => Ok(RestoreState::NotApplicable),
-        _ => Err(CustomTextError::InvalidFormat(format!("未知恢复状态“{value}”"))),
+        _ => Err(CustomTextError::InvalidFormat(format!(
+            "未知恢复状态“{value}”"
+        ))),
     }
 }
 
@@ -820,14 +820,16 @@ fn load_formats(
             _ => return Err(CustomTextError::InvalidFormat("未知存储类型".to_owned())),
         };
         formats.push(StoredFormat {
-            format_order: u32::try_from(format_order).map_err(|_| {
-                CustomTextError::InvalidFormat("格式顺序不能为负数".to_owned())
-            })?,
+            format_order: u32::try_from(format_order)
+                .map_err(|_| CustomTextError::InvalidFormat("格式顺序不能为负数".to_owned()))?,
             format_namespace,
             format_key,
             format_name,
             native_format_id: native_format_id
-                .map(|value| u32::try_from(value).map_err(|_| CustomTextError::InvalidFormat("原生格式 ID 无效".to_owned())))
+                .map(|value| {
+                    u32::try_from(value)
+                        .map_err(|_| CustomTextError::InvalidFormat("原生格式 ID 无效".to_owned()))
+                })
                 .transpose()?,
             format_kind: parse_format_kind(format_kind)?,
             bytes,
@@ -979,8 +981,8 @@ mod tests {
     impl TestContext {
         fn new() -> Self {
             let directory = tempfile::tempdir().expect("无法创建测试目录");
-            let database = Database::open(directory.path().join("test.sqlite3"))
-                .expect("无法创建测试数据库");
+            let database =
+                Database::open(directory.path().join("test.sqlite3")).expect("无法创建测试数据库");
             let blob_store = RawBlobStore::new(directory.path()).expect("无法创建 blob 存储");
             let service = CustomTextService::new(database.clone(), blob_store);
             Self {
@@ -1027,10 +1029,7 @@ mod tests {
             true,
         );
         CapturedClipboard {
-            primary_format_identity: Some((
-                text.format_namespace.clone(),
-                text.format_key.clone(),
-            )),
+            primary_format_identity: Some((text.format_namespace.clone(), text.format_key.clone())),
             formats: vec![text, html],
             preview_candidate: None,
             source_application: SourceApplication::default(),
@@ -1052,7 +1051,12 @@ mod tests {
         context.item_id(history_id)
     }
 
-    fn query_format_count(connection: &Connection, item_id: i64, namespace: &str, key: &str) -> i64 {
+    fn query_format_count(
+        connection: &Connection,
+        item_id: i64,
+        namespace: &str,
+        key: &str,
+    ) -> i64 {
         connection
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_formats
@@ -1082,8 +1086,16 @@ mod tests {
             )
             .expect("缺少自定义文本格式");
         let original_count = query_format_count(&connection, item_id, "windows", "CF_UNICODETEXT");
-        let html_count = query_format_count(&connection, item_id, "windows", "registered:HTML Format");
-        let (primary, storage_kind, bytes, item_count, content_kind, preview): (i64, String, Vec<u8>, i64, String, String) = connection
+        let html_count =
+            query_format_count(&connection, item_id, "windows", "registered:HTML Format");
+        let (primary, storage_kind, bytes, item_count, content_kind, preview): (
+            i64,
+            String,
+            Vec<u8>,
+            i64,
+            String,
+            String,
+        ) = connection
             .query_row(
                 "SELECT f.is_primary, f.storage_kind, f.inline_data,
                         i.format_count, i.content_kind, i.preview_text
@@ -1091,7 +1103,16 @@ mod tests {
                  JOIN clipboard_items AS i ON i.id = f.item_id
                  WHERE f.id = ?1",
                 [first_custom_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .expect("无法查询编辑结果");
 
@@ -1140,8 +1161,13 @@ mod tests {
             .remove_custom_text(item_id)
             .expect("无法恢复原始内容");
         let connection = context.database.connect().expect("无法连接测试数据库");
-        let (custom_count, primary_count, item_count, preview, content_kind):
-            (i64, i64, i64, String, String) = connection
+        let (custom_count, primary_count, item_count, preview, content_kind): (
+            i64,
+            i64,
+            i64,
+            String,
+            String,
+        ) = connection
             .query_row(
                 "SELECT
                     (SELECT COUNT(*) FROM clipboard_formats
@@ -1152,7 +1178,15 @@ mod tests {
                     i.format_count, i.preview_text, i.content_kind
                  FROM clipboard_items AS i WHERE i.id = ?1",
                 [item_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .expect("无法查询恢复结果");
         let primary_key: String = connection
@@ -1170,10 +1204,12 @@ mod tests {
         assert_eq!(preview, "原始文本");
         assert_eq!(content_kind, "mixed");
         assert_eq!(primary_key, "CF_UNICODETEXT");
-        assert!(!context
-            .service
-            .can_restore_original(item_id)
-            .expect("无法检查恢复后的状态"));
+        assert!(
+            !context
+                .service
+                .can_restore_original(item_id)
+                .expect("无法检查恢复后的状态")
+        );
     }
 
     #[test]
@@ -1185,10 +1221,12 @@ mod tests {
             .expect("无法创建手动文本");
         let item_id = context.item_id(history_id);
 
-        assert!(!context
-            .service
-            .can_restore_original(item_id)
-            .expect("无法检查手动文本恢复状态"));
+        assert!(
+            !context
+                .service
+                .can_restore_original(item_id)
+                .expect("无法检查手动文本恢复状态")
+        );
         assert!(context.service.remove_custom_text(item_id).is_err());
     }
 
@@ -1215,7 +1253,10 @@ mod tests {
         assert_eq!(origin, "manual");
         assert_eq!(storage_kind, "inline");
         assert_eq!(bytes, unicode_text("手动新增\n内容"));
-        assert_eq!(query_format_count(&connection, item_id, "qcclip", "custom-text"), 1);
+        assert_eq!(
+            query_format_count(&connection, item_id, "qcclip", "custom-text"),
+            1
+        );
 
         let (source_name, source_path): (Option<String>, Option<String>) = connection
             .query_row(

@@ -28,7 +28,7 @@ use crate::{
     },
 };
 use gpui_component::ActiveTheme as _;
-use gpui_component::{h_flex, Sizable as _};
+use gpui_component::{Sizable as _, h_flex};
 
 const DEFAULT_DURATION: Duration = Duration::from_millis(4200);
 const ANIMATION_DURATION: Duration = Duration::from_millis(220);
@@ -48,8 +48,7 @@ fn render_image_from_rgba(mut image: image::RgbaImage) -> Arc<RenderImage> {
 }
 
 fn flatten_line_breaks(text: &str) -> String {
-    text.replace("\r\n", " ")
-        .replace(['\r', '\n'], " ")
+    text.replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
 fn image_notification_layout(
@@ -65,15 +64,14 @@ fn image_notification_layout(
             NOTIFICATION_IMAGE_ROW_CHROME_WIDTH
         };
     let available_image_width = (max_width - horizontal_insets).max(1.0);
-    let (image_display_width, image_display_height) =
-        if image_width > 0.0 && image_height > 0.0 {
-            let scale = (NOTIFICATION_IMAGE_HEIGHT / image_height)
-                .min(available_image_width / image_width)
-                .min(1.0);
-            (image_width * scale, image_height * scale)
-        } else {
-            (0.0, 0.0)
-        };
+    let (image_display_width, image_display_height) = if image_width > 0.0 && image_height > 0.0 {
+        let scale = (NOTIFICATION_IMAGE_HEIGHT / image_height)
+            .min(available_image_width / image_width)
+            .min(1.0);
+        (image_width * scale, image_height * scale)
+    } else {
+        (0.0, 0.0)
+    };
     let min_width = if has_title {
         NOTIFICATION_HEADER_MIN_WIDTH + NOTIFICATION_CONTENT_PADDING
     } else {
@@ -173,12 +171,8 @@ fn clipboard_notification_content(
     }
     if preview.content_kind == ContentKind::Image
         && let Some(source) = preview.image_source.as_ref()
-        && let Ok(image) = image_service.load(
-            source,
-            preview.format_kind,
-            &preview.format_key,
-            (480, 240),
-        )
+        && let Ok(image) =
+            image_service.load(source, preview.format_kind, &preview.format_key, (480, 240))
     {
         return NotificationContent::Image(image);
     }
@@ -281,7 +275,12 @@ fn notification_bounds(
         NotificationPosition::Bottom => (center_x, bottom),
         NotificationPosition::BottomRight => (right, bottom),
     };
-    PhysicalBounds { x, y, width, height }
+    PhysicalBounds {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 fn animation_offset(position: NotificationPosition) -> (f32, f32) {
@@ -388,23 +387,19 @@ impl NotificationWindow {
                 );
                 px(width)
             }
-            _ => {
-                self.render_card(cx)
-                    .into_any_element()
-                    .layout_as_root(
-                        size(AvailableSpace::MaxContent, AvailableSpace::MinContent),
-                        window,
-                        cx,
-                    )
-                    .width
-                    .min(max_width)
-            }
+            _ => self
+                .render_card(cx)
+                .into_any_element()
+                .layout_as_root(
+                    size(AvailableSpace::MaxContent, AvailableSpace::MinContent),
+                    window,
+                    cx,
+                )
+                .width
+                .min(max_width),
         };
         self.render_card(cx).into_any_element().layout_as_root(
-            size(
-                AvailableSpace::Definite(width),
-                AvailableSpace::MinContent,
-            ),
+            size(AvailableSpace::Definite(width), AvailableSpace::MinContent),
             window,
             cx,
         )
@@ -416,8 +411,8 @@ impl NotificationWindow {
         let translator = crate::i18n::translator(cx);
         let max_width = (self.area.width / self.scale_factor - NOTIFICATION_MARGIN * 2.0)
             .min(NOTIFICATION_WIDTH);
-        let max_height = (self.area.height / self.scale_factor - NOTIFICATION_MARGIN * 2.0)
-            .max(72.0);
+        let max_height =
+            (self.area.height / self.scale_factor - NOTIFICATION_MARGIN * 2.0).max(72.0);
         let icon = if let Some(image) = self.request.icon.clone() {
             img(image)
                 .w(px(18.0))
@@ -468,16 +463,18 @@ impl NotificationWindow {
                     )
                     .into_any_element()
             }
-            NotificationContent::FileCount(count) => div()
-                .w_full()
-                .text_size(ui_rem(14.0))
-                .line_height(ui_rem(19.0))
-                .text_color(theme.muted_foreground)
-                .child(translator.translate_with_args(
-                    "main.preview.file_list",
-                    &[("count", count.to_string())],
-                ))
-                .into_any_element(),
+            NotificationContent::FileCount(count) => {
+                div()
+                    .w_full()
+                    .text_size(ui_rem(14.0))
+                    .line_height(ui_rem(19.0))
+                    .text_color(theme.muted_foreground)
+                    .child(translator.translate_with_args(
+                        "main.preview.file_list",
+                        &[("count", count.to_string())],
+                    ))
+                    .into_any_element()
+            }
         };
         let progress = self.progress_fraction();
         let progress_color = match self.request.level {
@@ -486,19 +483,12 @@ impl NotificationWindow {
             NotificationLevel::Warning => theme.warning,
             NotificationLevel::Error => theme.danger,
         };
-        let mut progress_bar = div()
-            .w_full()
-            .h(px(3.0))
-            .bg(theme.border);
+        let mut progress_bar = div().w_full().h(px(3.0)).bg(theme.border);
         if progress_from_right(self.request.position) {
             progress_bar = progress_bar.flex().justify_end();
         }
-        let progress_bar = progress_bar.child(
-            div()
-                .h_full()
-                .w(relative(progress))
-                .bg(progress_color),
-        );
+        let progress_bar =
+            progress_bar.child(div().h_full().w(relative(progress)).bg(progress_color));
         let content = if let Some(title) = self.request.title.as_ref() {
             let header = h_flex()
                 .w_full()
@@ -608,16 +598,18 @@ impl NotificationWindow {
             .child(content)
             .when_some(self.request.action_url.clone(), |view, url| {
                 let label = self.request.action_label.clone().unwrap_or_default();
-                view.child(div().px_3().pb_2().child(
-                    gpui_component::button::Button::new("notification-open-release")
-                        .small()
-                        .icon(crate::ui::icon("external-link", 14.0, theme.foreground))
-                        .label(label)
-                        .on_click(cx.listener(move |view, _, window, cx| {
-                            cx.open_url(&url);
-                            view.dismiss(window, cx);
-                        })),
-                ))
+                view.child(
+                    div().px_3().pb_2().child(
+                        gpui_component::button::Button::new("notification-open-release")
+                            .small()
+                            .icon(crate::ui::icon("external-link", 14.0, theme.foreground))
+                            .label(label)
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                cx.open_url(&url);
+                                view.dismiss(window, cx);
+                            })),
+                    ),
+                )
             })
     }
 
@@ -626,7 +618,11 @@ impl NotificationWindow {
             return 0.0;
         }
         let duration = self.request.duration.as_secs_f32().max(f32::EPSILON);
-        (self.expires_at.saturating_duration_since(Instant::now()).as_secs_f32() / duration)
+        (self
+            .expires_at
+            .saturating_duration_since(Instant::now())
+            .as_secs_f32()
+            / duration)
             .clamp(0.0, 1.0)
     }
 
@@ -670,14 +666,10 @@ impl NotificationWindow {
                 ),
                 WindowPhase::Visible => unreachable!(),
             };
-            if !self.popup.resize_to_physical_bounds(
-                window,
-                cx,
-                x,
-                y,
-                target.width,
-                target.height,
-            ) {
+            if !self
+                .popup
+                .resize_to_physical_bounds(window, cx, x, y, target.width, target.height)
+            {
                 tracing::warn!("调整全局通知窗口位置失败");
             }
             if let Err(error) = self.popup.set_opacity(window, opacity) {
@@ -719,7 +711,12 @@ impl Render for NotificationWindow {
         self.schedule_next_frame(window, cx);
         let background = crate::window_material::background_element(window, cx);
         let card = self.render_card(cx);
-        div().relative().size_full().text_size(ui_rem(13.0)).child(background).child(card)
+        div()
+            .relative()
+            .size_full()
+            .text_size(ui_rem(13.0))
+            .child(background)
+            .child(card)
     }
 }
 
@@ -838,8 +835,7 @@ impl NotificationService {
                 service.image_preview_service.clone(),
             )
         });
-        let (Some(repository), Some(image_service)) = (repository, image_service)
-        else {
+        let (Some(repository), Some(image_service)) = (repository, image_service) else {
             return;
         };
         let priority = config_runtime::clipboard_config(cx).display_priority;
@@ -847,10 +843,7 @@ impl NotificationService {
             let mut query = HistoryQuery::default();
             query.limit = 1;
             query.load_image_sources = true;
-            let record = repository
-                .find_by_id(history_id, &query)
-                .ok()
-                .flatten()?;
+            let record = repository.find_by_id(history_id, &query).ok().flatten()?;
             Some(clipboard_notification_request(
                 &record.preview_options,
                 record.content_kind,
@@ -911,7 +904,9 @@ impl NotificationService {
             }
             if let Some(active) = service.active.as_ref()
                 && !config_runtime::notification_enabled(active.kind, cx)
-                && let Err(error) = active.handle.update(cx, |view, window, cx| view.dismiss(window, cx))
+                && let Err(error) = active
+                    .handle
+                    .update(cx, |view, window, cx| view.dismiss(window, cx))
             {
                 tracing::debug!(%error, "关闭已禁用的通知失败");
             }
@@ -966,10 +961,9 @@ impl NotificationService {
                     f32::from(bounds.origin.x + bounds.size.width / 2.0),
                     f32::from(bounds.origin.y + bounds.size.height / 2.0),
                 );
-                platform_window::BorderlessPopup::work_area_for_physical_point(cx, center)
-                    .or_else(|| {
-                        platform_window::BorderlessPopup::display_for_physical_point(cx, center)
-                    })
+                platform_window::BorderlessPopup::work_area_for_physical_point(cx, center).or_else(
+                    || platform_window::BorderlessPopup::display_for_physical_point(cx, center),
+                )
             });
         let Some(target) = target else {
             tracing::warn!("无法确定通知窗口的目标屏幕");
@@ -1017,7 +1011,10 @@ mod tests {
         config.set_notification_preference(NotificationKind::OperationResult, false);
         config.set_notification_preference(NotificationKind::FeatureStatus, false);
         let mut request = NotificationRequest::text("测试", "测试");
-        for kind in [NotificationKind::OperationResult, NotificationKind::FeatureStatus] {
+        for kind in [
+            NotificationKind::OperationResult,
+            NotificationKind::FeatureStatus,
+        ] {
             request.kind = kind;
             for level in [NotificationLevel::Info, NotificationLevel::Success] {
                 request.level = level;
@@ -1056,7 +1053,10 @@ mod tests {
 
     #[test]
     fn image_notification_layout_does_not_upscale_small_previews() {
-        assert_eq!(image_notification_layout(32.0, 24.0, 380.0, false), (116.0, 32.0, 24.0));
+        assert_eq!(
+            image_notification_layout(32.0, 24.0, 380.0, false),
+            (116.0, 32.0, 24.0)
+        );
     }
 
     #[test]
@@ -1111,7 +1111,10 @@ mod tests {
     fn animation_direction_follows_the_selected_edge() {
         assert_eq!(animation_offset(NotificationPosition::Top), (0.0, -36.0));
         assert_eq!(animation_offset(NotificationPosition::Left), (-36.0, 0.0));
-        assert_eq!(animation_offset(NotificationPosition::BottomRight), (36.0, 36.0));
+        assert_eq!(
+            animation_offset(NotificationPosition::BottomRight),
+            (36.0, 36.0)
+        );
     }
 
     #[test]

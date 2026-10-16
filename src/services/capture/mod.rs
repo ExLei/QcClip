@@ -5,11 +5,11 @@ mod preview;
 #[cfg(test)]
 pub(crate) mod mock;
 
-pub use hash::{CONTENT_HASH_VERSION, HashedClipboard, hash_clipboard};
 pub(crate) use hash::hash_format_set;
+pub use hash::{CONTENT_HASH_VERSION, HashedClipboard, hash_clipboard};
 pub use persistence::CaptureService;
-pub use preview::{ClipboardPreview, generate_preview, select_default_preview};
 pub(crate) use preview::extract_links;
+pub use preview::{ClipboardPreview, generate_preview, select_default_preview};
 
 use thiserror::Error;
 

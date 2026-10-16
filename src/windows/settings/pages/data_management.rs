@@ -1,6 +1,8 @@
 use crate::ui::scale::ui_rem;
 
-use super::super::{notify_settings_error, notify_settings_status, open_settings_directory, SettingsPage};
+use super::super::{
+    SettingsPage, notify_settings_error, notify_settings_status, open_settings_directory,
+};
 use crate::windows::notification::NotificationLevel;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Entity, FontWeight, Hsla, div, img, px, relative};
@@ -17,12 +19,12 @@ use super::super::{DataStatsScope, SettingsWindowView, components, parse_optiona
 use crate::{
     config::HistoryConfig,
     config_runtime,
-    ui::icon::icon,
     services::{
         data_management::{self, DataManagementService, PreparedDataLocation},
         database::HistoryRepository,
         image_preview::ImagePreviewService,
     },
+    ui::icon::icon,
     windows::menu::{DropdownItem, DropdownItemId},
 };
 
@@ -94,10 +96,13 @@ impl SettingsWindowView {
             retention_items,
             move |id, cx| {
                 let mut next = config_runtime::history_config(cx);
-                let Some(value) = parse_optional_limit(id.as_str()) else { return; };
+                let Some(value) = parse_optional_limit(id.as_str()) else {
+                    return;
+                };
                 next.retention_days = value;
                 save_history_config(retention_view.clone(), next, cx);
-            }, cx,
+            },
+            cx,
         );
         let retention_control = h_flex()
             .h(ui_rem(34.0))
@@ -169,10 +174,13 @@ impl SettingsWindowView {
             max_items_items,
             move |id, cx| {
                 let mut next = config_runtime::history_config(cx);
-                let Some(value) = parse_optional_limit(id.as_str()) else { return; };
+                let Some(value) = parse_optional_limit(id.as_str()) else {
+                    return;
+                };
                 next.max_items = value;
                 save_history_config(max_items_view.clone(), next, cx);
-            }, cx,
+            },
+            cx,
         );
         let max_items_control = h_flex()
             .h(ui_rem(34.0))
@@ -195,43 +203,86 @@ impl SettingsWindowView {
             .child(max_items_preset);
         let reset_view = view.clone();
         let reset_translator = translator.clone();
-        let reset_button = Button::new("settings-data-reset").warning().small().disabled(self.data_busy).label(translator.translate("settings.data_management.reset"))
+        let reset_button = Button::new("settings-data-reset")
+            .warning()
+            .small()
+            .disabled(self.data_busy)
+            .label(translator.translate("settings.data_management.reset"))
             .on_click(move |_, _, cx| {
                 let result = config_runtime::reset_history_config(cx);
                 if let Err(error) = &result {
                     tracing::error!("恢复历史设置失败：{error}");
                 }
                 reset_view.update(cx, |view, cx| {
-                    view.data_error = notify_settings_error(SettingsPage::DataManagement, result.err().map(|_| reset_translator.translate("settings.data_management.history_reset_error")), cx);
-                    view.data_message = None; cx.notify();
+                    view.data_error = notify_settings_error(
+                        SettingsPage::DataManagement,
+                        result.err().map(|_| {
+                            reset_translator
+                                .translate("settings.data_management.history_reset_error")
+                        }),
+                        cx,
+                    );
+                    view.data_message = None;
+                    cx.notify();
                 });
             });
         let cleanup_view = view.clone();
-        let cleanup_button = Button::new("settings-data-cleanup").primary().small().disabled(self.data_busy).label(translator.translate("settings.data_management.cleanup"))
+        let cleanup_button = Button::new("settings-data-cleanup")
+            .primary()
+            .small()
+            .disabled(self.data_busy)
+            .label(translator.translate("settings.data_management.cleanup"))
             .on_click(move |_, _, cx| start_cleanup(cleanup_view.clone(), cx));
         let export_view = view.clone();
-        let export_button = Button::new("settings-data-export").secondary().small().disabled(self.data_busy).label(translator.translate("settings.data_management.export"))
+        let export_button = Button::new("settings-data-export")
+            .secondary()
+            .small()
+            .disabled(self.data_busy)
+            .label(translator.translate("settings.data_management.export"))
             .on_click(move |_, _, cx| start_export(export_view.clone(), cx));
         let import_view = view.clone();
-        let import_button = Button::new("settings-data-import").secondary().small().disabled(self.data_busy).label(translator.translate("settings.data_management.import"))
+        let import_button = Button::new("settings-data-import")
+            .secondary()
+            .small()
+            .disabled(self.data_busy)
+            .label(translator.translate("settings.data_management.import"))
             .on_click(move |_, _, cx| start_import(import_view.clone(), cx));
         let clear_history_view = view.clone();
         let clear_history_button = Button::new("settings-data-clear-all-history")
-            .danger().small().disabled(self.data_busy)
+            .danger()
+            .small()
+            .disabled(self.data_busy)
             .label(translator.translate("settings.data_management.clear_all_history"))
             .on_click(move |_, window, cx| {
-                confirm_destructive_action(clear_history_view.clone(), DataDestructiveAction::ClearHistory, window, cx);
+                confirm_destructive_action(
+                    clear_history_view.clone(),
+                    DataDestructiveAction::ClearHistory,
+                    window,
+                    cx,
+                );
             });
         let reset_application_view = view.clone();
         let reset_application_button = Button::new("settings-data-reset-application")
-            .danger().small().disabled(self.data_busy)
+            .danger()
+            .small()
+            .disabled(self.data_busy)
             .label(translator.translate("settings.data_management.reset_application"))
             .on_click(move |_, window, cx| {
-                confirm_destructive_action(reset_application_view.clone(), DataDestructiveAction::ResetApplication, window, cx);
+                confirm_destructive_action(
+                    reset_application_view.clone(),
+                    DataDestructiveAction::ResetApplication,
+                    window,
+                    cx,
+                );
             });
-        let open_data_button = Button::new("settings-data-open-directory").secondary().small().label(translator.translate("settings.data_management.open_directory"))
+        let open_data_button = Button::new("settings-data-open-directory")
+            .secondary()
+            .small()
+            .label(translator.translate("settings.data_management.open_directory"))
             .on_click(|_, _, cx| {
-                let data_root = cx.read_global::<DataManagementService, _>(|service, _| service.data_root().to_path_buf());
+                let data_root = cx.read_global::<DataManagementService, _>(|service, _| {
+                    service.data_root().to_path_buf()
+                });
                 open_settings_directory(data_root, "settings.data_management.open_directory", cx);
             });
         let change_location_view = view.clone();
@@ -291,87 +342,170 @@ impl SettingsWindowView {
                     .child(open_data_button.flex_1()),
             );
 
-        let stats_actions = self.highlight_element(theme, translator.translate("settings.data_management.actions_title"), h_flex()
-            .w_full()
-            .items_center()
-            .gap_2()
-            .border_b_1()
-            .border_color(theme.border)
-            .px_4()
-            .py_3()
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.foreground)
-                            .child(translator.translate("settings.data_management.actions_title")),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(translator.translate("settings.data_management.actions_description")),
-                    ),
-            )
-            .child(
-                v_flex().w(ui_rem(390.0)).max_w_full().flex_shrink_0().gap_2()
-                    .child(h_flex().w_full().gap_2()
-                        .child(cleanup_button.flex_grow(2.0))
-                        .child(export_button.flex_1())
-                        .child(import_button.flex_1()))
-                    .child(h_flex().w_full().gap_2()
-                        .child(clear_history_button.flex_1())
-                        .child(reset_application_button.flex_1())),
-            ));
-        let stats_dashboard = self.highlight_element(theme, translator.translate("settings.data_management.stats_title"), render_statistics_dashboard(
+        let stats_actions = self.highlight_element(
             theme,
-            &translator,
-            self.data_stats.as_ref(),
-            self.data_stats_loading,
-            config.max_items,
-            self.data_stats_scope,
-            view.clone(),
-            {
-                let refresh_view = view.clone();
-                let refresh_label = translator.translate("settings.data_management.refresh_stats");
-                Button::new("settings-data-stats-refresh")
-                    .ghost()
-                    .small()
-                    .icon(crate::ui::icon::icon("refresh", 14.0, theme.muted_foreground))
-                    .accessibility_label(refresh_label.clone())
-                    .tooltip(refresh_label)
-                    .disabled(self.data_stats_loading)
-                    .on_click(move |_, _, cx| {
-                        let _ = refresh_view.update(cx, |view, cx| {
-                            view.refresh_data_stats(cx);
-                            cx.notify();
-                        });
-                    })
-            },
-        ));
-        let mut section = v_flex().w_full().min_w_0().flex_shrink_0().overflow_hidden()
-            .rounded(px(8.0)).border_1().border_color(theme.border).bg(theme.title_bar)
+            translator.translate("settings.data_management.actions_title"),
+            h_flex()
+                .w_full()
+                .items_center()
+                .gap_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .px_4()
+                .py_3()
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.foreground)
+                                .child(
+                                    translator.translate("settings.data_management.actions_title"),
+                                ),
+                        )
+                        .child(div().text_xs().text_color(theme.muted_foreground).child(
+                            translator.translate("settings.data_management.actions_description"),
+                        )),
+                )
+                .child(
+                    v_flex()
+                        .w(ui_rem(390.0))
+                        .max_w_full()
+                        .flex_shrink_0()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .gap_2()
+                                .child(cleanup_button.flex_grow(2.0))
+                                .child(export_button.flex_1())
+                                .child(import_button.flex_1()),
+                        )
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .gap_2()
+                                .child(clear_history_button.flex_1())
+                                .child(reset_application_button.flex_1()),
+                        ),
+                ),
+        );
+        let stats_dashboard = self.highlight_element(
+            theme,
+            translator.translate("settings.data_management.stats_title"),
+            render_statistics_dashboard(
+                theme,
+                &translator,
+                self.data_stats.as_ref(),
+                self.data_stats_loading,
+                config.max_items,
+                self.data_stats_scope,
+                view.clone(),
+                {
+                    let refresh_view = view.clone();
+                    let refresh_label =
+                        translator.translate("settings.data_management.refresh_stats");
+                    Button::new("settings-data-stats-refresh")
+                        .ghost()
+                        .small()
+                        .icon(crate::ui::icon::icon(
+                            "refresh",
+                            14.0,
+                            theme.muted_foreground,
+                        ))
+                        .accessibility_label(refresh_label.clone())
+                        .tooltip(refresh_label)
+                        .disabled(self.data_stats_loading)
+                        .on_click(move |_, _, cx| {
+                            let _ = refresh_view.update(cx, |view, cx| {
+                                view.refresh_data_stats(cx);
+                                cx.notify();
+                            });
+                        })
+                },
+            ),
+        );
+        let mut section = v_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .overflow_hidden()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.title_bar)
             .child(components::settings_page_header(
-                theme, translator.translate("settings.page.data_management"),
-                translator.translate("settings.data_management.description"), reset_button,
+                theme,
+                translator.translate("settings.page.data_management"),
+                translator.translate("settings.data_management.description"),
+                reset_button,
             ))
             .child(self.render_legacy_migration(cx))
-            .child(self.setting_row(theme, translator.translate("settings.data_management.data_location"), Some(translator.translate(if can_change_data_location { "settings.data_management.data_location_description" } else { "settings.data_management.portable_data_location_description" }).into()), data_location_control))
-            .child(self.setting_row(theme, translator.translate("settings.data_management.retention"), Some(translator.translate("settings.data_management.retention_description").into()), retention_control))
-            .child(self.setting_row(theme, translator.translate("settings.data_management.max_items"), Some(translator.translate("settings.data_management.max_items_description").into()), max_items_control))
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.data_management.data_location"),
+                    Some(
+                        translator
+                            .translate(if can_change_data_location {
+                                "settings.data_management.data_location_description"
+                            } else {
+                                "settings.data_management.portable_data_location_description"
+                            })
+                            .into(),
+                    ),
+                    data_location_control,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.data_management.retention"),
+                    Some(
+                        translator
+                            .translate("settings.data_management.retention_description")
+                            .into(),
+                    ),
+                    retention_control,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.data_management.max_items"),
+                    Some(
+                        translator
+                            .translate("settings.data_management.max_items_description")
+                            .into(),
+                    ),
+                    max_items_control,
+                ),
+            )
             .child(stats_actions)
             .child(stats_dashboard);
         if self.data_busy {
             let busy_message = translator.translate("settings.data_management.busy");
             section = section.child(components::settings_error_row(theme, &busy_message));
         }
-        if let Some(message) = &self.data_message { section = section.child(div().border_t_1().border_color(theme.border).px_4().py_2().text_sm().text_color(theme.success).child(message.clone())); }
-        if let Some(error) = &self.data_error { section = section.child(components::settings_error_row(theme, error)); }
+        if let Some(message) = &self.data_message {
+            section = section.child(
+                div()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .px_4()
+                    .py_2()
+                    .text_sm()
+                    .text_color(theme.success)
+                    .child(message.clone()),
+            );
+        }
+        if let Some(error) = &self.data_error {
+            section = section.child(components::settings_error_row(theme, error));
+        }
         section.into_any_element()
     }
 }
@@ -437,14 +571,13 @@ fn render_statistics_dashboard(
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme.foreground)
-                                .child(translator.translate("settings.data_management.stats_title")),
+                                .child(
+                                    translator.translate("settings.data_management.stats_title"),
+                                ),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(translator.translate("settings.data_management.stats_description")),
-                        ),
+                        .child(div().text_xs().text_color(theme.muted_foreground).child(
+                            translator.translate("settings.data_management.stats_description"),
+                        )),
                 )
                 .child(
                     div()
@@ -466,25 +599,17 @@ fn render_statistics_dashboard(
                 .gap_3()
                 .items_stretch()
                 .child(render_history_summary_panel(
-                    theme,
-                    translator,
-                    stats,
-                    loading,
+                    theme, translator, stats, loading,
                 ))
                 .child(render_relation_summary(
-                    theme,
-                    translator,
-                    favorites,
-                    tags,
-                    loading,
+                    theme, translator, favorites, tags, loading,
                 )),
         )
-        .child(
-            render_two_column_panels(retention_panel, storage_panel),
-        )
-        .child(
-            render_two_column_panels(content_type_panel, source_app_panel),
-        )
+        .child(render_two_column_panels(retention_panel, storage_panel))
+        .child(render_two_column_panels(
+            content_type_panel,
+            source_app_panel,
+        ))
         .into_any_element()
 }
 
@@ -507,9 +632,13 @@ fn render_history_summary_panel(
     loading: bool,
 ) -> AnyElement {
     let value = |value: Option<u64>| {
-        value
-            .map(format_number)
-            .unwrap_or_else(|| if loading { "…".to_owned() } else { "—".to_owned() })
+        value.map(format_number).unwrap_or_else(|| {
+            if loading {
+                "…".to_owned()
+            } else {
+                "—".to_owned()
+            }
+        })
     };
     let total = stats.map(|stats| stats.history_count);
     let pinned = stats.map(|stats| stats.pinned_history_count);
@@ -583,9 +712,10 @@ fn render_history_summary_panel(
                                         .text_sm()
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(theme.foreground)
-                                        .child(translator.translate(
-                                            "settings.data_management.stat_history",
-                                        )),
+                                        .child(
+                                            translator
+                                                .translate("settings.data_management.stat_history"),
+                                        ),
                                 )
                                 .child(
                                     div()
@@ -644,9 +774,13 @@ fn render_relation_summary(
     loading: bool,
 ) -> AnyElement {
     let value = |value: Option<u64>| {
-        value
-            .map(format_number)
-            .unwrap_or_else(|| if loading { "…".to_owned() } else { "—".to_owned() })
+        value.map(format_number).unwrap_or_else(|| {
+            if loading {
+                "…".to_owned()
+            } else {
+                "—".to_owned()
+            }
+        })
     };
 
     v_flex()
@@ -772,23 +906,29 @@ fn render_retention_panel(
     max_items: Option<u32>,
 ) -> AnyElement {
     let (limit_used, pending) = stats
-        .map(|stats| (stats.retention_limit_used_count, stats.pending_cleanup_count))
+        .map(|stats| {
+            (
+                stats.retention_limit_used_count,
+                stats.pending_cleanup_count,
+            )
+        })
         .unwrap_or_default();
     let ratio = match (stats, max_items) {
-        (Some(_), Some(limit)) if limit > 0 => {
-            (limit_used as f32 / limit as f32).clamp(0.0, 1.0)
-        }
+        (Some(_), Some(limit)) if limit > 0 => (limit_used as f32 / limit as f32).clamp(0.0, 1.0),
         (Some(_), Some(_)) => 1.0,
         _ => 0.0,
     };
     let ratio_text = if stats.is_none() {
-        if loading { "…".to_owned() } else { "—".to_owned() }
+        if loading {
+            "…".to_owned()
+        } else {
+            "—".to_owned()
+        }
     } else if let Some(limit) = max_items {
         if limit_used >= u64::from(limit) {
             "100%".to_owned()
         } else {
-            let percentage =
-                (limit_used as f64 / f64::from(limit) * 1000.0).round() / 10.0;
+            let percentage = (limit_used as f64 / f64::from(limit) * 1000.0).round() / 10.0;
             format!("{:.1}%", percentage.min(99.9))
         }
     } else {
@@ -895,14 +1035,25 @@ fn render_retention_panel(
                 .w_full()
                 .rounded(px(4.0))
                 .bg(theme.muted)
-                .child(div().h_full().rounded(px(4.0)).bg(theme.success).w(relative(ratio))),
+                .child(
+                    div()
+                        .h_full()
+                        .rounded(px(4.0))
+                        .bg(theme.success)
+                        .w(relative(ratio)),
+                ),
         )
         .child(
             h_flex()
                 .items_center()
                 .justify_between()
                 .text_xs()
-                .child(div().min_w_0().text_color(theme.muted_foreground).child(used_text))
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_color(theme.muted_foreground)
+                        .child(used_text),
+                )
                 .child(
                     div()
                         .flex_none()
@@ -945,14 +1096,42 @@ fn render_storage_panel(
     let total = stats.map(|stats| stats.total_bytes).unwrap_or(0);
     let total_text = stats
         .map(|stats| format_bytes(stats.total_bytes))
-        .unwrap_or_else(|| if loading { "…".to_owned() } else { "—".to_owned() });
-    let categories = stats.map(|stats| [
-        ("settings.data_management.storage_database", stats.database_bytes, theme.primary),
-        ("settings.data_management.storage_raw_data", stats.raw_data_bytes, theme.info),
-        ("settings.data_management.storage_images", stats.image_library_bytes, theme.success),
-        ("settings.data_management.storage_sound", stats.sound_bytes, theme.warning),
-        ("settings.data_management.storage_other", stats.other_bytes, theme.muted_foreground),
-    ]);
+        .unwrap_or_else(|| {
+            if loading {
+                "…".to_owned()
+            } else {
+                "—".to_owned()
+            }
+        });
+    let categories = stats.map(|stats| {
+        [
+            (
+                "settings.data_management.storage_database",
+                stats.database_bytes,
+                theme.primary,
+            ),
+            (
+                "settings.data_management.storage_raw_data",
+                stats.raw_data_bytes,
+                theme.info,
+            ),
+            (
+                "settings.data_management.storage_images",
+                stats.image_library_bytes,
+                theme.success,
+            ),
+            (
+                "settings.data_management.storage_sound",
+                stats.sound_bytes,
+                theme.warning,
+            ),
+            (
+                "settings.data_management.storage_other",
+                stats.other_bytes,
+                theme.muted_foreground,
+            ),
+        ]
+    });
 
     let mut panel = v_flex()
         .w_full()
@@ -967,15 +1146,38 @@ fn render_storage_panel(
             h_flex()
                 .items_center()
                 .justify_between()
-                .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(theme.foreground).child(translator.translate("settings.data_management.storage_title")))
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(theme.foreground).child(total_text)),
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.foreground)
+                        .child(translator.translate("settings.data_management.storage_title")),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.foreground)
+                        .child(total_text),
+                ),
         );
     if let Some(categories) = categories {
         for (label_key, bytes, color) in categories {
-            panel = panel.child(storage_row(translator.translate(label_key), bytes, total, color, theme));
+            panel = panel.child(storage_row(
+                translator.translate(label_key),
+                bytes,
+                total,
+                color,
+                theme,
+            ));
         }
     } else {
-        panel = panel.child(div().text_xs().text_color(theme.muted_foreground).child(translator.translate("settings.data_management.storage_empty")));
+        panel = panel.child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(translator.translate("settings.data_management.storage_empty")),
+        );
     }
     panel.into_any_element()
 }
@@ -1000,7 +1202,10 @@ fn render_content_type_distribution(
         ("settings.data_management.content_type_image", theme.info),
         ("settings.data_management.content_type_file", theme.success),
         ("settings.data_management.content_type_link", theme.warning),
-        ("settings.data_management.content_type_other", theme.muted_foreground),
+        (
+            "settings.data_management.content_type_other",
+            theme.muted_foreground,
+        ),
     ];
     let mut rows = v_flex().w_full().gap_1();
     for (index, (label_key, color)) in items.into_iter().enumerate() {
@@ -1020,10 +1225,7 @@ fn render_content_type_distribution(
         rows.into_any_element(),
         false,
         Some(render_content_type_scope_switcher(
-            theme,
-            translator,
-            scope,
-            view,
+            theme, translator, scope, view,
         )),
     )
 }
@@ -1059,7 +1261,8 @@ fn render_content_type_scope_switcher(
                 }
             });
         });
-    let favorites_label = translator.translate("settings.data_management.content_type_scope_favorites");
+    let favorites_label =
+        translator.translate("settings.data_management.content_type_scope_favorites");
     let favorites_view = view;
     let favorites_button = Button::new("settings-data-content-type-favorites")
         .ghost()
@@ -1107,12 +1310,10 @@ fn render_source_distribution(
     let mut rows = v_flex().w_full().gap_1();
     if let Some(source_counts) = source_counts {
         if source_counts.is_empty() {
-            rows = rows.child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(translator.translate("settings.data_management.source_distribution_empty")),
-            );
+            rows =
+                rows.child(div().text_xs().text_color(theme.muted_foreground).child(
+                    translator.translate("settings.data_management.source_distribution_empty"),
+                ));
         } else {
             for (index, source) in source_counts.into_iter().enumerate() {
                 let label = if source.name.is_empty() {
@@ -1286,9 +1487,13 @@ fn distribution_row(
     color: Hsla,
     theme: gpui_component::ThemeColor,
 ) -> AnyElement {
-    let value_text = value
-        .map(format_number)
-        .unwrap_or_else(|| if loading { "…".to_owned() } else { "—".to_owned() });
+    let value_text = value.map(format_number).unwrap_or_else(|| {
+        if loading {
+            "…".to_owned()
+        } else {
+            "—".to_owned()
+        }
+    });
     let ratio = match (value, max_count) {
         (Some(value), max_count) if max_count > 0 => value as f32 / max_count as f32,
         _ => 0.0,
@@ -1333,12 +1538,23 @@ fn storage_row(
     color: Hsla,
     theme: gpui_component::ThemeColor,
 ) -> AnyElement {
-    let ratio = if total == 0 { 0.0 } else { (bytes as f32 / total as f32).clamp(0.0, 1.0) };
+    let ratio = if total == 0 {
+        0.0
+    } else {
+        (bytes as f32 / total as f32).clamp(0.0, 1.0)
+    };
     h_flex()
         .w_full()
         .items_center()
         .gap_2()
-        .child(div().w(ui_rem(58.0)).flex_none().text_xs().text_color(theme.muted_foreground).child(label))
+        .child(
+            div()
+                .w(ui_rem(58.0))
+                .flex_none()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(label),
+        )
         .child(
             div()
                 .h(ui_rem(6.0))
@@ -1347,7 +1563,15 @@ fn storage_row(
                 .bg(theme.muted)
                 .child(div().h_full().rounded(px(3.0)).bg(color).w(relative(ratio))),
         )
-        .child(div().w(ui_rem(62.0)).flex_none().text_right().text_xs().text_color(theme.foreground).child(format_bytes(bytes)))
+        .child(
+            div()
+                .w(ui_rem(62.0))
+                .flex_none()
+                .text_right()
+                .text_xs()
+                .text_color(theme.foreground)
+                .child(format_bytes(bytes)),
+        )
         .into_any_element()
 }
 
@@ -1363,7 +1587,11 @@ fn format_number(value: u64) -> String {
     grouped
 }
 
-fn save_history_config(view: gpui::Entity<SettingsWindowView>, config: HistoryConfig, cx: &mut App) {
+fn save_history_config(
+    view: gpui::Entity<SettingsWindowView>,
+    config: HistoryConfig,
+    cx: &mut App,
+) {
     if view.read(cx).data_busy {
         return;
     }
@@ -1373,7 +1601,13 @@ fn save_history_config(view: gpui::Entity<SettingsWindowView>, config: HistoryCo
         tracing::error!("保存历史设置失败：{error}");
     }
     view.update(cx, |view, cx| {
-        view.data_error = notify_settings_error(SettingsPage::DataManagement, result.err().map(|_| translator.translate("settings.data_management.history_save_error")), cx);
+        view.data_error = notify_settings_error(
+            SettingsPage::DataManagement,
+            result
+                .err()
+                .map(|_| translator.translate("settings.data_management.history_save_error")),
+            cx,
+        );
         view.data_message = None;
         cx.notify();
     });
@@ -1381,7 +1615,9 @@ fn save_history_config(view: gpui::Entity<SettingsWindowView>, config: HistoryCo
 
 fn start_choose_data_location(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
     if view.read(cx).data_busy
-        || !cx.read_global::<DataManagementService, _>(|service, _| service.can_change_data_location())
+        || !cx.read_global::<DataManagementService, _>(|service, _| {
+            service.can_change_data_location()
+        })
     {
         return;
     }
@@ -1391,10 +1627,14 @@ fn start_choose_data_location(view: gpui::Entity<SettingsWindowView>, cx: &mut A
     cx.spawn(async move |cx| {
         let Some(folder) = dialog.pick_folder().await else {
             view.update(cx, |view, cx| {
-                view.data_message = notify_settings_status(SettingsPage::DataManagement, Some(
-                    crate::i18n::translator(cx)
-                        .translate("settings.data_management.cancelled"),
-                ), NotificationLevel::Info, cx);
+                view.data_message = notify_settings_status(
+                    SettingsPage::DataManagement,
+                    Some(
+                        crate::i18n::translator(cx).translate("settings.data_management.cancelled"),
+                    ),
+                    NotificationLevel::Info,
+                    cx,
+                );
                 cx.notify();
             });
             return;
@@ -1425,7 +1665,9 @@ fn confirm_destructive_action(
     window: &mut gpui::Window,
     cx: &mut App,
 ) {
-    if view.read(cx).data_busy { return; }
+    if view.read(cx).data_busy {
+        return;
+    }
     let translator = crate::i18n::translator(cx);
     let (title_key, detail_key, confirm_key) = match action {
         DataDestructiveAction::ClearHistory => (
@@ -1449,21 +1691,32 @@ fn confirm_destructive_action(
         ],
         cx,
     );
-    view.update(cx, |view, cx| { view.data_busy = true; cx.notify(); });
+    view.update(cx, |view, cx| {
+        view.data_busy = true;
+        cx.notify();
+    });
     cx.spawn(async move |cx| {
         let confirmed = matches!(answer.await, Ok(1));
         cx.update(|cx| {
-            view.update(cx, |view, cx| { view.data_busy = false; cx.notify(); });
-            if !confirmed { return; }
+            view.update(cx, |view, cx| {
+                view.data_busy = false;
+                cx.notify();
+            });
+            if !confirmed {
+                return;
+            }
             match action {
                 DataDestructiveAction::ClearHistory => start_history_cleanup(view, true, cx),
                 DataDestructiveAction::ResetApplication => {
-                    let target = cx.read_global::<DataManagementService, _>(|service, _| service.default_data_root().to_path_buf());
+                    let target = cx.read_global::<DataManagementService, _>(|service, _| {
+                        service.default_data_root().to_path_buf()
+                    });
                     start_data_replacement(view, target, true, cx);
                 }
             }
         });
-    }).detach();
+    })
+    .detach();
 }
 
 fn start_data_replacement(
@@ -1494,8 +1747,11 @@ fn start_data_replacement(
         let result = cx
             .background_executor()
             .spawn(async move {
-                if reset_application { service.prepare_application_reset() }
-                else { service.prepare_data_location_switch(&target) }
+                if reset_application {
+                    service.prepare_application_reset()
+                } else {
+                    service.prepare_data_location_switch(&target)
+                }
             })
             .await;
         match result {
@@ -1510,10 +1766,7 @@ fn start_data_replacement(
                     crate::windows::menu::MenuService::close_all(cx);
                     crate::windows::preview::PreviewWindowService::destroy(cx);
                     crate::windows::notification::NotificationService::dismiss_all(cx);
-                    crate::state_runtime::StateRuntime::reload(
-                        data_root.join("state.json"),
-                        cx,
-                    );
+                    crate::state_runtime::StateRuntime::reload(data_root.join("state.json"), cx);
                     let config_reload = crate::config_runtime::ConfigRuntime::reload(
                         data_root.join("config.json"),
                         cx,
@@ -1538,10 +1791,7 @@ fn start_data_replacement(
                         image_preview_service,
                         cx,
                     );
-                    crate::config_runtime::ConfigRuntime::apply_imported_config(
-                        config_reload,
-                        cx,
-                    );
+                    crate::config_runtime::ConfigRuntime::apply_imported_config(config_reload, cx);
                 });
                 drop(switch_guard);
                 cx.update(|cx| {
@@ -1565,17 +1815,26 @@ fn start_data_replacement(
                     view.data_busy = false;
                     let message = translator.translate(if reset_application {
                         "settings.data_management.reset_application_success"
-                    } else { "settings.data_management.location_success" });
+                    } else {
+                        "settings.data_management.location_success"
+                    });
                     let error = cleanup_error.map(|_| {
                         translator.translate(if reset_application {
                             "settings.data_management.reset_application_cleanup_error"
-                        } else { "settings.data_management.location_cleanup_error" })
+                        } else {
+                            "settings.data_management.location_cleanup_error"
+                        })
                     });
                     let (notification, level) = match error.as_ref() {
                         Some(error) => (format!("{message}\n{error}"), NotificationLevel::Warning),
                         None => (message.clone(), NotificationLevel::Success),
                     };
-                    let _ = notify_settings_status(SettingsPage::DataManagement, Some(notification), level, cx);
+                    let _ = notify_settings_status(
+                        SettingsPage::DataManagement,
+                        Some(notification),
+                        level,
+                        cx,
+                    );
                     view.data_error = error;
                     view.data_message = Some(message);
                     view.data_stats_request_id = view.data_stats_request_id.wrapping_add(1);
@@ -1587,18 +1846,25 @@ fn start_data_replacement(
                 });
             }
             Err(error) => {
-                if reset_application { tracing::error!("重置应用程序失败：{error}"); }
-                else { tracing::error!("更改数据位置失败：{error}"); }
+                if reset_application {
+                    tracing::error!("重置应用程序失败：{error}");
+                } else {
+                    tracing::error!("更改数据位置失败：{error}");
+                }
                 cx.update(|cx| {
                     crate::windows::main::MainWindowService::restart_clipboard_listener(cx);
                 });
                 view.update(cx, |view, cx| {
                     view.data_busy = false;
-                    view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(
-                        translator.translate(if reset_application {
+                    view.data_error = notify_settings_error(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate(if reset_application {
                             "settings.data_management.reset_application_error"
-                        } else { "settings.data_management.location_error" }),
-                    ), cx);
+                        } else {
+                            "settings.data_management.location_error"
+                        })),
+                        cx,
+                    );
                     cx.notify();
                 });
             }
@@ -1612,39 +1878,71 @@ fn start_cleanup(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
 }
 
 fn start_history_cleanup(view: Entity<SettingsWindowView>, clear_all: bool, cx: &mut App) {
-    if view.read(cx).data_busy { return; }
+    if view.read(cx).data_busy {
+        return;
+    }
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
     let policy = config_runtime::history_config(cx);
     let translator = crate::i18n::translator(cx);
-    view.update(cx, |view, cx| { view.data_busy = true; view.data_error = None; view.data_message = None; cx.notify(); });
+    view.update(cx, |view, cx| {
+        view.data_busy = true;
+        view.data_error = None;
+        view.data_message = None;
+        cx.notify();
+    });
     if clear_all {
         crate::windows::quick_paste::QuickPasteWindowService::cancel(cx);
         crate::windows::preview::PreviewWindowService::destroy(cx);
         crate::windows::main::MainWindowService::stop_clipboard_listener(cx);
     }
     cx.spawn(async move |cx| {
-        let result = cx.background_executor().spawn(async move {
-            if clear_all { service.clear_all_history() } else { service.cleanup_history(&policy) }
-        }).await;
+        let result = cx
+            .background_executor()
+            .spawn(async move {
+                if clear_all {
+                    service.clear_all_history()
+                } else {
+                    service.cleanup_history(&policy)
+                }
+            })
+            .await;
         let cleaned = result.is_ok();
         view.update(cx, |view, cx| {
             view.data_busy = false;
             match result {
-                Ok(report) => view.data_message = notify_settings_status(SettingsPage::DataManagement, Some(translator.translate_with_args(
-                    if clear_all { "settings.data_management.clear_all_history_success" }
-                    else { "settings.data_management.cleanup_success" },
-                    &[
-                        ("history_count", report.history_items_removed.to_string()),
-                        ("orphan_count", report.orphan_items_removed.to_string()),
-                    ],
-                )), NotificationLevel::Success, cx),
+                Ok(report) => {
+                    view.data_message = notify_settings_status(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate_with_args(
+                            if clear_all {
+                                "settings.data_management.clear_all_history_success"
+                            } else {
+                                "settings.data_management.cleanup_success"
+                            },
+                            &[
+                                ("history_count", report.history_items_removed.to_string()),
+                                ("orphan_count", report.orphan_items_removed.to_string()),
+                            ],
+                        )),
+                        NotificationLevel::Success,
+                        cx,
+                    )
+                }
                 Err(error) => {
-                    if clear_all { tracing::error!("清空所有剪贴板历史失败：{error}"); }
-                    else { tracing::error!("清理待清理历史失败：{error}"); }
-                    view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(translator.translate(
-                        if clear_all { "settings.data_management.clear_all_history_error" }
-                        else { "settings.data_management.cleanup_error" },
-                    )), cx);
+                    if clear_all {
+                        tracing::error!("清空所有剪贴板历史失败：{error}");
+                    } else {
+                        tracing::error!("清理待清理历史失败：{error}");
+                    }
+                    view.data_error = notify_settings_error(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate(if clear_all {
+                            "settings.data_management.clear_all_history_error"
+                        } else {
+                            "settings.data_management.cleanup_error"
+                        })),
+                        cx,
+                    );
                 }
             }
             view.data_stats = None;
@@ -1660,46 +1958,86 @@ fn start_history_cleanup(view: Entity<SettingsWindowView>, clear_all: bool, cx: 
         if clear_all {
             cx.update(crate::windows::main::MainWindowService::restart_clipboard_listener);
         }
-    }).detach();
+    })
+    .detach();
 }
 
 fn start_export(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
-    if view.read(cx).data_busy { return; }
+    if view.read(cx).data_busy {
+        return;
+    }
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
     let suggested = service.suggested_export_file_name();
     let translator = crate::i18n::translator(cx);
-    let dialog = rfd::AsyncFileDialog::new().set_title(translator.translate("settings.data_management.export_title"))
+    let dialog = rfd::AsyncFileDialog::new()
+        .set_title(translator.translate("settings.data_management.export_title"))
         .set_file_name(suggested)
-        .add_filter(translator.translate("settings.data_management.file_filter"), &["qcclip-data"]);
-    view.update(cx, |view, cx| { view.data_busy = true; view.data_error = None; view.data_message = None; cx.notify(); });
+        .add_filter(
+            translator.translate("settings.data_management.file_filter"),
+            &["qcclip-data"],
+        );
+    view.update(cx, |view, cx| {
+        view.data_busy = true;
+        view.data_error = None;
+        view.data_message = None;
+        cx.notify();
+    });
     cx.spawn(async move |cx| {
         let (message, error, level) = match dialog.save_file().await {
-            Some(file) => match cx.background_executor().spawn(async move { service.export_data(file.path()) }).await {
-                Ok(()) => (Some(translator.translate("settings.data_management.export_success")), None, NotificationLevel::Success),
+            Some(file) => match cx
+                .background_executor()
+                .spawn(async move { service.export_data(file.path()) })
+                .await
+            {
+                Ok(()) => (
+                    Some(translator.translate("settings.data_management.export_success")),
+                    None,
+                    NotificationLevel::Success,
+                ),
                 Err(error) => {
                     tracing::error!("导出数据失败：{error}");
-                    (None, Some(translator.translate("settings.data_management.export_error")), NotificationLevel::Error)
+                    (
+                        None,
+                        Some(translator.translate("settings.data_management.export_error")),
+                        NotificationLevel::Error,
+                    )
                 }
             },
-            None => (Some(translator.translate("settings.data_management.cancelled")), None, NotificationLevel::Info),
+            None => (
+                Some(translator.translate("settings.data_management.cancelled")),
+                None,
+                NotificationLevel::Info,
+            ),
         };
         view.update(cx, |view, cx| {
             view.data_busy = false;
-            view.data_message = notify_settings_status(SettingsPage::DataManagement, message, level, cx);
+            view.data_message =
+                notify_settings_status(SettingsPage::DataManagement, message, level, cx);
             view.data_error = notify_settings_error(SettingsPage::DataManagement, error, cx);
             cx.notify();
         });
-    }).detach();
+    })
+    .detach();
 }
 
 fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
-    if view.read(cx).data_busy { return; }
+    if view.read(cx).data_busy {
+        return;
+    }
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
     let translator = crate::i18n::translator(cx);
     let dialog = rfd::AsyncFileDialog::new()
         .set_title(translator.translate("settings.data_management.import_title"))
-        .add_filter(translator.translate("settings.data_management.file_filter"), &["qcclip-data"]);
-    view.update(cx, |view, cx| { view.data_busy = true; view.data_error = None; view.data_message = None; cx.notify(); });
+        .add_filter(
+            translator.translate("settings.data_management.file_filter"),
+            &["qcclip-data"],
+        );
+    view.update(cx, |view, cx| {
+        view.data_busy = true;
+        view.data_error = None;
+        view.data_message = None;
+        cx.notify();
+    });
     cx.spawn(async move |cx| {
         let data_root = service.data_root().to_path_buf();
         let mut clipboard_listener_stopped = false;
@@ -1734,7 +2072,12 @@ fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
                 cx.update(|cx| data_management::refresh_after_import(config_reload, cx));
                 view.update(cx, |view, cx| {
                     view.data_busy = false;
-                    view.data_message = notify_settings_status(SettingsPage::DataManagement, Some(translator.translate("settings.data_management.import_success")), NotificationLevel::Success, cx);
+                    view.data_message = notify_settings_status(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate("settings.data_management.import_success")),
+                        NotificationLevel::Success,
+                        cx,
+                    );
                     view.data_stats_request_id = view.data_stats_request_id.wrapping_add(1);
                     view.data_stats_policy = None;
                     view.data_stats_loading = false;
@@ -1752,7 +2095,12 @@ fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
                 }
                 view.update(cx, |view, cx| {
                     view.data_busy = false;
-                    view.data_message = notify_settings_status(SettingsPage::DataManagement, Some(translator.translate("settings.data_management.cancelled")), NotificationLevel::Info, cx);
+                    view.data_message = notify_settings_status(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate("settings.data_management.cancelled")),
+                        NotificationLevel::Info,
+                        cx,
+                    );
                     cx.notify();
                 })
             }
@@ -1765,7 +2113,11 @@ fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
                 }
                 view.update(cx, |view, cx| {
                     view.data_busy = false;
-                    view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(translator.translate("settings.data_management.import_error")), cx);
+                    view.data_error = notify_settings_error(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate("settings.data_management.import_error")),
+                        cx,
+                    );
                     cx.notify();
                 });
             }
@@ -1778,17 +2130,28 @@ fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
                 }
                 view.update(cx, |view, cx| {
                     view.data_busy = false;
-                    view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(translator.translate("settings.data_management.import_error")), cx);
+                    view.data_error = notify_settings_error(
+                        SettingsPage::DataManagement,
+                        Some(translator.translate("settings.data_management.import_error")),
+                        cx,
+                    );
                     cx.notify();
                 });
             }
         }
-    }).detach();
+    })
+    .detach();
 }
 
 fn format_bytes(bytes: u64) -> String {
-    if bytes < 1024 { return format!("{bytes} B"); }
-    if bytes < 1024 * 1024 { return format!("{:.1} KB", bytes as f64 / 1024.0); }
-    if bytes < 1024 * 1024 * 1024 { return format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)); }
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    if bytes < 1024 * 1024 {
+        return format!("{:.1} KB", bytes as f64 / 1024.0);
+    }
+    if bytes < 1024 * 1024 * 1024 {
+        return format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0));
+    }
     format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
 }

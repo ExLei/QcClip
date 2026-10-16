@@ -18,18 +18,18 @@ use windows::{
         System::{
             Com::{
                 DATADIR_GET, DVASPECT_CONTENT, FORMATETC, IAdviseSink, IDataObject,
-                IDataObject_Impl, IEnumFORMATETC, IEnumFORMATETC_Impl, IEnumSTATDATA,
-                STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+                IDataObject_Impl, IEnumFORMATETC, IEnumFORMATETC_Impl, IEnumSTATDATA, STGMEDIUM,
+                STGMEDIUM_0, TYMED_HGLOBAL,
             },
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
             Ole::{
-                DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize, CF_DIB, CF_DIBV5,
-                CF_HDROP, CF_TEXT, CF_UNICODETEXT, DROPEFFECT, DROPEFFECT_COPY,
+                CF_DIB, CF_DIBV5, CF_HDROP, CF_TEXT, CF_UNICODETEXT, DROPEFFECT, DROPEFFECT_COPY,
+                DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize,
             },
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
         },
     },
-    core::{implement, BOOL, Error, PCWSTR, Ref, Result as WindowsResult},
+    core::{BOOL, Error, PCWSTR, Ref, Result as WindowsResult, implement},
 };
 
 use crate::platform::clipboard::ClipboardPayload;
@@ -37,7 +37,6 @@ use crate::platform::drag_preview::{DragPreviewService, NativeDragPreviewTarget}
 use crate::platform::image_temp_file::{ImageTempFile, create_image_temp_file, hdrop_bytes};
 use crate::platform::input::pointer_snapshot;
 use crate::platform::window::{PhysicalClientBounds, physical_client_bounds};
-
 
 const E_NOTIMPL: windows::core::HRESULT = windows::core::HRESULT(0x8000_4001u32 as i32);
 const E_INVALIDARG: windows::core::HRESULT = windows::core::HRESULT(0x8007_0057u32 as i32);
@@ -116,10 +115,12 @@ impl ExternalDragService {
                 .retain(|retained| retained.expires_at > now);
         });
 
-        let Some(source_window) = cx
-            .try_global::<Self>()
-            .and_then(|service| service.session.as_ref().map(|session| session.source_window))
-        else {
+        let Some(source_window) = cx.try_global::<Self>().and_then(|service| {
+            service
+                .session
+                .as_ref()
+                .map(|session| session.source_window)
+        }) else {
             return None;
         };
 
@@ -328,7 +329,6 @@ fn build_formats(
 
     Ok(formats)
 }
-
 
 fn format_id(payload: &ClipboardPayload) -> Result<u16, String> {
     let id = match payload.format_key.as_str() {
@@ -625,10 +625,7 @@ impl IEnumFORMATETC_Impl for FormatEnumerator_Impl {
     }
 
     fn Clone(&self) -> WindowsResult<IEnumFORMATETC> {
-        let index = self
-            .index
-            .lock()
-            .map_err(|_| Error::new(E_FAIL, ""))?;
+        let index = self.index.lock().map_err(|_| Error::new(E_FAIL, ""))?;
         Ok(FormatEnumerator {
             formats: self.formats.clone(),
             index: Mutex::new(*index),
@@ -685,8 +682,7 @@ mod tests {
             native_format_id: Some(13),
             bytes: vec![0, 0],
         };
-        let formats =
-            build_formats(&[payload.clone(), payload], None).expect("格式构造应成功");
+        let formats = build_formats(&[payload.clone(), payload], None).expect("格式构造应成功");
         assert_eq!(formats.len(), 1);
     }
 }

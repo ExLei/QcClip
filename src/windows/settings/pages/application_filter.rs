@@ -1,6 +1,6 @@
 use crate::ui::scale::ui_rem;
 
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, FontWeight, RenderImage, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -91,14 +91,23 @@ impl SettingsWindowView {
                     .small()
                     .label(translator.translate("settings.application_filter.add"))
                     .on_click(move |_, window, cx| {
-                        let query = view.read(cx).application_filter_input.read(cx).value().to_string();
-                        let result = application_filter::resolve_manual_application(&query).and_then(
-                            |application| add_application(application, cx),
-                        );
+                        let query = view
+                            .read(cx)
+                            .application_filter_input
+                            .read(cx)
+                            .value()
+                            .to_string();
+                        let result = application_filter::resolve_manual_application(&query)
+                            .and_then(|application| add_application(application, cx));
                         view.update(cx, |view, cx| {
-                            view.application_filter_error = notify_settings_error(SettingsPage::ApplicationFilter, result
-                                .err()
-                                .map(|_| i18n::translator(cx).translate("settings.application_filter.manual_error")), cx);
+                            view.application_filter_error = notify_settings_error(
+                                SettingsPage::ApplicationFilter,
+                                result.err().map(|_| {
+                                    i18n::translator(cx)
+                                        .translate("settings.application_filter.manual_error")
+                                }),
+                                cx,
+                            );
                             if view.application_filter_error.is_none() {
                                 view.application_filter_input.update(cx, |input, cx| {
                                     input.set_value("", window, cx);
@@ -125,9 +134,9 @@ impl SettingsWindowView {
             .application_filter_apps
             .iter()
             .filter(|application| {
-                !filtered
-                    .iter()
-                    .any(|filter| application_filter::same_application(&application.application, filter))
+                !filtered.iter().any(|filter| {
+                    application_filter::same_application(&application.application, filter)
+                })
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -136,7 +145,9 @@ impl SettingsWindowView {
             .map(|filter| {
                 self.application_filter_apps
                     .iter()
-                    .find(|application| application_filter::same_application(&application.application, filter))
+                    .find(|application| {
+                        application_filter::same_application(&application.application, filter)
+                    })
                     .cloned()
                     .unwrap_or_else(|| ApplicationInfo::from_application(filter.clone()))
             })
@@ -157,65 +168,74 @@ impl SettingsWindowView {
                 translator.translate("settings.application_filter.description"),
                 div(),
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.application_filter.enabled"),
-                Some(translator.translate("settings.application_filter.enabled_description").into()),
-                enabled,
-            ))
-            .child(self.highlight_element(
-                theme,
-                translator.translate("settings.application_filter.scope"),
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .px_4()
-                    .py_3()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.foreground)
-                            .child(translator.translate("settings.application_filter.scope")),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(translator.translate(
-                                "settings.application_filter.scope_description",
-                            )),
-                    )
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .flex_wrap()
-                            .items_center()
-                            .gap_4()
-                            .children([
-                                self.highlight_element(
-                                    theme,
-                                    translator.translate("settings.application_filter.disable_clipboard"),
-                                    disable_clipboard,
-                                ),
-                                self.highlight_element(
-                                    theme,
-                                    translator.translate("settings.application_filter.disable_hotkeys"),
-                                    disable_hotkeys,
-                                ),
-                                self.highlight_element(
-                                    theme,
-                                    translator.translate("settings.application_filter.disable_edge_hide"),
-                                    disable_edge_hide,
-                                ),
-                            ]),
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.application_filter.enabled"),
+                    Some(
+                        translator
+                            .translate("settings.application_filter.enabled_description")
+                            .into(),
                     ),
-            ))
+                    enabled,
+                ),
+            )
+            .child(
+                self.highlight_element(
+                    theme,
+                    translator.translate("settings.application_filter.scope"),
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_shrink_0()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .px_4()
+                        .py_3()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.foreground)
+                                .child(translator.translate("settings.application_filter.scope")),
+                        )
+                        .child(div().text_xs().text_color(theme.muted_foreground).child(
+                            translator.translate("settings.application_filter.scope_description"),
+                        ))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_4()
+                                .children([
+                                    self.highlight_element(
+                                        theme,
+                                        translator.translate(
+                                            "settings.application_filter.disable_clipboard",
+                                        ),
+                                        disable_clipboard,
+                                    ),
+                                    self.highlight_element(
+                                        theme,
+                                        translator.translate(
+                                            "settings.application_filter.disable_hotkeys",
+                                        ),
+                                        disable_hotkeys,
+                                    ),
+                                    self.highlight_element(
+                                        theme,
+                                        translator.translate(
+                                            "settings.application_filter.disable_edge_hide",
+                                        ),
+                                        disable_edge_hide,
+                                    ),
+                                ]),
+                        ),
+                ),
+            )
             .child(self.highlight_element(
                 theme,
                 translator.translate("settings.application_filter.manual"),
@@ -299,7 +319,8 @@ fn persist_application_filter(
             i18n::translator(cx).translate("settings.application_filter.save_error")
         });
     view.update(cx, |view, cx| {
-        view.application_filter_error = notify_settings_error(SettingsPage::ApplicationFilter, error, cx);
+        view.application_filter_error =
+            notify_settings_error(SettingsPage::ApplicationFilter, error, cx);
         cx.notify();
     });
 }
@@ -345,9 +366,14 @@ fn application_list_panel(
             .h(ui_rem(150.0))
             .gap_1()
             .overflow_y_scrollbar()
-            .children(applications.into_iter().enumerate().map(|(index, application)| {
-                application_row(index, application, view.clone(), remove, theme)
-            }))
+            .children(
+                applications
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, application)| {
+                        application_row(index, application, view.clone(), remove, theme)
+                    }),
+            )
             .into_any_element()
     };
     v_flex()
@@ -361,17 +387,14 @@ fn application_list_panel(
         .bg(theme.background)
         .p_3()
         .child({
-            let mut header = h_flex()
-                .w_full()
-                .items_center()
-                .child(
-                    div()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.foreground)
-                        .child(title)
-                );
+            let mut header = h_flex().w_full().items_center().child(
+                div()
+                    .flex_1()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.foreground)
+                    .child(title),
+            );
             if let Some(action) = header_action {
                 header = header.child(action);
             }

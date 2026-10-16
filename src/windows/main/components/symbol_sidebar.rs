@@ -65,11 +65,7 @@ pub(crate) fn active_indicator_at(
         .items_center()
         .justify_center()
         .child({
-            let bar = div()
-                .size_full()
-                .rounded_lg()
-                .bg(color)
-                .shadow_sm();
+            let bar = div().size_full().rounded_lg().bg(color).shadow_sm();
             if animations_enabled {
                 bar.with_animation(
                     (id.clone(), format!("stretch-{index}")),
@@ -87,7 +83,9 @@ pub(crate) fn active_indicator_at(
         });
     if animations_enabled {
         indicator
-            .with_spring((id, "top"), spring(top), |this, value| this.top(ui_rem(value)))
+            .with_spring((id, "top"), spring(top), |this, value| {
+                this.top(ui_rem(value))
+            })
             .into_any_element()
     } else {
         indicator.into_any_element()
@@ -101,10 +99,8 @@ pub(crate) fn render(
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     let theme = cx.theme().colors;
-    let animations_enabled = config_runtime::animation_enabled(
-        cx,
-        crate::config::AnimationKind::SingleSelectIndicator,
-    );
+    let animations_enabled =
+        config_runtime::animation_enabled(cx, crate::config::AnimationKind::SingleSelectIndicator);
     let active_index = items.iter().position(|item| item.id == active_id);
     let content = div()
         .w(ui_rem(TAB_BAR_HEIGHT))
@@ -128,44 +124,38 @@ pub(crate) fn render(
         });
 
     let content = content.children(items.iter().map(|item| {
-            let active = item.id == active_id;
-            let color = if active {
-                theme.primary_foreground
-            } else {
-                theme.foreground
-            };
-            let item_id = item.id;
-            let label = item.label.clone();
-            let on_select = on_select.clone();
-            let group = format!("symbol-sidebar-{}", item.id);
-            let mut button = div()
-                .id(("symbol-sidebar", item_id))
-                .group(group.clone())
-                .size(ui_rem(TAB_BUTTON_HEIGHT))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_lg()
-                .cursor_pointer()
-                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-                .child(hover_icon(
-                    group,
-                    item.icon,
-                    16.0,
-                    color,
-                ))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    on_select(this, item_id, window, cx);
-                }));
-            if !active {
-                button = button.hover(|this| this.bg(theme.secondary_hover));
-            }
-            button
-        }));
+        let active = item.id == active_id;
+        let color = if active {
+            theme.primary_foreground
+        } else {
+            theme.foreground
+        };
+        let item_id = item.id;
+        let label = item.label.clone();
+        let on_select = on_select.clone();
+        let group = format!("symbol-sidebar-{}", item.id);
+        let mut button = div()
+            .id(("symbol-sidebar", item_id))
+            .group(group.clone())
+            .size(ui_rem(TAB_BUTTON_HEIGHT))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_lg()
+            .cursor_pointer()
+            .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+            .child(hover_icon(group, item.icon, 16.0, color))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                on_select(this, item_id, window, cx);
+            }));
+        if !active {
+            button = button.hover(|this| this.bg(theme.secondary_hover));
+        }
+        button
+    }));
 
-    let content = content
-        .into_any_element();
+    let content = content.into_any_element();
 
     div()
         .w(ui_rem(TAB_BAR_HEIGHT))

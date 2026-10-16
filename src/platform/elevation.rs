@@ -6,9 +6,7 @@ mod windows_impl {
 
     use windows::Win32::{
         Foundation::{CloseHandle, HANDLE},
-        Security::{
-            GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
-        },
+        Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
         System::Threading::{GetCurrentProcess, OpenProcessToken},
         UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
     };
@@ -17,8 +15,7 @@ mod windows_impl {
     pub(crate) fn is_elevated() -> io::Result<bool> {
         let mut token = HANDLE::default();
         unsafe {
-            OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
-                .map_err(to_io_error)?;
+            OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).map_err(to_io_error)?;
         }
 
         let mut elevation = TOKEN_ELEVATION::default();

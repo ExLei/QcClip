@@ -1,8 +1,8 @@
 use std::{
     collections::HashSet,
+    ffi::OsStr,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
-    ffi::OsStr,
     path::{Component, Path, PathBuf},
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -20,7 +20,7 @@ use crate::{
     config::HistoryConfig,
     services::{
         database::{Database, HistoryCleanupReport, HistoryRepository},
-        storage::{RawBlobStore, RawBlobError},
+        storage::{RawBlobError, RawBlobStore},
     },
 };
 
@@ -92,7 +92,10 @@ pub enum DataManagementError {
         rollback: io::Error,
     },
     #[error("重置失败（{operation}），且恢复原数据失败（{rollback}）")]
-    ResetRollback { operation: String, rollback: io::Error },
+    ResetRollback {
+        operation: String,
+        rollback: io::Error,
+    },
     #[error("数据正在导入，请稍后重试")]
     DataSwitching,
     #[error("当前程序无法完整处理较新数据库的资源，切换数据目录和导出请使用新版程序")]
@@ -179,8 +182,7 @@ impl DataManagementService {
             in_scope_history_count: u64::try_from(retention_counts.in_scope_items).unwrap_or(0),
             retention_limit_used_count: u64::try_from(retention_counts.in_scope_unpinned_items)
                 .unwrap_or(0),
-            over_limit_history_count: u64::try_from(retention_counts.over_limit_items)
-                .unwrap_or(0),
+            over_limit_history_count: u64::try_from(retention_counts.over_limit_items).unwrap_or(0),
             pending_cleanup_count: u64::try_from(retention_counts.pending_cleanup_items)
                 .unwrap_or(0),
             favorite_count: {
@@ -197,11 +199,8 @@ impl DataManagementService {
             },
             tag_count: {
                 let connection = self.database.connect()?;
-                let count: i64 = connection.query_row(
-                    "SELECT COUNT(*) FROM tags",
-                    [],
-                    |row| row.get(0),
-                )?;
+                let count: i64 =
+                    connection.query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))?;
                 u64::try_from(count).unwrap_or(0)
             },
             content_type_counts: {
@@ -343,7 +342,9 @@ impl DataManagementService {
             return Err(error.into());
         }
         if let Err(error) = write_location(&self.location_path, &target) {
-            if let Err(rollback_error) = crate::logging::switch_directory(&self.data_root.join("log")) {
+            if let Err(rollback_error) =
+                crate::logging::switch_directory(&self.data_root.join("log"))
+            {
                 tracing::error!(%rollback_error, "恢复原日志目录失败");
             }
             drop(switch_guard);
@@ -387,7 +388,9 @@ impl DataManagementService {
     ) -> Result<PreparedDataLocation, DataManagementError> {
         let target = self.default_data_root.clone();
         fs::create_dir_all(&target)?;
-        let staging = tempfile::Builder::new().prefix(".reset-staging-").tempdir_in(&target)?;
+        let staging = tempfile::Builder::new()
+            .prefix(".reset-staging-")
+            .tempdir_in(&target)?;
         Database::open(staging.path().join("qcclip.sqlite3"))?;
         let switch_guard = super::data_runtime::begin_switch();
         let roots = if paths_equal(&self.data_root, &target) {
@@ -406,58 +409,75 @@ impl DataManagementService {
         }
         let mut backups = Vec::new();
         let mut moved_current = Vec::new();
-        let new_paths = MANAGED_ROOT_FILES.iter().copied()
+        let new_paths = MANAGED_ROOT_FILES
+            .iter()
+            .copied()
             .chain(DATA_LOCATION_DIRECTORIES.iter().copied())
-            .map(|name| target.join(name)).collect::<Vec<_>>();
+            .map(|name| target.join(name))
+            .collect::<Vec<_>>();
         let mut installed = false;
-        let (database, blob_store) = crate::logging::with_directory_switch(&target.join("log"), || {
-            let result = (|| -> Result<(Database, RawBlobStore), DataManagementError> {
-                // 先将旧数据移到同磁盘暂存目录，任一步失败时可恢复原文件。
-                for root in &roots {
-                    let entries = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
-                    let backup = tempfile::Builder::new().prefix(".reset-rollback-").tempdir_in(root)?;
-                    let backup_path = backup.path().to_path_buf();
-                    backups.push(backup);
-                    for entry in entries {
-                        if entry.path() == staging.path() { continue; }
-                        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-                        if is_location_managed_root_entry(&name)
-                            || is_sqlite_shared_memory_artifact(&entry.file_name())
-                        {
-                            let old = backup_path.join(entry.file_name());
-                            rename_with_retry(&entry.path(), &old)?;
-                            moved_current.push((entry.path(), old));
+        let (database, blob_store) =
+            crate::logging::with_directory_switch(&target.join("log"), || {
+                let result = (|| -> Result<(Database, RawBlobStore), DataManagementError> {
+                    // 先将旧数据移到同磁盘暂存目录，任一步失败时可恢复原文件。
+                    for root in &roots {
+                        let entries = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
+                        let backup = tempfile::Builder::new()
+                            .prefix(".reset-rollback-")
+                            .tempdir_in(root)?;
+                        let backup_path = backup.path().to_path_buf();
+                        backups.push(backup);
+                        for entry in entries {
+                            if entry.path() == staging.path() {
+                                continue;
+                            }
+                            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                            if is_location_managed_root_entry(&name)
+                                || is_sqlite_shared_memory_artifact(&entry.file_name())
+                            {
+                                let old = backup_path.join(entry.file_name());
+                                rename_with_retry(&entry.path(), &old)?;
+                                moved_current.push((entry.path(), old));
+                            }
                         }
                     }
-                }
-                installed = true;
-                rename_with_retry(&staging.path().join("qcclip.sqlite3"), &target.join("qcclip.sqlite3"))?;
-                let database = Database::open(target.join("qcclip.sqlite3"))?;
-                let blob_store = RawBlobStore::new(&target)?;
-                fs::create_dir_all(target.join("log"))?;
-                if !self.portable {
-                    match fs::remove_file(&self.location_path) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(error.into()),
+                    installed = true;
+                    rename_with_retry(
+                        &staging.path().join("qcclip.sqlite3"),
+                        &target.join("qcclip.sqlite3"),
+                    )?;
+                    let database = Database::open(target.join("qcclip.sqlite3"))?;
+                    let blob_store = RawBlobStore::new(&target)?;
+                    fs::create_dir_all(target.join("log"))?;
+                    if !self.portable {
+                        match fs::remove_file(&self.location_path) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error.into()),
+                        }
+                    }
+                    Ok((database, blob_store))
+                })();
+                match result {
+                    Ok(sources) => Ok(sources),
+                    Err(error) => {
+                        let rollback = rollback_import(
+                            if installed { &new_paths } else { &[] },
+                            &moved_current,
+                        );
+                        if let Err(rollback) = rollback {
+                            for backup in backups.drain(..) {
+                                let _ = backup.keep();
+                            }
+                            return Err(DataManagementError::ResetRollback {
+                                operation: error.to_string(),
+                                rollback,
+                            });
+                        }
+                        Err(error)
                     }
                 }
-                Ok((database, blob_store))
-            })();
-            match result {
-                Ok(sources) => Ok(sources),
-                Err(error) => {
-                    let rollback = rollback_import(if installed { &new_paths } else { &[] }, &moved_current);
-                    if let Err(rollback) = rollback {
-                        for backup in backups.drain(..) { let _ = backup.keep(); }
-                        return Err(DataManagementError::ResetRollback {
-                            operation: error.to_string(), rollback,
-                        });
-                    }
-                    Err(error)
-                }
-            }
-        })?;
+            })?;
         let mut cleanup_error = None;
         for backup in backups {
             if let Err(error) = backup.close() {
@@ -466,7 +486,11 @@ impl DataManagementService {
             }
         }
         Ok(PreparedDataLocation {
-            database, blob_store, data_root: target, cleanup_error, switch_guard,
+            database,
+            blob_store,
+            data_root: target,
+            cleanup_error,
+            switch_guard,
         })
     }
 
@@ -555,7 +579,11 @@ impl DataManagementService {
             remove_sqlite_shared_memory_artifacts(&staging)?;
             fs::write(
                 &marker_temp,
-                staging.file_name().unwrap_or_default().to_string_lossy().as_bytes(),
+                staging
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .as_bytes(),
             )?;
             fs::rename(&marker_temp, &marker)?;
             Ok::<_, DataManagementError>(())
@@ -633,19 +661,15 @@ fn content_type_counts(
              ), 0)
          FROM relation_types"
     );
-    let counts: [i64; 5] = connection.query_row(
-        &sql,
-        [],
-        |row| {
-            Ok([
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ])
-        },
-    )?;
+    let counts: [i64; 5] = connection.query_row(&sql, [], |row| {
+        Ok([
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ])
+    })?;
     Ok(counts.map(|count| u64::try_from(count).unwrap_or(0)))
 }
 
@@ -684,7 +708,9 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
         .map_err(|_| DataManagementError::InvalidDataFile("导入暂存标记无效".to_owned()))?;
     let staging = pending_root.join(staging_id.to_string());
     if !staging.is_dir() {
-        return Err(DataManagementError::InvalidDataFile("导入暂存目录不存在".to_owned()));
+        return Err(DataManagementError::InvalidDataFile(
+            "导入暂存目录不存在".to_owned(),
+        ));
     }
     let mut staged_entries = Vec::new();
     for entry in fs::read_dir(&staging)? {
@@ -709,7 +735,10 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
     {
         // 数据库主文件是导入必需项；即使归档没有 WAL/SHM，也要清理当前侧文件，
         // 避免它们与新的数据库主文件混用。其他文件缺失时保留当前内容。
-        let database_sidecar = matches!(name, "qcclip.sqlite3" | "qcclip.sqlite3-wal" | "qcclip.sqlite3-shm");
+        let database_sidecar = matches!(
+            name,
+            "qcclip.sqlite3" | "qcclip.sqlite3-wal" | "qcclip.sqlite3-shm"
+        );
         if !database_sidecar && !has_staged_entry(name) {
             continue;
         }
@@ -799,9 +828,7 @@ fn copy_import_entry(source: &Path, target: &Path) -> Result<(), io::Error> {
         .file_type();
     if file_type.is_dir() {
         fs::create_dir(target).map_err(|error| io_with_path(error, target))?;
-        for entry in fs::read_dir(source)
-            .map_err(|error| io_with_path(error, source))?
-        {
+        for entry in fs::read_dir(source).map_err(|error| io_with_path(error, source))? {
             let entry = entry.map_err(|error| io_with_path(error, source))?;
             copy_import_entry(&entry.path(), &target.join(entry.file_name()))?;
         }
@@ -1175,9 +1202,9 @@ fn path_is_within_root(path: &Path, root: &Path) -> Result<bool, io::Error> {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let file_name = path.file_name().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "导出路径缺少文件名")
-        })?;
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "导出路径缺少文件名"))?;
         dunce::canonicalize(parent)?.join(file_name)
     };
     Ok(canonical_path == canonical_root || canonical_path.starts_with(&canonical_root))
@@ -1212,7 +1239,10 @@ fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, DataManagementError
     if relative.is_empty()
         || path.is_absolute()
         || path.components().any(|component| {
-            matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
         })
     {
         return Err(DataManagementError::InvalidDataFile(format!(
@@ -1227,29 +1257,33 @@ fn extract_archive(path: &Path, staging: &Path) -> Result<(), DataManagementErro
     let mut magic = vec![0; MAGIC.len()];
     file.read_exact(&mut magic)?;
     if magic != MAGIC {
-        return Err(DataManagementError::InvalidDataFile("文件头不匹配".to_owned()));
+        return Err(DataManagementError::InvalidDataFile(
+            "文件头不匹配".to_owned(),
+        ));
     }
     let count = read_u32(&mut file)?;
     if count > MAX_ENTRIES {
-        return Err(DataManagementError::InvalidDataFile("数据文件条目数量过多".to_owned()));
+        return Err(DataManagementError::InvalidDataFile(
+            "数据文件条目数量过多".to_owned(),
+        ));
     }
     let mut paths = HashSet::with_capacity(count as usize);
     let mut has_database = false;
     for _ in 0..count {
         let path_length = read_u32(&mut file)?;
         let byte_length = read_u64(&mut file)?;
-        if path_length == 0
-            || path_length > MAX_PATH_LENGTH
-            || byte_length > MAX_ENTRY_BYTES
-        {
-            return Err(DataManagementError::InvalidDataFile("数据文件条目大小无效".to_owned()));
+        if path_length == 0 || path_length > MAX_PATH_LENGTH || byte_length > MAX_ENTRY_BYTES {
+            return Err(DataManagementError::InvalidDataFile(
+                "数据文件条目大小无效".to_owned(),
+            ));
         }
         let mut expected_hash = [0; 32];
         file.read_exact(&mut expected_hash)?;
         let mut path_bytes = vec![0; path_length as usize];
         file.read_exact(&mut path_bytes)?;
-        let relative = String::from_utf8(path_bytes)
-            .map_err(|_| DataManagementError::InvalidDataFile("数据文件路径不是 UTF-8".to_owned()))?;
+        let relative = String::from_utf8(path_bytes).map_err(|_| {
+            DataManagementError::InvalidDataFile("数据文件路径不是 UTF-8".to_owned())
+        })?;
         safe_join(Path::new("."), &relative)?;
         let mut components = Path::new(&relative).components();
         let first = components.next();
@@ -1297,7 +1331,9 @@ fn extract_archive(path: &Path, staging: &Path) -> Result<(), DataManagementErro
     }
     let mut extra = [0; 1];
     if file.read(&mut extra)? != 0 {
-        return Err(DataManagementError::InvalidDataFile("数据文件包含未解析的数据".to_owned()));
+        return Err(DataManagementError::InvalidDataFile(
+            "数据文件包含未解析的数据".to_owned(),
+        ));
     }
     if !has_database {
         return Err(DataManagementError::InvalidDataFile(
@@ -1364,31 +1400,48 @@ mod tests {
         service.default_data_root = default_root.clone();
         service.location_path = directory.path().join("location.json");
         let format = crate::domain::capture::RawFormat::captured(
-            "mime", "text/plain", "文本", crate::domain::capture::FormatKind::Text,
-            b"old-history".to_vec(), 0, true,
+            "mime",
+            "text/plain",
+            "文本",
+            crate::domain::capture::FormatKind::Text,
+            b"old-history".to_vec(),
+            0,
+            true,
         );
         let history_id = crate::services::capture::CaptureService::new(
-            service.database.clone(), service.blob_store.clone(),
-        ).store_captured_clipboard(&crate::domain::capture::CapturedClipboard {
+            service.database.clone(),
+            service.blob_store.clone(),
+        )
+        .store_captured_clipboard(&crate::domain::capture::CapturedClipboard {
             formats: vec![format],
             primary_format_identity: Some(("mime".to_owned(), "text/plain".to_owned())),
             preview_candidate: Some("old-history".to_owned()),
             source_application: crate::domain::capture::SourceApplication::default(),
-        }).unwrap();
+        })
+        .unwrap();
         let connection = service.database.connect().unwrap();
-        let item_id: i64 = connection.query_row(
-            "SELECT item_id FROM clipboard_history WHERE id = ?1", [history_id], |row| row.get(0),
-        ).unwrap();
+        let item_id: i64 = connection
+            .query_row(
+                "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                [history_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         drop(connection);
         crate::services::database::FavoriteRepository::new(service.database.clone())
-            .add_to_favorites(item_id).unwrap();
+            .add_to_favorites(item_id)
+            .unwrap();
         write_location(&service.location_path, &root).unwrap();
         for data_root in [&root, &default_root] {
             fs::create_dir_all(data_root).unwrap();
             for name in ["config.json", "state.json"] {
                 fs::write(data_root.join(name), b"old-settings").unwrap();
             }
-            for name in DATA_LOCATION_DIRECTORIES.iter().copied().chain([IMPORT_DIRECTORY]) {
+            for name in DATA_LOCATION_DIRECTORIES
+                .iter()
+                .copied()
+                .chain([IMPORT_DIRECTORY])
+            {
                 fs::create_dir_all(data_root.join(name)).unwrap();
                 fs::write(data_root.join(name).join("old-data"), b"old-data").unwrap();
             }
@@ -1402,15 +1455,32 @@ mod tests {
         for data_root in [&root, &default_root] {
             assert!(!data_root.join("config.json").exists());
             assert!(!data_root.join("state.json").exists());
-            for name in DATA_LOCATION_DIRECTORIES.iter().copied().chain([IMPORT_DIRECTORY]) {
+            for name in DATA_LOCATION_DIRECTORIES
+                .iter()
+                .copied()
+                .chain([IMPORT_DIRECTORY])
+            {
                 assert!(!data_root.join(name).join("old-data").exists());
             }
-            assert_eq!(fs::read(data_root.join("user-file.txt")).unwrap(), b"user-data");
+            assert_eq!(
+                fs::read(data_root.join("user-file.txt")).unwrap(),
+                b"user-data"
+            );
         }
         assert!(!root.join("qcclip.sqlite3").exists());
         let connection = prepared.database.connect().unwrap();
-        for table in ["clipboard_history", "clipboard_items", "favorites", "tags", "binary_blobs"] {
-            let count: i64 = connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0)).unwrap();
+        for table in [
+            "clipboard_history",
+            "clipboard_items",
+            "favorites",
+            "tags",
+            "binary_blobs",
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
             assert_eq!(count, 0);
         }
     }
@@ -1426,7 +1496,10 @@ mod tests {
         fs::write(root.join("data").join("old-data"), b"old-data").unwrap();
         assert!(service.prepare_application_reset().is_err());
         assert_eq!(fs::read(root.join("config.json")).unwrap(), b"old-settings");
-        assert_eq!(fs::read(root.join("data").join("old-data")).unwrap(), b"old-data");
+        assert_eq!(
+            fs::read(root.join("data").join("old-data")).unwrap(),
+            b"old-data"
+        );
         assert!(service.database.connect().is_ok());
     }
 

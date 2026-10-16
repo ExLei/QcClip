@@ -120,7 +120,10 @@ pub struct DropdownModel {
 
 impl DropdownModel {
     pub fn new(items: Vec<DropdownItem>) -> Self {
-        Self { items, font_family: None }
+        Self {
+            items,
+            font_family: None,
+        }
     }
 
     pub(crate) fn font_family(mut self, family: impl Into<SharedString>) -> Self {
@@ -133,7 +136,9 @@ impl DropdownModel {
     }
 
     pub(crate) fn selected_index(&self) -> Option<usize> {
-        self.items.iter().position(|item| item.selected && !item.separator)
+        self.items
+            .iter()
+            .position(|item| item.selected && !item.separator)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -327,7 +332,8 @@ mod tests {
     fn dropdown_scrolls_to_first_selected_option_even_if_disabled() {
         let menu = DropdownModel::new(vec![
             DropdownItem::option(DropdownItemId::new("first"), "当前选项")
-                .selected(true).disabled(),
+                .selected(true)
+                .disabled(),
             DropdownItem::separator(),
             DropdownItem::option(DropdownItemId::new("second"), "另一组选项").selected(true),
         ]);

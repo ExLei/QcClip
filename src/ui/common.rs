@@ -11,11 +11,7 @@ use gpui_component::{
 
 use crate::ui::{hover_icon, hover_icon_path};
 
-pub fn window_title_bar(
-    title: impl Into<SharedString>,
-    window: &mut Window,
-    cx: &mut App,
-) -> Div {
+pub fn window_title_bar(title: impl Into<SharedString>, window: &mut Window, cx: &mut App) -> Div {
     let theme = cx.theme().colors;
     h_flex()
         .w_full()
@@ -36,12 +32,21 @@ pub fn window_title_bar(
                 .window_control_area(WindowControlArea::Drag)
                 .on_double_click(|_, window, _| window.zoom_window())
                 .child(
-                    div().flex_shrink_0().size(ui_rem(24.0))
-                        .flex().items_center().justify_center()
+                    div()
+                        .flex_shrink_0()
+                        .size(ui_rem(24.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .child(img("assets/icon64.png").size(ui_rem(20.0))),
                 )
-                .child(div().min_w_0().truncate().font_weight(FontWeight::SEMIBOLD)
-                    .child(title.into())),
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(title.into()),
+                ),
         )
         .child(
             div()
@@ -66,19 +71,31 @@ fn window_controls(window: &mut Window, cx: &mut App) -> AnyElement {
         .h_full()
         .flex_shrink_0()
         .child(window_control_button(
-            "window-minimize", "assets/icons/window-minimize.svg",
-            WindowControlArea::Min, false,
-            |window, _| window.minimize_window(), window, cx,
+            "window-minimize",
+            "assets/icons/window-minimize.svg",
+            WindowControlArea::Min,
+            false,
+            |window, _| window.minimize_window(),
+            window,
+            cx,
         ))
         .child(window_control_button(
-            "window-maximize", maximize_icon,
-            WindowControlArea::Max, false,
-            |window, _| window.zoom_window(), window, cx,
+            "window-maximize",
+            maximize_icon,
+            WindowControlArea::Max,
+            false,
+            |window, _| window.zoom_window(),
+            window,
+            cx,
         ))
         .child(window_control_button(
-            "window-close", "assets/icons/window-close.svg",
-            WindowControlArea::Close, true,
-            |window, _| window.remove_window(), window, cx,
+            "window-close",
+            "assets/icons/window-close.svg",
+            WindowControlArea::Close,
+            true,
+            |window, _| window.remove_window(),
+            window,
+            cx,
         ))
         .into_any_element()
 }
@@ -98,10 +115,18 @@ fn window_control_button(
     let (hover_bg, hover_fg, active_bg) = if is_danger {
         (theme.danger, theme.danger_foreground, theme.danger_active)
     } else {
-        (theme.secondary_hover, theme.foreground, theme.secondary_active)
+        (
+            theme.secondary_hover,
+            theme.foreground,
+            theme.secondary_active,
+        )
     };
     let hover_state = window.use_keyed_state(id.clone(), cx, |_, _| false);
-    let icon_color = if *hover_state.read(cx) { hover_fg } else { theme.foreground };
+    let icon_color = if *hover_state.read(cx) {
+        hover_fg
+    } else {
+        theme.foreground
+    };
     let hover_state_for_listener = hover_state.clone();
 
     div()
@@ -132,7 +157,11 @@ fn window_control_button(
 }
 
 pub fn divider(theme: ThemeColor) -> impl IntoElement {
-    div().flex_none().w(px(0.5)).h(ui_rem(24.0)).bg(theme.border)
+    div()
+        .flex_none()
+        .w(px(0.5))
+        .h(ui_rem(24.0))
+        .bg(theme.border)
 }
 
 pub fn titlebar_button(
@@ -166,12 +195,7 @@ pub fn titlebar_button(
         })
         .aria_label(tooltip.clone())
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-        .child(hover_icon(
-            group,
-            name,
-            16.0,
-            color,
-        ));
+        .child(hover_icon(group, name, 16.0, color));
     if active {
         button = button.bg(theme.primary).shadow_sm();
     }

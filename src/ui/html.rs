@@ -128,9 +128,7 @@ fn parsed_html(source: &str) -> Rc<ParsedHtml> {
     PARSED_DOM_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(index) = cache.iter().position(|parsed| parsed.source == source) {
-            let parsed = cache
-                .remove(index)
-                .expect("HTML DOM 缓存索引应该有效");
+            let parsed = cache.remove(index).expect("HTML DOM 缓存索引应该有效");
             cache.push_back(parsed.clone());
             return parsed.clone();
         }

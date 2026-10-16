@@ -46,8 +46,8 @@ impl ImageLibraryService {
     }
 
     pub(crate) fn load_groups(&self) -> Result<Vec<ImageLibraryGroup>, String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         fs::create_dir_all(self.icon_directory())
             .map_err(|error| format!("创建图库图标目录失败：{error}"))?;
         let groups_path = self.root.join(GROUPS_FILE_NAME);
@@ -56,8 +56,8 @@ impl ImageLibraryService {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(format!("读取图库组信息失败：{error}")),
         };
-        let mut groups: Vec<ImageLibraryGroup> =
-            serde_json::from_str(&content).map_err(|error| format!("解析图库组信息失败：{error}"))?;
+        let mut groups: Vec<ImageLibraryGroup> = serde_json::from_str(&content)
+            .map_err(|error| format!("解析图库组信息失败：{error}"))?;
         let mut seen_ids = Vec::new();
         let mut seen_names = Vec::new();
         groups.retain(|group| {
@@ -82,8 +82,8 @@ impl ImageLibraryService {
         name: &str,
         icon_path: Option<&Path>,
     ) -> Result<ImageLibraryGroup, String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         let name = name.trim();
         if !valid_group_name(name) {
             return Err("组名称不能为空，且不能包含 /\\:*?\"<>| 等路径字符".to_owned());
@@ -127,8 +127,8 @@ impl ImageLibraryService {
         name: &str,
         icon_path: Option<&Path>,
     ) -> Result<ImageLibraryGroup, String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         let name = name.trim();
         if !valid_group_name(name) {
             return Err("组名称不能为空，且不能包含 /\\:*?\"<>| 等路径字符".to_owned());
@@ -138,9 +138,13 @@ impl ImageLibraryService {
             .iter()
             .position(|candidate| candidate.id == group.id)
             .ok_or_else(|| "图库组不存在".to_owned())?;
-        if groups.iter().enumerate().any(|(candidate_index, candidate)| {
-            candidate_index != index && candidate.name.eq_ignore_ascii_case(name)
-        }) {
+        if groups
+            .iter()
+            .enumerate()
+            .any(|(candidate_index, candidate)| {
+                candidate_index != index && candidate.name.eq_ignore_ascii_case(name)
+            })
+        {
             return Err("已存在同名图库组".to_owned());
         }
 
@@ -193,7 +197,9 @@ impl ImageLibraryService {
                 .ok_or_else(|| "图库组不存在".to_owned())?;
             let current = groups.remove(index);
             let directory = self.group_directory(&current)?;
-            let staging = self.root.join(format!(".deleted-group-{}", uuid::Uuid::new_v4()));
+            let staging = self
+                .root
+                .join(format!(".deleted-group-{}", uuid::Uuid::new_v4()));
             let staged = match fs::symlink_metadata(&directory) {
                 Ok(metadata) => {
                     if !metadata.is_dir() || metadata.file_type().is_symlink() {
@@ -221,13 +227,19 @@ impl ImageLibraryService {
             }
             if staged {
                 if let Err(error) = fs::remove_dir_all(&staging) {
-                    tracing::warn!("图库组已删除，清理图片目录失败（{}）：{error}", staging.display());
+                    tracing::warn!(
+                        "图库组已删除，清理图片目录失败（{}）：{error}",
+                        staging.display()
+                    );
                 }
             }
             if let Some(path) = self.group_icon_path(&current) {
                 if let Err(error) = fs::remove_file(&path) {
                     if error.kind() != std::io::ErrorKind::NotFound {
-                        tracing::warn!("图库组已删除，清理组图标失败（{}）：{error}", path.display());
+                        tracing::warn!(
+                            "图库组已删除，清理组图标失败（{}）：{error}",
+                            path.display()
+                        );
                     }
                 }
             }
@@ -239,11 +251,12 @@ impl ImageLibraryService {
         &self,
         group: &ImageLibraryGroup,
     ) -> Result<Vec<ImageLibraryImage>, String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         let directory = self.group_directory(group)?;
         fs::create_dir_all(&directory).map_err(|error| format!("读取图库组目录失败：{error}"))?;
-        let entries = fs::read_dir(directory).map_err(|error| format!("读取图库图片列表失败：{error}"))?;
+        let entries =
+            fs::read_dir(directory).map_err(|error| format!("读取图库图片列表失败：{error}"))?;
         let mut images = entries
             .filter_map(Result::ok)
             .filter_map(|entry| {
@@ -291,8 +304,8 @@ impl ImageLibraryService {
         source: &Path,
         name: &str,
     ) -> Result<PathBuf, String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         let name = name.trim();
         if name.is_empty() || name == "." || name == ".." {
             return Err("图片名称不能为空".to_owned());
@@ -323,7 +336,8 @@ impl ImageLibraryService {
         if destination.exists() {
             return Err("目标图片名称已存在".to_owned());
         }
-        fs::rename(&source, &destination).map_err(|error| format!("重命名图库图片失败：{error}"))?;
+        fs::rename(&source, &destination)
+            .map_err(|error| format!("重命名图库图片失败：{error}"))?;
         Ok(destination)
     }
 
@@ -333,8 +347,8 @@ impl ImageLibraryService {
         target_group: &ImageLibraryGroup,
         source: &Path,
     ) -> Result<(), String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         if source_group.id == target_group.id {
             return Ok(());
         }
@@ -352,9 +366,13 @@ impl ImageLibraryService {
         fs::rename(&source_path, &target_path).map_err(|error| format!("移动图库图片失败：{error}"))
     }
 
-    pub(crate) fn delete_image(&self, group: &ImageLibraryGroup, source: &Path) -> Result<(), String> {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+    pub(crate) fn delete_image(
+        &self,
+        group: &ImageLibraryGroup,
+        source: &Path,
+    ) -> Result<(), String> {
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         let source_name = source
             .file_name()
             .ok_or_else(|| "图片路径无效".to_owned())?;
@@ -371,15 +389,18 @@ impl ImageLibraryService {
     where
         F: FnMut(usize, usize),
     {
-        let _operation = crate::services::data_runtime::begin_operation()
-            .map_err(|error| error.to_string())?;
+        let _operation =
+            crate::services::data_runtime::begin_operation().map_err(|error| error.to_string())?;
         let directory = self.group_directory(group)?;
         fs::create_dir_all(&directory).map_err(|error| format!("打开图库组目录失败：{error}"))?;
         let mut copied = 0;
         let total = paths.len();
         for (index, source) in paths.iter().enumerate() {
             let completed = index + 1;
-            if let Some(url) = source.to_string_lossy().strip_prefix(REMOTE_IMAGE_PATH_PREFIX) {
+            if let Some(url) = source
+                .to_string_lossy()
+                .strip_prefix(REMOTE_IMAGE_PATH_PREFIX)
+            {
                 let (url, referrer) = url
                     .split_once(REMOTE_IMAGE_REFERRER_SEPARATOR)
                     .map_or((url, None), |(url, referrer)| (url, Some(referrer)));
@@ -469,10 +490,7 @@ impl ImageLibraryService {
         let response = request
             .call()
             .map_err(|error| format!("下载网络图片失败：{error}"))?;
-        let content_type = response
-            .header("Content-Type")
-            .unwrap_or("未知")
-            .to_owned();
+        let content_type = response.header("Content-Type").unwrap_or("未知").to_owned();
         if let Some(length) = response.header("Content-Length")
             && length
                 .parse::<usize>()
@@ -494,24 +512,17 @@ impl ImageLibraryService {
             Ok(format) => format,
             Err(error) => {
                 let is_html = content_type.to_ascii_lowercase().contains("html")
-                    || bytes
-                        .get(..128.min(bytes.len()))
-                        .is_some_and(|prefix| {
-                            let prefix = String::from_utf8_lossy(prefix).to_ascii_lowercase();
-                            prefix.contains("<!doctype html")
-                                || prefix.contains("<html")
-                                || prefix.contains("<head")
-                        });
+                    || bytes.get(..128.min(bytes.len())).is_some_and(|prefix| {
+                        let prefix = String::from_utf8_lossy(prefix).to_ascii_lowercase();
+                        prefix.contains("<!doctype html")
+                            || prefix.contains("<html")
+                            || prefix.contains("<head")
+                    });
                 if depth == 0
                     && is_html
                     && let Some(image_url) = extract_html_image_url(&bytes)
                 {
-                    return self.import_remote_image_with_depth(
-                        directory,
-                        &image_url,
-                        referrer,
-                        1,
-                    );
+                    return self.import_remote_image_with_depth(directory, &image_url, referrer, 1);
                 }
                 return Err(format!(
                     "识别网络图片格式失败：{error}（Content-Type: {content_type}）"
@@ -547,17 +558,14 @@ impl ImageLibraryService {
             .then(|| self.icon_directory().join(format!("{}.png", group.id)))
     }
 
-    fn save_group_icon(
-        &self,
-        group: &ImageLibraryGroup,
-        source: &Path,
-    ) -> Result<(), String> {
+    fn save_group_icon(&self, group: &ImageLibraryGroup, source: &Path) -> Result<(), String> {
         let bytes = self.encode_group_icon(source)?;
         self.save_group_icon_bytes(group, &bytes)
     }
 
     fn encode_group_icon(&self, source: &Path) -> Result<Vec<u8>, String> {
-        let metadata = fs::metadata(source).map_err(|error| format!("读取组图标文件失败：{error}"))?;
+        let metadata =
+            fs::metadata(source).map_err(|error| format!("读取组图标文件失败：{error}"))?;
         if !metadata.is_file() || metadata.len() > MAX_GROUP_ICON_BYTES {
             return Err("组图标文件无效或超过 32 MB".to_owned());
         }
@@ -579,14 +587,10 @@ impl ImageLibraryService {
         Ok(bytes.into_inner())
     }
 
-    fn save_group_icon_bytes(
-        &self,
-        group: &ImageLibraryGroup,
-        bytes: &[u8],
-    ) -> Result<(), String> {
+    fn save_group_icon_bytes(&self, group: &ImageLibraryGroup, bytes: &[u8]) -> Result<(), String> {
         let path = self.icon_directory().join(format!("{}.png", group.id));
-        let mut file = AtomicWriteFile::open(path)
-            .map_err(|error| format!("打开组图标缓存失败：{error}"))?;
+        let mut file =
+            AtomicWriteFile::open(path).map_err(|error| format!("打开组图标缓存失败：{error}"))?;
         file.write_all(bytes)
             .map_err(|error| format!("写入组图标缓存失败：{error}"))?;
         file.commit()
@@ -599,10 +603,12 @@ impl ImageLibraryService {
             .map_err(|error| format!("序列化图库组信息失败：{error}"))?;
         content.push('\n');
         let path = self.root.join(GROUPS_FILE_NAME);
-        let mut file = AtomicWriteFile::open(path).map_err(|error| format!("打开图库组信息文件失败：{error}"))?;
+        let mut file = AtomicWriteFile::open(path)
+            .map_err(|error| format!("打开图库组信息文件失败：{error}"))?;
         file.write_all(content.as_bytes())
             .map_err(|error| format!("写入图库组信息失败：{error}"))?;
-        file.commit().map_err(|error| format!("保存图库组信息失败：{error}"))
+        file.commit()
+            .map_err(|error| format!("保存图库组信息失败：{error}"))
     }
 
     fn group_directory(&self, group: &ImageLibraryGroup) -> Result<PathBuf, String> {
@@ -625,7 +631,11 @@ fn valid_group_name(name: &str) -> bool {
         && !name.ends_with('.')
         && !name.ends_with(' ')
         && !name.chars().any(|character| {
-            character.is_control() || matches!(character, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            character.is_control()
+                || matches!(
+                    character,
+                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+                )
         })
 }
 

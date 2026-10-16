@@ -1,6 +1,6 @@
 use crate::ui::scale::ui_rem;
 
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context};
 
@@ -40,7 +40,8 @@ impl SettingsWindowView {
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
-                    view.sound_error = notify_settings_error(SettingsPage::Sound, error_message, cx);
+                    view.sound_error =
+                        notify_settings_error(SettingsPage::Sound, error_message, cx);
                     cx.notify();
                 });
             });
@@ -197,83 +198,97 @@ impl SettingsWindowView {
                 None,
                 enabled_switch,
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.copy_effect"),
-                Some(
-                    translator
-                        .translate("settings.sound.effect_description")
-                        .into(),
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.copy_effect"),
+                    Some(
+                        translator
+                            .translate("settings.sound.effect_description")
+                            .into(),
+                    ),
+                    h_flex().gap_2().child(copy_selector).child(copy_preview),
                 ),
-                h_flex().gap_2().child(copy_selector).child(copy_preview),
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.copy_volume"),
-                Some(
-                    translator
-                        .translate("settings.sound.volume_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.copy_volume"),
+                    Some(
+                        translator
+                            .translate("settings.sound.volume_description")
+                            .into(),
+                    ),
+                    copy_volume,
                 ),
-                copy_volume,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.paste_effect"),
-                Some(
-                    translator
-                        .translate("settings.sound.effect_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.paste_effect"),
+                    Some(
+                        translator
+                            .translate("settings.sound.effect_description")
+                            .into(),
+                    ),
+                    h_flex().gap_2().child(paste_selector).child(paste_preview),
                 ),
-                h_flex().gap_2().child(paste_selector).child(paste_preview),
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.paste_volume"),
-                Some(
-                    translator
-                        .translate("settings.sound.volume_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.paste_volume"),
+                    Some(
+                        translator
+                            .translate("settings.sound.volume_description")
+                            .into(),
+                    ),
+                    paste_volume,
                 ),
-                paste_volume,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.quick_paste_scroll_effect"),
-                Some(
-                    translator
-                        .translate("settings.sound.quick_paste_scroll_effect_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.quick_paste_scroll_effect"),
+                    Some(
+                        translator
+                            .translate("settings.sound.quick_paste_scroll_effect_description")
+                            .into(),
+                    ),
+                    h_flex()
+                        .gap_2()
+                        .child(quick_paste_scroll_selector)
+                        .child(quick_paste_scroll_preview),
                 ),
-                h_flex()
-                    .gap_2()
-                    .child(quick_paste_scroll_selector)
-                    .child(quick_paste_scroll_preview),
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.quick_paste_scroll_volume"),
-                Some(
-                    translator
-                        .translate("settings.sound.volume_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.quick_paste_scroll_volume"),
+                    Some(
+                        translator
+                            .translate("settings.sound.volume_description")
+                            .into(),
+                    ),
+                    quick_paste_scroll_volume,
                 ),
-                quick_paste_scroll_volume,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.sound.external.title"),
-                Some(
-                    translator
-                        .translate("settings.sound.external.description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.sound.external.title"),
+                    Some(
+                        translator
+                            .translate("settings.sound.external.description")
+                            .into(),
+                    ),
+                    Button::new("settings-sound-open-folder")
+                        .secondary()
+                        .small()
+                        .label(translator.translate("settings.sound.external.open_folder"))
+                        .on_click(|_, _, _| sound::open_sound_directory()),
                 ),
-                Button::new("settings-sound-open-folder")
-                    .secondary()
-                    .small()
-                    .label(translator.translate("settings.sound.external.open_folder"))
-                    .on_click(|_, _, _| sound::open_sound_directory()),
-            ));
+            );
         if let Some(error) = &self.sound_error {
             section = section.child(settings_error_row(theme, error));
         }
@@ -399,13 +414,17 @@ pub(in crate::windows::settings) fn persist_sound_change_in_view<F>(
 {
     let mut sound_config = config_runtime::sound_config(cx);
     update(&mut sound_config);
-    view.sound_error = notify_settings_error(SettingsPage::Sound, match config_runtime::set_sound_config(sound_config, cx) {
-        Ok(_) => None,
-        Err(error) => {
-            tracing::error!("保存{field_name}失败：{error}");
-            Some(save_error)
-        }
-    }, cx);
+    view.sound_error = notify_settings_error(
+        SettingsPage::Sound,
+        match config_runtime::set_sound_config(sound_config, cx) {
+            Ok(_) => None,
+            Err(error) => {
+                tracing::error!("保存{field_name}失败：{error}");
+                Some(save_error)
+            }
+        },
+        cx,
+    );
     cx.notify();
 }
 

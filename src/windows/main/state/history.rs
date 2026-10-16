@@ -15,10 +15,8 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         self.history_repository = HistoryRepository::new(database.clone(), blob_store.clone());
-        self.favorite_repository = FavoriteRepository::with_blob_store(
-            database.clone(),
-            blob_store.clone(),
-        );
+        self.favorite_repository =
+            FavoriteRepository::with_blob_store(database.clone(), blob_store.clone());
         self.tag_repository = TagRepository::new(database.clone());
         self.capture_service = CaptureService::new(database.clone(), blob_store.clone());
         self.custom_text_service = CustomTextService::new(database.clone(), blob_store.clone());
@@ -269,7 +267,8 @@ impl MainWindow {
             } else {
                 history_repository.ordered_snapshot_scoped(&query, &policy)?
             };
-            let initial_ids = snapshot.ids
+            let initial_ids = snapshot
+                .ids
                 .iter()
                 .take(INITIAL_PAGE_SIZE.saturating_add(1))
                 .copied()
@@ -302,18 +301,15 @@ impl MainWindow {
     ) {
         // 滚动可能导致工具栏隐藏，残留拖拽状态需清除。
         self.floating_toolbar_drag = None;
-        if self
-            .list_smooth_scroll
-            .handle_wheel(
-                &self.list_scroll_handle,
-                event,
-                window,
-                crate::config_runtime::animation_enabled(
-                    cx,
-                    crate::config::AnimationKind::SmoothScroll,
-                ),
-            )
-        {
+        if self.list_smooth_scroll.handle_wheel(
+            &self.list_scroll_handle,
+            event,
+            window,
+            crate::config_runtime::animation_enabled(
+                cx,
+                crate::config::AnimationKind::SmoothScroll,
+            ),
+        ) {
             cx.stop_propagation();
             cx.notify();
         }
@@ -325,18 +321,15 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .emoji_smooth_scroll
-            .handle_wheel(
-                &self.emoji_scroll_handle,
-                event,
-                window,
-                crate::config_runtime::animation_enabled(
-                    cx,
-                    crate::config::AnimationKind::SmoothScroll,
-                ),
-            )
-        {
+        if self.emoji_smooth_scroll.handle_wheel(
+            &self.emoji_scroll_handle,
+            event,
+            window,
+            crate::config_runtime::animation_enabled(
+                cx,
+                crate::config::AnimationKind::SmoothScroll,
+            ),
+        ) {
             cx.stop_propagation();
             cx.notify();
         }
@@ -348,18 +341,15 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .symbol_smooth_scroll
-            .handle_wheel(
-                &self.symbol_scroll_handle,
-                event,
-                window,
-                crate::config_runtime::animation_enabled(
-                    cx,
-                    crate::config::AnimationKind::SmoothScroll,
-                ),
-            )
-        {
+        if self.symbol_smooth_scroll.handle_wheel(
+            &self.symbol_scroll_handle,
+            event,
+            window,
+            crate::config_runtime::animation_enabled(
+                cx,
+                crate::config::AnimationKind::SmoothScroll,
+            ),
+        ) {
             cx.stop_propagation();
             cx.notify();
         }
@@ -371,18 +361,15 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .symbol_smooth_scroll
-            .handle_wheel(
-                &self.gallery_scroll_handle,
-                event,
-                window,
-                crate::config_runtime::animation_enabled(
-                    cx,
-                    crate::config::AnimationKind::SmoothScroll,
-                ),
-            )
-        {
+        if self.symbol_smooth_scroll.handle_wheel(
+            &self.gallery_scroll_handle,
+            event,
+            window,
+            crate::config_runtime::animation_enabled(
+                cx,
+                crate::config::AnimationKind::SmoothScroll,
+            ),
+        ) {
             cx.stop_propagation();
             cx.notify();
         }
@@ -411,5 +398,4 @@ impl MainWindow {
                 .advance(&self.symbol_scroll_handle, window);
         }
     }
-
 }

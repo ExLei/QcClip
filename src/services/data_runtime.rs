@@ -105,11 +105,17 @@ pub(crate) fn begin_switch() -> DataSwitchGuard {
 }
 
 pub(crate) fn with_exclusive_operation<T>(operation: impl FnOnce() -> T) -> T {
-    assert!(OPERATION_DEPTH.with(|depth| depth.get() == 0), "独占数据操作不能嵌套执行");
+    assert!(
+        OPERATION_DEPTH.with(|depth| depth.get() == 0),
+        "独占数据操作不能嵌套执行"
+    );
     let _switch = begin_switch();
     // 仅当前线程允许调用现有存储接口；其他线程保持暂停，避免备份和提交之间发生写入。
     OPERATION_DEPTH.with(|depth| depth.set(1));
-    let _owner = DataOperationGuard { runtime: None, _not_send: PhantomData };
+    let _owner = DataOperationGuard {
+        runtime: None,
+        _not_send: PhantomData,
+    };
     operation()
 }
 

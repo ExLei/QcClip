@@ -45,13 +45,17 @@ impl ListHeatmap {
     }
 
     pub(crate) fn update(&mut self, index: usize, count: u64) {
-        let Some(previous) = self.counts.get_mut(index) else { return };
+        let Some(previous) = self.counts.get_mut(index) else {
+            return;
+        };
         if *previous == count {
             return;
         }
         *previous = count;
         if !self.dirty {
-            let slot = self.buckets.partition_point(|bucket| bucket.range.end <= index);
+            let slot = self
+                .buckets
+                .partition_point(|bucket| bucket.range.end <= index);
             if let Some(bucket) = Rc::make_mut(&mut self.buckets).get_mut(slot) {
                 *bucket = HeatBucket::new(&self.counts, bucket.range.clone());
             }
@@ -74,8 +78,12 @@ impl ListHeatmap {
         if !self.dirty {
             let start = from.min(to);
             let end = from.max(to) + 1;
-            let first = self.buckets.partition_point(|bucket| bucket.range.end <= start);
-            let last = self.buckets.partition_point(|bucket| bucket.range.start < end);
+            let first = self
+                .buckets
+                .partition_point(|bucket| bucket.range.end <= start);
+            let last = self
+                .buckets
+                .partition_point(|bucket| bucket.range.start < end);
             for bucket in &mut Rc::make_mut(&mut self.buckets)[first..last] {
                 *bucket = HeatBucket::new(&self.counts, bucket.range.clone());
             }
@@ -99,11 +107,15 @@ impl ListHeatmap {
     pub(crate) fn buckets(&mut self) -> Rc<Vec<HeatBucket>> {
         if self.dirty {
             let count = self.counts.len().min(MAX_HEAT_BUCKETS);
-            self.buckets = Rc::new((0..count).map(|slot| {
-                let start = slot * self.counts.len() / count;
-                let end = (slot + 1) * self.counts.len() / count;
-                HeatBucket::new(&self.counts, start..end)
-            }).collect());
+            self.buckets = Rc::new(
+                (0..count)
+                    .map(|slot| {
+                        let start = slot * self.counts.len() / count;
+                        let end = (slot + 1) * self.counts.len() / count;
+                        HeatBucket::new(&self.counts, start..end)
+                    })
+                    .collect(),
+            );
             self.dirty = false;
         }
         self.buckets.clone()
@@ -143,7 +155,9 @@ impl HeatScrollbarState {
     }
 
     fn update_scroll_offset(&mut self, offset: Pixels) -> bool {
-        self.last_scroll_offset.replace(offset).is_some_and(|previous| previous != offset)
+        self.last_scroll_offset
+            .replace(offset)
+            .is_some_and(|previous| previous != offset)
     }
 }
 
@@ -183,8 +197,11 @@ impl MainWindow {
 
     fn schedule_heat_scrollbar_hide(&mut self, delay: Duration, cx: &mut Context<Self>) {
         let deadline = Instant::now() + delay;
-        self.heat_scrollbar.hide_deadline = Some(self.heat_scrollbar.hide_deadline
-            .map_or(deadline, |previous| previous.max(deadline)));
+        self.heat_scrollbar.hide_deadline = Some(
+            self.heat_scrollbar
+                .hide_deadline
+                .map_or(deadline, |previous| previous.max(deadline)),
+        );
         if self.heat_scrollbar.hide_task.is_some() {
             return;
         }
@@ -193,34 +210,45 @@ impl MainWindow {
             let mut delay = delay;
             loop {
                 cx.background_executor().timer(delay).await;
-                let next_delay = this.update(cx, |this, cx| {
-                    let state = &mut this.heat_scrollbar;
-                    if !state.hovered && state.drag_origin.is_none() {
-                        if let Some(remaining) = state.hide_deadline
-                            .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
-                        {
-                            return Some(remaining);
+                let next_delay = this
+                    .update(cx, |this, cx| {
+                        let state = &mut this.heat_scrollbar;
+                        if !state.hovered && state.drag_origin.is_none() {
+                            if let Some(remaining) = state.hide_deadline.and_then(|deadline| {
+                                deadline.checked_duration_since(Instant::now())
+                            }) {
+                                return Some(remaining);
+                            }
+                            state.visible = false;
+                            state.hovered_bucket = None;
+                            cx.notify();
                         }
-                        state.visible = false;
-                        state.hovered_bucket = None;
-                        cx.notify();
-                    }
-                    this.heat_scrollbar.hide_deadline = None;
-                    this.heat_scrollbar.hide_task = None;
-                    None
-                }).ok().flatten();
+                        this.heat_scrollbar.hide_deadline = None;
+                        this.heat_scrollbar.hide_task = None;
+                        None
+                    })
+                    .ok()
+                    .flatten();
                 let Some(remaining) = next_delay else { break };
                 delay = remaining;
             }
         }));
     }
 
-    pub(crate) fn navigate_heat_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.list_order_ids.get(index).copied() else { return };
+    pub(crate) fn navigate_heat_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.list_order_ids.get(index).copied() else {
+            return;
+        };
         self.list_smooth_scroll.reset();
         PreviewWindowService::hide(cx);
         self.select_list_item_at(index, id, window, cx);
-        self.list_scroll_handle.scroll_to_item(index, gpui::ScrollStrategy::Top);
+        self.list_scroll_handle
+            .scroll_to_item(index, gpui::ScrollStrategy::Top);
         cx.notify();
     }
 }
@@ -294,9 +322,19 @@ mod tests {
         assert_eq!(buckets.len(), MAX_HEAT_BUCKETS);
         assert_eq!(buckets.first().unwrap().range.start, 0);
         assert_eq!(buckets.last().unwrap().range.end, 100_003);
-        assert!(buckets.windows(2).all(|pair| pair[0].range.end == pair[1].range.start));
-        let hot = buckets.iter().find(|bucket| bucket.range.contains(&81_234)).unwrap();
-        assert_eq!((hot.peak_index, hot.max_count, hot.total_count), (81_234, 120, 120));
+        assert!(
+            buckets
+                .windows(2)
+                .all(|pair| pair[0].range.end == pair[1].range.start)
+        );
+        let hot = buckets
+            .iter()
+            .find(|bucket| bucket.range.contains(&81_234))
+            .unwrap();
+        assert_eq!(
+            (hot.peak_index, hot.max_count, hot.total_count),
+            (81_234, 120, 120)
+        );
         assert!(Rc::ptr_eq(&buckets, &map.buckets()));
     }
 
@@ -307,11 +345,19 @@ mod tests {
         let before = map.buckets();
         map.update(521, 32);
         let after = map.buckets();
-        let slot = after.iter().position(|bucket| bucket.range.contains(&521)).unwrap();
+        let slot = after
+            .iter()
+            .position(|bucket| bucket.range.contains(&521))
+            .unwrap();
         assert_eq!(after[slot].max_count, 32);
         assert_eq!(before[slot].max_count, 0);
-        assert!(before.iter().zip(after.iter()).enumerate()
-            .all(|(index, (left, right))| index == slot || left == right));
+        assert!(
+            before
+                .iter()
+                .zip(after.iter())
+                .enumerate()
+                .all(|(index, (left, right))| index == slot || left == right)
+        );
         map.update(521, 0);
         assert_eq!(map.buckets()[slot].max_count, 0);
     }
@@ -325,7 +371,13 @@ mod tests {
         map.insert(2, 8);
         map.remove_positions(&[1, 4]);
         assert_eq!(map.counts, vec![4, 8, 3]);
-        assert_eq!(map.buckets().iter().map(|bucket| bucket.max_count).collect::<Vec<_>>(), vec![4, 8, 3]);
+        assert_eq!(
+            map.buckets()
+                .iter()
+                .map(|bucket| bucket.max_count)
+                .collect::<Vec<_>>(),
+            vec![4, 8, 3]
+        );
         map.replace(Vec::new());
         assert!(map.buckets().is_empty());
     }

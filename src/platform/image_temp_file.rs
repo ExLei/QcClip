@@ -49,7 +49,9 @@ impl ImageTempFile {
 /// 将临时图片文件交给进程级保留池，到期后自动删除。
 pub(crate) fn retain_image_temp_file(file: ImageTempFile) {
     let now = Instant::now();
-    let mut retained = RETAINED_IMAGE_FILES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut retained = RETAINED_IMAGE_FILES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     retained.retain(|entry| entry.expires_at > now);
     retained.push(RetainedImageFile {
         expires_at: now + IMAGE_TEMP_FILE_RETENTION,
@@ -78,7 +80,7 @@ pub(crate) fn create_image_temp_file(
             let kind = FormatKind::from_str(&payload.format_kind).unwrap_or(FormatKind::Unknown);
             (classify_format_role(kind, &payload.format_key, &payload.format_name)
                 == FormatRole::Image)
-            .then(|| ImageTempFile::from_bytes(&payload.bytes, &payload.format_key))
+                .then(|| ImageTempFile::from_bytes(&payload.bytes, &payload.format_key))
         })
         .transpose()
 }
@@ -151,8 +153,8 @@ pub(crate) fn create_openable_image_file(
     std::fs::create_dir_all(&directory)
         .map_err(|error| format!("创建打开的临时文件目录失败：{error}"))?;
     let path = unique_opened_path(&directory);
-    let mut file = std::fs::File::create(&path)
-        .map_err(|error| format!("创建打开的临时图片失败：{error}"))?;
+    let mut file =
+        std::fs::File::create(&path).map_err(|error| format!("创建打开的临时图片失败：{error}"))?;
     let result = image
         .write_to(&mut file, ImageFormat::Png)
         .map_err(|error| format!("写入打开的临时图片失败：{error}"))
@@ -179,12 +181,11 @@ fn unique_opened_path(directory: &Path) -> std::path::PathBuf {
 }
 
 fn decode_image(bytes: &[u8], format_key: &str) -> Result<DynamicImage, String> {
-    if format_key.eq_ignore_ascii_case("CF_DIB")
-        || format_key.eq_ignore_ascii_case("CF_DIBV5")
-    {
+    if format_key.eq_ignore_ascii_case("CF_DIB") || format_key.eq_ignore_ascii_case("CF_DIBV5") {
         let normalized;
         let dib = if format_key.eq_ignore_ascii_case("CF_DIBV5") {
-            normalized = normalize_dib_v5(bytes).ok_or_else(|| "无效的 CF_DIBV5 数据".to_owned())?;
+            normalized =
+                normalize_dib_v5(bytes).ok_or_else(|| "无效的 CF_DIBV5 数据".to_owned())?;
             normalized.as_slice()
         } else {
             bytes
@@ -197,7 +198,8 @@ fn decode_image(bytes: &[u8], format_key: &str) -> Result<DynamicImage, String> 
 }
 
 fn bmp_file_bytes_from_dib(bytes: &[u8]) -> Option<Vec<u8>> {
-    let header_size = usize::try_from(u32::from_le_bytes(bytes.get(0..4)?.try_into().ok()?)).ok()?;
+    let header_size =
+        usize::try_from(u32::from_le_bytes(bytes.get(0..4)?.try_into().ok()?)).ok()?;
     if header_size < 12 || header_size > bytes.len() {
         return None;
     }

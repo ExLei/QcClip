@@ -11,10 +11,9 @@ use tracing::warn;
 
 use crate::{
     config::{
-        default_window_material_opacity, AnimationKind, AppConfig, ApplicationFilterConfig,
-        AppearanceConfig,
-        ClipboardConfig, HistoryConfig, InterfaceLanguage, ShortcutBinding, ShortcutsConfig, SoundConfig,
-        NotificationKind, QuickPasteConfig, WindowMaterial,
+        AnimationKind, AppConfig, AppearanceConfig, ApplicationFilterConfig, ClipboardConfig,
+        HistoryConfig, InterfaceLanguage, NotificationKind, QuickPasteConfig, ShortcutBinding,
+        ShortcutsConfig, SoundConfig, WindowMaterial, default_window_material_opacity,
     },
     i18n::{self, Locale},
 };
@@ -36,7 +35,9 @@ pub(crate) enum ConfigError {
     #[error("无法序列化配置：{source}")]
     Serialize { source: serde_json::Error },
     #[error("现有配置无法解析，为避免丢失数据已停止保存：{source}")]
-    InvalidExistingConfig { source: crate::config::load::ConfigLoadError },
+    InvalidExistingConfig {
+        source: crate::config::load::ConfigLoadError,
+    },
     #[error("数据正在导入，请稍后重试")]
     DataSwitching,
     #[error("代理地址必须是有效的 HTTP 代理地址，如 http://127.0.0.1:7890")]
@@ -79,7 +80,10 @@ impl ConfigRuntime {
     }
 
     pub(crate) fn apply_imported_config(reload: ConfigReload, cx: &mut App) {
-        let ConfigReload { previous, current: config } = reload;
+        let ConfigReload {
+            previous,
+            current: config,
+        } = reload;
         if previous.general.language != config.general.language {
             i18n::set_locale(Locale::new(config.general.language.code()), cx);
         }
@@ -104,14 +108,16 @@ impl ConfigRuntime {
         if previous.application_filter != config.application_filter {
             crate::services::application_filter::ApplicationFilterService::refresh(cx);
         }
-        if previous.general.global_notification_enabled && !config.general.global_notification_enabled
+        if previous.general.global_notification_enabled
+            && !config.general.global_notification_enabled
         {
             crate::windows::notification::NotificationService::dismiss_all(cx);
         } else {
             crate::windows::notification::NotificationService::dismiss_disabled(cx);
         }
         if previous.general.launch_at_login != config.general.launch_at_login {
-            if let Err(error) = crate::platform::auto_start::set_enabled(config.general.launch_at_login)
+            if let Err(error) =
+                crate::platform::auto_start::set_enabled(config.general.launch_at_login)
             {
                 tracing::error!("同步开机自启设置失败：{error}");
             }
@@ -145,7 +151,11 @@ pub(crate) fn set_update_config(
         return Err(ConfigError::InvalidUpdateProxy);
     }
     let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
-        (runtime.config.updates.clone(), runtime.path.clone(), runtime.config.clone())
+        (
+            runtime.config.updates.clone(),
+            runtime.path.clone(),
+            runtime.config.clone(),
+        )
     });
     if current == updates {
         return Ok(false);
@@ -203,9 +213,7 @@ pub(crate) fn launch_at_login(cx: &App) -> bool {
 }
 
 pub(crate) fn run_as_administrator(cx: &App) -> bool {
-    cx.read_global::<ConfigRuntime, _>(|runtime, _| {
-        runtime.config.general.run_as_administrator
-    })
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.general.run_as_administrator)
 }
 
 pub(crate) fn application_filter_config(cx: &App) -> ApplicationFilterConfig {
@@ -298,7 +306,11 @@ pub(crate) fn set_history_config(
     cx: &mut App,
 ) -> Result<bool, ConfigError> {
     let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
-        (runtime.config.history.clone(), runtime.path.clone(), runtime.config.clone())
+        (
+            runtime.config.history.clone(),
+            runtime.path.clone(),
+            runtime.config.clone(),
+        )
     });
     if current == history {
         return Ok(false);
@@ -398,19 +410,13 @@ pub(crate) fn set_global_notification_enabled(
     Ok(true)
 }
 
-pub(crate) fn set_launch_at_login(
-    enabled: bool,
-    cx: &mut App,
-) -> Result<bool, ConfigError> {
+pub(crate) fn set_launch_at_login(enabled: bool, cx: &mut App) -> Result<bool, ConfigError> {
     update_with_auto_start(cx, enabled, |config| {
         config.general.launch_at_login = enabled;
     })
 }
 
-pub(crate) fn set_run_as_administrator(
-    enabled: bool,
-    cx: &mut App,
-) -> Result<bool, ConfigError> {
+pub(crate) fn set_run_as_administrator(enabled: bool, cx: &mut App) -> Result<bool, ConfigError> {
     let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
         (
             runtime.config.general.run_as_administrator,
@@ -496,9 +502,7 @@ fn update_with_auto_start(
     }
     if let Err(error) = persist_config(&path, &next) {
         if previous_enabled != enabled {
-            if let Err(restore_error) =
-                crate::platform::auto_start::set_enabled(previous_enabled)
-            {
+            if let Err(restore_error) = crate::platform::auto_start::set_enabled(previous_enabled) {
                 return Err(ConfigError::AutoStartRollback {
                     config: error.to_string(),
                     restore: restore_error.to_string(),
@@ -545,11 +549,7 @@ pub(crate) fn set_appearance_config(
     Ok(true)
 }
 
-fn apply_appearance_change(
-    previous: &AppearanceConfig,
-    current: &AppearanceConfig,
-    cx: &mut App,
-) {
+fn apply_appearance_change(previous: &AppearanceConfig, current: &AppearanceConfig, cx: &mut App) {
     if appearance_requires_global_refresh(previous, current) {
         crate::ui::theme::apply_appearance_from_config(cx);
         if background_image_needs_refresh(previous, current) {
@@ -577,10 +577,7 @@ fn appearance_requires_global_refresh(
         || previous.window_material_brightness != current.window_material_brightness
 }
 
-fn background_image_needs_refresh(
-    current: &AppearanceConfig,
-    next: &AppearanceConfig,
-) -> bool {
+fn background_image_needs_refresh(current: &AppearanceConfig, next: &AppearanceConfig) -> bool {
     current.background_image_path != next.background_image_path
         || (current.window_material != WindowMaterial::CustomImage
             && next.window_material == WindowMaterial::CustomImage)
@@ -766,8 +763,8 @@ fn load_config(path: &Path) -> AppConfig {
 }
 
 fn persist_config(path: &Path, config: &AppConfig) -> Result<(), ConfigError> {
-    let _operation = crate::services::data_runtime::begin_operation()
-        .map_err(|_| ConfigError::DataSwitching)?;
+    let _operation =
+        crate::services::data_runtime::begin_operation().map_err(|_| ConfigError::DataSwitching)?;
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -790,8 +787,11 @@ fn persist_config(path: &Path, config: &AppConfig) -> Result<(), ConfigError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => next,
         Err(source) => return Err(ConfigError::Open { source }),
     };
-    let version = persisted.get("schemaVersion").and_then(serde_json::Value::as_u64)
-        .unwrap_or(0).max(u64::from(crate::config::CURRENT_SCHEMA_VERSION));
+    let version = persisted
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        .max(u64::from(crate::config::CURRENT_SCHEMA_VERSION));
     persisted["schemaVersion"] = version.into();
     let mut content = serde_json::to_string_pretty(&persisted)
         .map_err(|source| ConfigError::Serialize { source })?;
@@ -815,10 +815,16 @@ fn merge_config_fields(
         return;
     }
     match (persisted, previous, next) {
-        (serde_json::Value::Object(original), serde_json::Value::Object(previous), serde_json::Value::Object(next)) => {
+        (
+            serde_json::Value::Object(original),
+            serde_json::Value::Object(previous),
+            serde_json::Value::Object(next),
+        ) => {
             for (key, value) in next {
                 match (original.get_mut(key), previous.get(key)) {
-                    (Some(original), Some(previous)) => merge_config_fields(original, previous, value),
+                    (Some(original), Some(previous)) => {
+                        merge_config_fields(original, previous, value)
+                    }
                     _ => {
                         original.insert(key.clone(), value.clone());
                     }
@@ -833,7 +839,10 @@ fn merge_config_fields(
 mod tests {
     use tempfile::tempdir;
 
-    use super::{appearance_requires_global_refresh, background_image_needs_refresh, load_config, persist_config};
+    use super::{
+        appearance_requires_global_refresh, background_image_needs_refresh, load_config,
+        persist_config,
+    };
     use crate::config::{AppConfig, InterfaceLanguage, WindowMaterial};
 
     #[test]
@@ -858,18 +867,22 @@ mod tests {
     fn saving_preserves_unknown_fields_values_and_future_version() {
         let directory = tempdir().expect("无法创建临时目录");
         let path = directory.path().join("config.json");
-        std::fs::write(&path, r#"{
+        std::fs::write(
+            &path,
+            r#"{
             "schemaVersion": 9,
             "futureGroup": {"enabled": true},
             "appearance": {"windowMaterial": "future-material", "futureOpacity": 0.7},
             "general": {"language": "zh-CN", "futureOption": [1, 2]}
-        }"#).expect("无法写入新版配置");
+        }"#,
+        )
+        .expect("无法写入新版配置");
         let mut config = load_config(&path);
         config.general.language = InterfaceLanguage::EnUs;
         persist_config(&path, &config).expect("无法保存兼容配置");
-        let saved: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("无法读取兼容配置"),
-        ).expect("无法解析兼容配置");
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("无法读取兼容配置"))
+                .expect("无法解析兼容配置");
         assert_eq!(saved["schemaVersion"], 9);
         assert_eq!(saved["futureGroup"]["enabled"], true);
         assert_eq!(saved["appearance"]["windowMaterial"], "future-material");
@@ -879,9 +892,9 @@ mod tests {
 
         config.appearance.window_material = WindowMaterial::CustomImage;
         persist_config(&path, &config).expect("无法修改已知字段");
-        let saved: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("无法读取修改后的配置"),
-        ).expect("无法解析修改后的配置");
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("无法读取修改后的配置"))
+                .expect("无法解析修改后的配置");
         assert_eq!(saved["appearance"]["windowMaterial"], "customimage");
         assert_eq!(saved["appearance"]["futureOpacity"], 0.7);
     }
@@ -892,7 +905,10 @@ mod tests {
         let path = directory.path().join("config.json");
         std::fs::write(&path, "{invalid").expect("无法写入无效配置");
         assert!(persist_config(&path, &AppConfig::default()).is_err());
-        assert_eq!(std::fs::read_to_string(&path).expect("无法核验配置"), "{invalid");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("无法核验配置"),
+            "{invalid"
+        );
     }
 
     #[test]

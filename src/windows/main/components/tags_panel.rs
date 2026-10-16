@@ -30,8 +30,8 @@ const TAG_DRAG_PREVIEW_BACKGROUND_OPACITY: f32 = 0.8;
 
 fn sidebar_panel_width(preferred_width: f32, viewport_width: f32) -> f32 {
     use crate::state_runtime::PersistedMainWindowState as State;
-    let max_width = (viewport_width * 0.45)
-        .clamp(State::MIN_TAGS_PANEL_WIDTH, State::MAX_TAGS_PANEL_WIDTH);
+    let max_width =
+        (viewport_width * 0.45).clamp(State::MIN_TAGS_PANEL_WIDTH, State::MAX_TAGS_PANEL_WIDTH);
     preferred_width.clamp(State::MIN_TAGS_PANEL_WIDTH, max_width)
 }
 
@@ -620,7 +620,10 @@ pub fn render(
     let translator = i18n::translator(cx);
     let scale = crate::ui::scale::window_scale(window);
     let panel_width = if sidebar_layout {
-        px(sidebar_panel_width(main.tags_panel_width, f32::from(window.viewport_size().width) / scale) * scale)
+        px(sidebar_panel_width(
+            main.tags_panel_width,
+            f32::from(window.viewport_size().width) / scale,
+        ) * scale)
     } else {
         window.viewport_size().width * 0.65 + px(1.0)
     };
@@ -711,19 +714,21 @@ pub fn render(
         .border_1()
         .border_color(input_border)
         .bg(theme.background)
-        .capture_any_mouse_down(cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-            this.window_drag_start = None;
-            if event.button != MouseButton::Left || window.is_window_active() {
-                return;
-            }
+        .capture_any_mouse_down(
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                this.window_drag_start = None;
+                if event.button != MouseButton::Left || window.is_window_active() {
+                    return;
+                }
 
-            if let Err(error) = crate::services::focus::focus_input_window(window) {
-                tracing::error!("点击标签搜索框时激活窗口失败：{error}");
-                return;
-            }
+                if let Err(error) = crate::services::focus::focus_input_window(window) {
+                    tracing::error!("点击标签搜索框时激活窗口失败：{error}");
+                    return;
+                }
 
-            tags_search_input_for_mouse.update(cx, |input, cx| input.focus(window, cx));
-        }))
+                tags_search_input_for_mouse.update(cx, |input, cx| input.focus(window, cx));
+            }),
+        )
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(tags_search_input_element);
 
@@ -740,9 +745,11 @@ pub fn render(
         .border(px(0.5))
         .border_color(theme.border)
         .when(!material_enabled, |this| this.shadow_lg())
-        .on_prepaint(cx.listener(|this, prepaint: &gpui::InteractivityPrepaint, _, _| {
-            this.tags_panel_bounds = Some(prepaint.bounds);
-        }))
+        .on_prepaint(
+            cx.listener(|this, prepaint: &gpui::InteractivityPrepaint, _, _| {
+                this.tags_panel_bounds = Some(prepaint.bounds);
+            }),
+        )
         .on_hover(cx.listener(|this, _, window, cx| {
             this.update_tags_panel_auto_close(window, cx);
         }))
@@ -750,27 +757,29 @@ pub fn render(
             let main_window = cx.entity().downgrade();
             move |event: &gpui::MouseMoveEvent, phase, _, window, cx| {
                 if phase == gpui::DispatchPhase::Capture {
-                    main_window.update(cx, |this, cx| {
-                        if let Some((start_x, start_width)) = this.tags_panel_resize_start {
-                            if event.dragging() {
-                                let scale = crate::ui::scale::window_scale(window);
-                                let width = sidebar_panel_width(
-                                    start_width + f32::from(event.position.x - start_x) / scale,
-                                    f32::from(window.viewport_size().width) / scale,
-                                );
-                                if this.tags_panel_width != width {
-                                    this.tags_panel_width = width;
-                                    this.adaptive_item_heights.clear();
-                                    this.invalidate_list_layout_cache();
-                                    cx.notify();
+                    main_window
+                        .update(cx, |this, cx| {
+                            if let Some((start_x, start_width)) = this.tags_panel_resize_start {
+                                if event.dragging() {
+                                    let scale = crate::ui::scale::window_scale(window);
+                                    let width = sidebar_panel_width(
+                                        start_width + f32::from(event.position.x - start_x) / scale,
+                                        f32::from(window.viewport_size().width) / scale,
+                                    );
+                                    if this.tags_panel_width != width {
+                                        this.tags_panel_width = width;
+                                        this.adaptive_item_heights.clear();
+                                        this.invalidate_list_layout_cache();
+                                        cx.notify();
+                                    }
+                                    cx.stop_propagation();
+                                } else {
+                                    this.finish_tags_panel_resize(cx);
                                 }
-                                cx.stop_propagation();
-                            } else {
-                                this.finish_tags_panel_resize(cx);
                             }
-                        }
-                        this.update_tags_panel_auto_close(window, cx);
-                    }).ok();
+                            this.update_tags_panel_auto_close(window, cx);
+                        })
+                        .ok();
                 }
             }
         })
@@ -778,10 +787,12 @@ pub fn render(
             let main_window = cx.entity().downgrade();
             move |event, phase, _, window, cx| {
                 if phase == gpui::DispatchPhase::Capture && event.button == MouseButton::Left {
-                    main_window.update(cx, |this, cx| {
-                        this.finish_tags_panel_resize(cx);
-                        this.update_tags_panel_auto_close(window, cx);
-                    }).ok();
+                    main_window
+                        .update(cx, |this, cx| {
+                            this.finish_tags_panel_resize(cx);
+                            this.update_tags_panel_auto_close(window, cx);
+                        })
+                        .ok();
                 }
             }
         })
@@ -974,14 +985,20 @@ pub fn render(
                     .w(ui_rem(5.0))
                     .cursor_col_resize()
                     .hover(|this| this.bg(theme.border))
-                    .when(main.tags_panel_resize_start.is_some(), |this| this.bg(theme.ring))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.window_drag_start = None;
-                        this.cancel_tags_panel_close();
-                        this.tags_panel_resize_start = Some((event.position.x, f32::from(panel_width) / scale));
-                        cx.notify();
-                    })),
+                    .when(main.tags_panel_resize_start.is_some(), |this| {
+                        this.bg(theme.ring)
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.window_drag_start = None;
+                            this.cancel_tags_panel_close();
+                            this.tags_panel_resize_start =
+                                Some((event.position.x, f32::from(panel_width) / scale));
+                            cx.notify();
+                        }),
+                    ),
             );
     } else {
         let scale = crate::ui::scale::window_scale(window);
@@ -990,16 +1007,20 @@ pub fn render(
         } else {
             px(0.0)
         };
-        let content_right = window.viewport_size().width - if matches!(titlebar_position, TitlebarPosition::Right) {
-            px(36.0 * scale)
-        } else {
-            px(0.0)
-        };
+        let content_right = window.viewport_size().width
+            - if matches!(titlebar_position, TitlebarPosition::Right) {
+                px(36.0 * scale)
+            } else {
+                px(0.0)
+            };
         let panel_width = panel_width.min(content_right - content_left);
-        let anchor = main.tags_button_bounds.map(|bounds| bounds.center().x)
+        let anchor = main
+            .tags_button_bounds
+            .map(|bounds| bounds.center().x)
             .unwrap_or(content_right);
         let panel_left = (anchor - panel_width / 2.0)
-            .max(content_left).min(content_right - panel_width);
+            .max(content_left)
+            .min(content_right - panel_width);
         panel = panel
             .absolute()
             .top(if titlebar_position.is_vertical() {

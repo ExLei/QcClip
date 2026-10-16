@@ -2,8 +2,8 @@ use std::f32::consts::TAU;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{OnceLock, RwLock, mpsc};
 use std::thread;
 
 use rodio::buffer::SamplesBuffer;
@@ -201,7 +201,10 @@ impl SoundPlayer {
         if let Err(error) = spawn_result {
             tracing::error!("启动音效播放线程失败：{error}");
         }
-        Self { sender, disconnected_reported: AtomicBool::new(false) }
+        Self {
+            sender,
+            disconnected_reported: AtomicBool::new(false),
+        }
     }
 }
 
@@ -247,7 +250,11 @@ fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
                 let Some(source) = load_external_source(directory, &file_name) else {
                     continue;
                 };
-                append_if_enabled(settings, sink, source.amplify(request.volume).convert_samples());
+                append_if_enabled(
+                    settings,
+                    sink,
+                    source.amplify(request.volume).convert_samples(),
+                );
             }
         }
     }
@@ -367,8 +374,8 @@ fn generate_quick_paste_scroll_click() -> Vec<f32> {
                 random_state ^= random_state >> 17;
                 random_state ^= random_state << 5;
                 let noise = (random_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
-                let filtered_noise = high_pass_alpha
-                    * (previous_filtered_noise + noise - previous_noise);
+                let filtered_noise =
+                    high_pass_alpha * (previous_filtered_noise + noise - previous_noise);
                 previous_noise = noise;
                 previous_filtered_noise = filtered_noise;
                 let envelope = 0.22 * (0.0001_f32 / 0.22).powf(time / NOISE_DURATION);
@@ -489,11 +496,19 @@ mod tests {
         )
         .expect("启用音效时应生成播放请求");
         settings.write().expect("无法更新测试音效配置").enabled = false;
-        append_if_enabled(&settings, &sink, SamplesBuffer::new(1, 44_100, generate_samples(request.preset)));
+        append_if_enabled(
+            &settings,
+            &sink,
+            SamplesBuffer::new(1, 44_100, generate_samples(request.preset)),
+        );
         assert!(sink.empty());
 
         settings.write().expect("无法更新测试音效配置").enabled = true;
-        append_if_enabled(&settings, &sink, SamplesBuffer::new(1, 44_100, generate_samples(SoundPreset::CrispChime)));
+        append_if_enabled(
+            &settings,
+            &sink,
+            SamplesBuffer::new(1, 44_100, generate_samples(SoundPreset::CrispChime)),
+        );
         assert!(!sink.empty());
     }
 

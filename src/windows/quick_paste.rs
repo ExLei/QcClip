@@ -323,35 +323,34 @@ impl QuickPasteWindowService {
             repository,
             favorite_repository,
             paste_service,
-        )) = cx
-            .update_global::<Self, _>(|service, cx| {
-                if service.closing || !service.active {
-                    return None;
-                }
-                let window = service.window?;
-                service.active = false;
-                service.closing = true;
-                let (selected_id, selected_index, source, mouse_inside) = window
-                    .update(cx, |view, _, _| {
-                        (
-                            view.selected_list_id(),
-                            view.selected_index,
-                            view.source,
-                            view.mouse_inside || view.keyboard_navigation_used,
-                        )
-                    })
-                    .ok()
-                    .unwrap_or((None, 0, PersistedQuickPasteTab::Clipboard, false));
-                Some((
-                    window,
-                    mouse_inside.then_some(selected_id).flatten(),
-                    selected_index,
-                    source,
-                    service.history_repository.clone(),
-                    service.favorite_repository.clone(),
-                    service.paste_service.clone(),
-                ))
-            })
+        )) = cx.update_global::<Self, _>(|service, cx| {
+            if service.closing || !service.active {
+                return None;
+            }
+            let window = service.window?;
+            service.active = false;
+            service.closing = true;
+            let (selected_id, selected_index, source, mouse_inside) = window
+                .update(cx, |view, _, _| {
+                    (
+                        view.selected_list_id(),
+                        view.selected_index,
+                        view.source,
+                        view.mouse_inside || view.keyboard_navigation_used,
+                    )
+                })
+                .ok()
+                .unwrap_or((None, 0, PersistedQuickPasteTab::Clipboard, false));
+            Some((
+                window,
+                mouse_inside.then_some(selected_id).flatten(),
+                selected_index,
+                source,
+                service.history_repository.clone(),
+                service.favorite_repository.clone(),
+                service.paste_service.clone(),
+            ))
+        })
         else {
             return;
         };
@@ -481,7 +480,9 @@ impl QuickPasteWindowService {
 
     pub(crate) fn navigate(navigation: crate::hotkey::QuickPasteNavigation, cx: &mut App) {
         let Some(window) = cx.read_global::<Self, _>(|service, _| {
-            (service.active && !service.closing).then_some(service.window).flatten()
+            (service.active && !service.closing)
+                .then_some(service.window)
+                .flatten()
         }) else {
             return;
         };
@@ -621,8 +622,7 @@ impl QuickPasteWindowView {
             let bounds = window.bounds();
             self.width = self.configured_width;
             self.visible_rows = desired_row_count;
-            let logical_height = self.tab_height
-                + f32::from(row_height) * desired_row_count as f32;
+            let logical_height = self.tab_height + f32::from(row_height) * desired_row_count as f32;
             self.reveal_center = point(px(self.width / 2.0), px(logical_height / 2.0));
             if !popup.resize_to_physical_bounds(
                 window,
@@ -789,8 +789,8 @@ impl QuickPasteWindowView {
             return None;
         }
 
-        let total_height = self.tab_height
-            + f32::from(self.row_height) * self.visible_row_count().max(1) as f32;
+        let total_height =
+            self.tab_height + f32::from(self.row_height) * self.visible_row_count().max(1) as f32;
         let center_x = f32::from(self.reveal_center.x);
         let center_y = f32::from(self.reveal_center.y);
         let radius = center_x
@@ -828,9 +828,7 @@ impl QuickPasteWindowView {
             PersistedQuickPasteTab::Clipboard => self
                 .history_repository
                 .ordered_ids_scoped(&self.query, &self.history_config),
-            PersistedQuickPasteTab::Favorites => {
-                self.favorite_repository.ordered_ids(&self.query)
-            }
+            PersistedQuickPasteTab::Favorites => self.favorite_repository.ordered_ids(&self.query),
         };
         let list_ids = match list_ids {
             Ok(list_ids) => list_ids,
@@ -918,13 +916,9 @@ impl QuickPasteWindowView {
         let bounds = self.display.map(|display| display.bounds);
         let margin = 8.0 * scale;
         let (x, y) = match (self.pointer, bounds) {
-            (Some(pointer), Some(bounds)) => centered_overlay_origin(
-                pointer,
-                physical_width,
-                physical_height,
-                margin,
-                bounds,
-            ),
+            (Some(pointer), Some(bounds)) => {
+                centered_overlay_origin(pointer, physical_width, physical_height, margin, bounds)
+            }
             (Some(pointer), None) => (
                 pointer.x - physical_width / 2.0,
                 pointer.y - physical_height / 2.0,
@@ -938,21 +932,23 @@ impl QuickPasteWindowView {
             }
         };
         self.reveal_center = point(
-            px((self.pointer.map(|pointer| pointer.x - x).unwrap_or(physical_width / 2.0)
+            px((self
+                .pointer
+                .map(|pointer| pointer.x - x)
+                .unwrap_or(physical_width / 2.0)
                 .clamp(0.0, physical_width))
                 / scale),
-            px((self.pointer.map(|pointer| pointer.y - y).unwrap_or(physical_height / 2.0)
+            px((self
+                .pointer
+                .map(|pointer| pointer.y - y)
+                .unwrap_or(physical_height / 2.0)
                 .clamp(0.0, physical_height))
                 / scale),
         );
-        if !self.popup.resize_to_physical_bounds(
-            window,
-            cx,
-            x,
-            y,
-            physical_width,
-            physical_height,
-        ) {
+        if !self
+            .popup
+            .resize_to_physical_bounds(window, cx, x, y, physical_width, physical_height)
+        {
             tracing::error!("调整便捷粘贴窗口大小失败");
         }
         self.apply_reveal_clip(window);
@@ -1187,11 +1183,7 @@ impl QuickPasteWindowView {
                         let index = *index_by_id.get(&record.history_id)?;
                         Some((
                             index,
-                            QuickPasteRecord::from(
-                                record,
-                                &image_preview_service,
-                                image_max_size,
-                            ),
+                            QuickPasteRecord::from(record, &image_preview_service, image_max_size),
                         ))
                     })
                     .collect::<Vec<_>>()
@@ -1514,9 +1506,13 @@ fn apply_reveal_clip(window: &Window, parameters: Option<(f32, f32, f32)>) {
     static FAILURE_REPORTED: AtomicBool = AtomicBool::new(false);
     let result = if let Some((center_x, center_y, diameter)) = parameters {
         platform_window::set_window_circle_clip(window, center_x, center_y, diameter)
-    } else { platform_window::clear_window_circle_clip(window) };
+    } else {
+        platform_window::clear_window_circle_clip(window)
+    };
     match result {
-        Ok(()) => { FAILURE_REPORTED.store(false, Ordering::Relaxed); }
+        Ok(()) => {
+            FAILURE_REPORTED.store(false, Ordering::Relaxed);
+        }
         Err(error) => {
             // 动画逐帧调用，仅在连续失败的第一帧记录。
             if !FAILURE_REPORTED.swap(true, Ordering::Relaxed) {

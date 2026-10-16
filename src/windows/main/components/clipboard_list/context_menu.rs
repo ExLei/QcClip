@@ -93,7 +93,11 @@ pub(super) fn tag_color_value(color: &str) -> u32 {
     0x6B7280
 }
 
-pub(super) fn tags_menu_item(tags: &[Tag], item_tag_ids: &[i64], translator: &Translator) -> MenuItem {
+pub(super) fn tags_menu_item(
+    tags: &[Tag],
+    item_tag_ids: &[i64],
+    translator: &Translator,
+) -> MenuItem {
     if tags.is_empty() {
         return MenuItem::action(
             MenuActionId::new("tags"),
@@ -243,15 +247,25 @@ pub(super) fn favorite_item_context_menu(
 fn pin_menu_item(item: &ClipboardListItem, translator: &Translator) -> MenuItem {
     MenuItem::action(
         MenuActionId::new("toggle-pin"),
-        translator.translate(if item.is_pinned { "main.menu.unpin" } else { "main.menu.pin" }),
-    ).with_icon(MenuIcon::svg("pin.svg"))
+        translator.translate(if item.is_pinned {
+            "main.menu.unpin"
+        } else {
+            "main.menu.pin"
+        }),
+    )
+    .with_icon(MenuIcon::svg("pin.svg"))
 }
 
 fn note_menu_item(item: &ClipboardListItem, translator: &Translator) -> MenuItem {
     MenuItem::action(
         MenuActionId::new(EDIT_NOTE_ACTION),
-        translator.translate(if item.note_text.is_empty() { "main.note.add" } else { "main.note.edit" }),
-    ).with_icon(MenuIcon::svg("note.svg"))
+        translator.translate(if item.note_text.is_empty() {
+            "main.note.add"
+        } else {
+            "main.note.edit"
+        }),
+    )
+    .with_icon(MenuIcon::svg("note.svg"))
 }
 
 pub(super) fn paste_menu_item(
@@ -430,7 +444,10 @@ pub(super) fn open_with_default_menu_item(
 
 /// 由调用方解析好的链接构建“在浏览器中打开”菜单项，使用系统默认浏览器。
 /// 单个链接直接作为可点击项，多个链接展开为子菜单并附“全部打开”。
-pub(super) fn open_in_browser_menu_item(translator: &Translator, links: &[String]) -> Option<MenuItem> {
+pub(super) fn open_in_browser_menu_item(
+    translator: &Translator,
+    links: &[String],
+) -> Option<MenuItem> {
     if links.is_empty() {
         return None;
     }
@@ -548,22 +565,51 @@ mod item_display_tests {
     fn both_context_menus_offer_pin_and_unpin_without_toolbar_controls() {
         let translator = Translator::builtin(Locale::zh_cn());
         let mut item = ClipboardListItem {
-            history_id: 1, item_id: 1, favorite_id: Some(2), tag_ids: vec![],
-            note_text: String::new(), preview_text: String::new(), preview_char_count: 0,
-            preview_options: vec![], all_format_options: vec![], content_kind: ContentKind::Text,
-            paste_count: 0, is_pinned: false, sort_order: 0, last_seen_at: 0,
-            shortcut: String::new(), source_app_name: None, source_app_icon: None, is_selected: false,
+            history_id: 1,
+            item_id: 1,
+            favorite_id: Some(2),
+            tag_ids: vec![],
+            note_text: String::new(),
+            preview_text: String::new(),
+            preview_char_count: 0,
+            preview_options: vec![],
+            all_format_options: vec![],
+            content_kind: ContentKind::Text,
+            paste_count: 0,
+            is_pinned: false,
+            sort_order: 0,
+            last_seen_at: 0,
+            shortcut: String::new(),
+            source_app_name: None,
+            source_app_icon: None,
+            is_selected: false,
         };
         for pinned in [false, true] {
             item.is_pinned = pinned;
             for build_menu in [history_item_context_menu, favorite_item_context_menu] {
                 let (menu, _) = build_menu(
-                    &item, &[], &translator, ClipboardDisplayPriority::default(), &[], None, &[],
+                    &item,
+                    &[],
+                    &translator,
+                    ClipboardDisplayPriority::default(),
+                    &[],
+                    None,
+                    &[],
                 );
-                let action = menu.items().iter().find(|entry| {
-                    entry.id.as_ref().is_some_and(|id| id.as_str() == "toggle-pin")
-                }).expect("右键菜单缺少置顶操作");
-                assert_eq!(action.label.as_ref(), if pinned { "取消置顶" } else { "置顶" });
+                let action = menu
+                    .items()
+                    .iter()
+                    .find(|entry| {
+                        entry
+                            .id
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == "toggle-pin")
+                    })
+                    .expect("右键菜单缺少置顶操作");
+                assert_eq!(
+                    action.label.as_ref(),
+                    if pinned { "取消置顶" } else { "置顶" }
+                );
                 assert!(action.enabled);
             }
         }

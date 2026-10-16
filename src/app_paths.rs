@@ -48,7 +48,9 @@ impl AppPaths {
                 None
             }
         };
-        if let Some(paths) = executable.as_deref().and_then(Self::portable_from_executable)
+        if let Some(paths) = executable
+            .as_deref()
+            .and_then(Self::portable_from_executable)
         {
             return Ok(paths);
         }
@@ -56,9 +58,7 @@ impl AppPaths {
             .ok_or(AppPathsError::DataDirectoryUnavailable)?;
         let base_dirs = BaseDirs::new().ok_or(AppPathsError::DataDirectoryUnavailable)?;
         let default_data_root = base_dirs.data_local_dir().join(project_dirs.project_path());
-        let host_root = base_dirs
-            .data_local_dir()
-            .join(ORGANIZATION_NAME);
+        let host_root = base_dirs.data_local_dir().join(ORGANIZATION_NAME);
         let location_path = host_root.join(LOCATION_FILE_NAME);
         let data_root = match read_location(&location_path) {
             Ok(Some(path)) => path,
@@ -165,7 +165,10 @@ fn read_location(path: &Path) -> std::io::Result<Option<PathBuf>> {
     let location = serde_json::from_str::<LocationFile>(&content)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     if !location.data_root.is_absolute() {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "数据位置必须是绝对路径"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "数据位置必须是绝对路径",
+        ));
     }
     Ok(Some(location.data_root))
 }
@@ -181,11 +184,17 @@ mod tests {
         let path = root.path().join("location.json");
         assert_eq!(super::read_location(&path).unwrap(), None);
         fs::write(&path, "{损坏").unwrap();
-        assert_eq!(super::read_location(&path).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            super::read_location(&path).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
         fs::write(&path, r#"{"data_root":"relative"}"#).unwrap();
         assert!(super::read_location(&path).is_err());
         super::write_location(&path, root.path()).unwrap();
-        assert_eq!(super::read_location(&path).unwrap(), Some(root.path().to_path_buf()));
+        assert_eq!(
+            super::read_location(&path).unwrap(),
+            Some(root.path().to_path_buf())
+        );
     }
 
     #[test]
@@ -213,8 +222,7 @@ mod tests {
     #[test]
     fn portable_marker_keeps_all_data_next_to_the_executable() {
         let directory = tempfile::tempdir().expect("应创建临时目录");
-        fs::write(directory.path().join("QcClip.portable"), b"")
-            .expect("应创建便携标记");
+        fs::write(directory.path().join("QcClip.portable"), b"").expect("应创建便携标记");
         let paths = AppPaths::portable_from_executable(&directory.path().join("QcClip.exe"))
             .expect("应识别便携版");
         let data_root = directory.path().join("QcClipData");
@@ -227,15 +235,17 @@ mod tests {
         assert_eq!(paths.state_path(), data_root.join("state.json"));
         assert_eq!(paths.log_directory(), data_root.join("log"));
         assert_eq!(paths.sound_directory(), data_root.join("sound"));
-        assert_eq!(paths.image_library_directory(), data_root.join("image_library"));
+        assert_eq!(
+            paths.image_library_directory(),
+            data_root.join("image_library")
+        );
     }
 
     #[test]
     fn portable_mode_ignores_custom_data_locations() {
         let directory = tempfile::tempdir().expect("应创建临时目录");
         let custom = tempfile::tempdir().expect("应创建自定义数据目录");
-        fs::write(directory.path().join("QcClip.portable"), b"")
-            .expect("应创建便携标记");
+        fs::write(directory.path().join("QcClip.portable"), b"").expect("应创建便携标记");
         super::write_location(&directory.path().join("location.json"), custom.path())
             .expect("应保存自定义数据位置");
 

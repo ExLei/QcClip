@@ -254,7 +254,12 @@ impl TagManager {
                     .ok();
             }
             Err(error) => {
-                if matches!(&error, TagUpdateError::NotFound(_) | TagUpdateError::Database(_) | TagUpdateError::Sql(_)) {
+                if matches!(
+                    &error,
+                    TagUpdateError::NotFound(_)
+                        | TagUpdateError::Database(_)
+                        | TagUpdateError::Sql(_)
+                ) {
                     tracing::error!(tag_id, %error, "修改标签名称失败");
                 }
                 this.update(cx, |this, cx| {
@@ -309,7 +314,12 @@ impl TagManager {
                     .ok();
             }
             Err(error) => {
-                if matches!(&error, TagUpdateError::NotFound(_) | TagUpdateError::Database(_) | TagUpdateError::Sql(_)) {
+                if matches!(
+                    &error,
+                    TagUpdateError::NotFound(_)
+                        | TagUpdateError::Database(_)
+                        | TagUpdateError::Sql(_)
+                ) {
                     tracing::error!(tag_id, %error, "修改标签颜色失败");
                 }
                 this.update(cx, |this, cx| {
@@ -455,7 +465,12 @@ impl TagManager {
                     .ok();
             }
             Err(error) => {
-                if matches!(&error, TagCreateError::Database(_) | TagCreateError::Sql(_) | TagCreateError::SortOrderOverflow) {
+                if matches!(
+                    &error,
+                    TagCreateError::Database(_)
+                        | TagCreateError::Sql(_)
+                        | TagCreateError::SortOrderOverflow
+                ) {
                     tracing::error!(%error, "创建标签失败");
                 }
                 this.update(cx, |this, cx| {

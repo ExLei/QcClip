@@ -1,4 +1,4 @@
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, px};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -37,7 +37,8 @@ impl SettingsWindowView {
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
-                    view.quick_paste_error = notify_settings_error(SettingsPage::QuickPaste, error, cx);
+                    view.quick_paste_error =
+                        notify_settings_error(SettingsPage::QuickPaste, error, cx);
                     cx.notify();
                 });
             });
@@ -53,7 +54,7 @@ impl SettingsWindowView {
                     ),
                 )
                 .selected(count == config.visible_items)
-        })
+            })
             .collect::<Vec<_>>();
         let save_error = translator.translate("settings.quick_paste.save_error");
         let visible_items_save_error = save_error.clone();
@@ -139,9 +140,9 @@ impl SettingsWindowView {
             Switch::new("settings-quick-paste-switch-list-with-left-right")
                 .large()
                 .checked(config.switch_list_with_left_right)
-                .accessibility_label(translator.translate(
-                    "settings.quick_paste.switch_list_with_left_right",
-                ))
+                .accessibility_label(
+                    translator.translate("settings.quick_paste.switch_list_with_left_right"),
+                )
                 .on_click({
                     let view = view.clone();
                     move |checked, _, cx| {
@@ -185,56 +186,68 @@ impl SettingsWindowView {
                 translator.translate("settings.quick_paste.description"),
                 reset_button,
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.quick_paste.visible_items"),
-                Some(
-                    translator
-                        .translate("settings.quick_paste.visible_items_description")
-                        .into(),
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.quick_paste.visible_items"),
+                    Some(
+                        translator
+                            .translate("settings.quick_paste.visible_items_description")
+                            .into(),
+                    ),
+                    selector,
                 ),
-                selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.quick_paste.window_width"),
-                Some(
-                    translator
-                        .translate("settings.quick_paste.window_width_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.quick_paste.window_width"),
+                    Some(
+                        translator
+                            .translate("settings.quick_paste.window_width_description")
+                            .into(),
+                    ),
+                    window_width_selector,
                 ),
-                window_width_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.quick_paste.select_with_up_down"),
-                Some(
-                    translator
-                        .translate("settings.quick_paste.select_with_up_down_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.quick_paste.select_with_up_down"),
+                    Some(
+                        translator
+                            .translate("settings.quick_paste.select_with_up_down_description")
+                            .into(),
+                    ),
+                    select_with_up_down_switch,
                 ),
-                select_with_up_down_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.quick_paste.switch_list_with_left_right"),
-                Some(
-                    translator
-                        .translate("settings.quick_paste.switch_list_with_left_right_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.quick_paste.switch_list_with_left_right"),
+                    Some(
+                        translator
+                            .translate(
+                                "settings.quick_paste.switch_list_with_left_right_description",
+                            )
+                            .into(),
+                    ),
+                    switch_list_with_left_right_switch,
                 ),
-                switch_list_with_left_right_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.quick_paste.keep_last_position"),
-                Some(
-                    translator
-                        .translate("settings.quick_paste.keep_last_position_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.quick_paste.keep_last_position"),
+                    Some(
+                        translator
+                            .translate("settings.quick_paste.keep_last_position_description")
+                            .into(),
+                    ),
+                    keep_last_position_switch,
                 ),
-                keep_last_position_switch,
-            ));
+            );
         if let Some(error) = &self.quick_paste_error {
             section = section.child(settings_error_row(theme, error));
         }

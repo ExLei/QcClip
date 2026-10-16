@@ -24,10 +24,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "clipboard_item_notes",
 ];
 
-const REQUIRED_UNIQUE_INDEXES: &[&str] = &[
-    "ux_clipboard_formats_primary",
-    "ux_tags_sort_order",
-];
+const REQUIRED_UNIQUE_INDEXES: &[&str] = &["ux_clipboard_formats_primary", "ux_tags_sort_order"];
 
 const REQUIRED_TRIGGERS: &[&str] = &[
     "ck_clipboard_items_start_pending",
@@ -70,13 +67,16 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<(), DatabaseError> 
                 "未标记版本的数据库已包含数据表，请先备份并核验结构，不能作为空库初始化".to_owned(),
             ));
         }
-        transaction.execute_batch(INITIAL_SCHEMA)
+        transaction
+            .execute_batch(INITIAL_SCHEMA)
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
-        transaction.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)
+        transaction
+            .pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
         validate_schema(&transaction)?;
         validate_write_schema(&transaction)?;
-        transaction.commit()
+        transaction
+            .commit()
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
     }
     // 高版本只核验兼容性，不回写版本号，也不执行旧程序的初始化语句。
@@ -96,12 +96,14 @@ pub(super) fn validate_schema(connection: &Connection) -> Result<(), DatabaseErr
         for required in &table.columns {
             let Some(column) = actual.iter().find(|column| column.name == required.name) else {
                 return Err(DatabaseError::Validation(format!(
-                    "缺少核心字段“{}.{}”", table.name, required.name,
+                    "缺少核心字段“{}.{}”",
+                    table.name, required.name,
                 )));
             };
             if required.not_null && !column.not_null {
                 return Err(DatabaseError::Validation(format!(
-                    "核心字段“{}.{}”允许空值，与当前读取规则不兼容", table.name, column.name,
+                    "核心字段“{}.{}”允许空值，与当前读取规则不兼容",
+                    table.name, column.name,
                 )));
             }
             if !column.data_type.eq_ignore_ascii_case(&required.data_type) {
@@ -125,7 +127,11 @@ pub(super) fn validate_write_schema(connection: &Connection) -> Result<(), Datab
     }
     for table in baseline_schema()? {
         for column in columns(connection, table.name)? {
-            if let Some(required) = table.columns.iter().find(|required| required.name == column.name) {
+            if let Some(required) = table
+                .columns
+                .iter()
+                .find(|required| required.name == column.name)
+            {
                 if column.primary_key != required.primary_key
                     || column.default_value != required.default_value
                     || (column.not_null && !required.not_null)
@@ -135,9 +141,13 @@ pub(super) fn validate_write_schema(connection: &Connection) -> Result<(), Datab
                         table.name, column.name,
                     )));
                 }
-            } else if column.not_null && column.default_value.as_deref().is_none_or(|value| {
-                value.trim().eq_ignore_ascii_case("null")
-            }) && column.primary_key == 0 {
+            } else if column.not_null
+                && column
+                    .default_value
+                    .as_deref()
+                    .is_none_or(|value| value.trim().eq_ignore_ascii_case("null"))
+                && column.primary_key == 0
+            {
                 return Err(DatabaseError::Validation(format!(
                     "新增必填字段“{}.{}”没有可用默认值，当前程序只能读取",
                     table.name, column.name,
@@ -148,7 +158,8 @@ pub(super) fn validate_write_schema(connection: &Connection) -> Result<(), Datab
         for required in &table.foreign_keys {
             if !actual_foreign_keys.contains(required) {
                 return Err(DatabaseError::Validation(format!(
-                    "表“{}”缺少写入所需的外键规则：{}", table.name, required.1,
+                    "表“{}”缺少写入所需的外键规则：{}",
+                    table.name, required.1,
                 )));
             }
         }
@@ -156,7 +167,9 @@ pub(super) fn validate_write_schema(connection: &Connection) -> Result<(), Datab
         for key in &table.unique_keys {
             if !actual_keys.contains(key) {
                 return Err(DatabaseError::Validation(format!(
-                    "表“{}”缺少写入所需的唯一约束：{}", table.name, key.join(", "),
+                    "表“{}”缺少写入所需的唯一约束：{}",
+                    table.name,
+                    key.join(", "),
                 )));
             }
         }
@@ -168,57 +181,73 @@ pub(super) fn validate_write_schema(connection: &Connection) -> Result<(), Datab
 fn baseline_schema() -> Result<&'static [TableSchema], DatabaseError> {
     let result = BASELINE_SCHEMA.get_or_init(|| {
         let connection = Connection::open_in_memory().map_err(|error| error.to_string())?;
-        connection.execute_batch(INITIAL_SCHEMA).map_err(|error| error.to_string())?;
-        REQUIRED_TABLES.iter().map(|name| {
-            Ok(TableSchema {
-                name,
-                columns: columns(&connection, name).map_err(|error| error.to_string())?,
-                unique_keys: unique_keys(&connection, name).map_err(|error| error.to_string())?,
-                foreign_keys: foreign_keys(&connection, name).map_err(|error| error.to_string())?,
+        connection
+            .execute_batch(INITIAL_SCHEMA)
+            .map_err(|error| error.to_string())?;
+        REQUIRED_TABLES
+            .iter()
+            .map(|name| {
+                Ok(TableSchema {
+                    name,
+                    columns: columns(&connection, name).map_err(|error| error.to_string())?,
+                    unique_keys: unique_keys(&connection, name)
+                        .map_err(|error| error.to_string())?,
+                    foreign_keys: foreign_keys(&connection, name)
+                        .map_err(|error| error.to_string())?,
+                })
             })
-        }).collect()
+            .collect()
     });
     match result {
         Ok(tables) => Ok(tables),
-        Err(error) => Err(DatabaseError::Validation(format!("无法加载首发数据库结构：{error}"))),
+        Err(error) => Err(DatabaseError::Validation(format!(
+            "无法加载首发数据库结构：{error}"
+        ))),
     }
 }
 
 fn columns(connection: &Connection, table: &str) -> Result<Vec<Column>, DatabaseError> {
-    let mut statement = connection.prepare(
-        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1)",
-    ).map_err(|source| DatabaseError::Inspect { source })?;
-    statement.query_map([table], |row| {
-        Ok(Column {
-            name: row.get(0)?,
-            data_type: row.get(1)?,
-            not_null: row.get(2)?,
-            default_value: row.get(3)?,
-            primary_key: row.get(4)?,
+    let mut statement = connection
+        .prepare("SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1)")
+        .map_err(|source| DatabaseError::Inspect { source })?;
+    statement
+        .query_map([table], |row| {
+            Ok(Column {
+                name: row.get(0)?,
+                data_type: row.get(1)?,
+                not_null: row.get(2)?,
+                default_value: row.get(3)?,
+                primary_key: row.get(4)?,
+            })
         })
-    }).map_err(|source| DatabaseError::Inspect { source })?
+        .map_err(|source| DatabaseError::Inspect { source })?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| DatabaseError::Inspect { source })
 }
 
 fn unique_keys(connection: &Connection, table: &str) -> Result<Vec<Vec<String>>, DatabaseError> {
-    let mut statement = connection.prepare(
-        "SELECT name FROM pragma_index_list(?1) WHERE \"unique\" = 1 AND partial = 0",
-    ).map_err(|source| DatabaseError::Inspect { source })?;
-    let names = statement.query_map([table], |row| row.get::<_, String>(0))
+    let mut statement = connection
+        .prepare("SELECT name FROM pragma_index_list(?1) WHERE \"unique\" = 1 AND partial = 0")
+        .map_err(|source| DatabaseError::Inspect { source })?;
+    let names = statement
+        .query_map([table], |row| row.get::<_, String>(0))
         .map_err(|source| DatabaseError::Inspect { source })?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| DatabaseError::Inspect { source })?;
-    names.iter().map(|name| {
-        let mut statement = connection.prepare(
-            "SELECT name FROM pragma_index_info(?1) ORDER BY seqno",
-        ).map_err(|source| DatabaseError::Inspect { source })?;
-        statement.query_map([name], |row| row.get::<_, Option<String>>(0))
-            .map_err(|source| DatabaseError::Inspect { source })?
-            .map(|row| row.map(|name| name.unwrap_or_default()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| DatabaseError::Inspect { source })
-    }).collect()
+    names
+        .iter()
+        .map(|name| {
+            let mut statement = connection
+                .prepare("SELECT name FROM pragma_index_info(?1) ORDER BY seqno")
+                .map_err(|source| DatabaseError::Inspect { source })?;
+            statement
+                .query_map([name], |row| row.get::<_, Option<String>>(0))
+                .map_err(|source| DatabaseError::Inspect { source })?
+                .map(|row| row.map(|name| name.unwrap_or_default()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|source| DatabaseError::Inspect { source })
+        })
+        .collect()
 }
 
 fn foreign_keys(
@@ -228,9 +257,17 @@ fn foreign_keys(
     let mut statement = connection.prepare(
         "SELECT \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list(?1)",
     ).map_err(|source| DatabaseError::Inspect { source })?;
-    statement.query_map([table], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
-    }).map_err(|source| DatabaseError::Inspect { source })?
+    statement
+        .query_map([table], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })
+        .map_err(|source| DatabaseError::Inspect { source })?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| DatabaseError::Inspect { source })
 }
@@ -241,13 +278,17 @@ fn validate_objects(
     required_names: &[&str],
 ) -> Result<(), DatabaseError> {
     for name in required_names {
-        let exists: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
-            [object_type, name],
-            |row| row.get(0),
-        ).map_err(|source| DatabaseError::Inspect { source })?;
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
+                [object_type, name],
+                |row| row.get(0),
+            )
+            .map_err(|source| DatabaseError::Inspect { source })?;
         if !exists {
-            return Err(DatabaseError::Validation(format!("缺少 {object_type} 对象“{name}”")));
+            return Err(DatabaseError::Validation(format!(
+                "缺少 {object_type} 对象“{name}”"
+            )));
         }
     }
     Ok(())

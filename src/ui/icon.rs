@@ -22,12 +22,7 @@ pub fn hover_icon(
     size: f32,
     color: Hsla,
 ) -> impl IntoElement {
-    hover_icon_path(
-        group,
-        format!("assets/icons/{name}.svg"),
-        size,
-        color,
-    )
+    hover_icon_path(group, format!("assets/icons/{name}.svg"), size, color)
 }
 
 /// 创建带悬停缩放动画的指定路径图标。
@@ -71,10 +66,9 @@ impl RenderOnce for HoverIcon {
             && crate::config_runtime::animation_enabled(
                 cx,
                 crate::config::AnimationKind::IconHoverScale,
-            )
-        {
-            let motion = Duration::from_millis(config.icon_hover_duration_ms)
-                .with_easing(gpui::ease_in_out);
+            ) {
+            let motion =
+                Duration::from_millis(config.icon_hover_duration_ms).with_easing(gpui::ease_in_out);
             icon.id(format!("{}-icon", self.group))
                 .transitions(|transitions| transitions.size(motion))
                 .group_hover(self.group, |style| {

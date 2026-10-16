@@ -36,8 +36,12 @@ pub enum NotificationKind {
 
 impl NotificationKind {
     pub const ALL: [Self; 6] = [
-        Self::Startup, Self::ClipboardPreview, Self::FeatureStatus,
-        Self::OperationResult, Self::Attention, Self::VersionUpdate,
+        Self::Startup,
+        Self::ClipboardPreview,
+        Self::FeatureStatus,
+        Self::OperationResult,
+        Self::Attention,
+        Self::VersionUpdate,
     ];
 
     pub const fn label_key(self) -> &'static str {

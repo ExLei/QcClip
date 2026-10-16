@@ -80,7 +80,8 @@ impl MenuWindowView {
             if crate::services::tray::refresh_update_menu(&mut view.menu, cx) {
                 cx.notify();
             }
-        }).detach();
+        })
+        .detach();
         #[cfg(not(target_os = "windows"))]
         let _ = cx;
         Self {
@@ -243,10 +244,7 @@ impl MenuWindowView {
         let (content_bounds, entrance_direction) = match &self.placement {
             MenuPlacement::Root { anchor } => {
                 let bounds = fit_root_bounds(*anchor, size, screen);
-                (
-                    bounds,
-                    vertical_entrance_direction(anchor.y, bounds),
-                )
+                (bounds, vertical_entrance_direction(anchor.y, bounds))
             }
             MenuPlacement::Submenu {
                 parent_menu,
@@ -326,14 +324,23 @@ impl MenuWindowView {
                 .px(gpui::rems(3.0 / 13.0))
                 .flex()
                 .items_center()
-                .child(div().h(gpui::rems(1.0 / 13.0)).w_full().bg(cx.theme().border))
+                .child(
+                    div()
+                        .h(gpui::rems(1.0 / 13.0))
+                        .w_full()
+                        .bg(cx.theme().border),
+                )
                 .into_any_element();
         }
 
         let enabled = item.enabled;
         let colors = cx.theme().colors;
         let foreground = if enabled {
-            if item.success { colors.success } else { colors.popover_foreground }
+            if item.success {
+                colors.success
+            } else {
+                colors.popover_foreground
+            }
         } else {
             colors.muted_foreground
         };
@@ -367,42 +374,55 @@ impl MenuWindowView {
                     this.click_item(index, window, cx);
                 }),
             )
-            .when(!item.centered, |view| view.child(
-                div()
-                    .w(gpui::rems(28.0 / 13.0))
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .when_some(icon_color, |view, color| {
-                        view.child(div().size(gpui::rems(8.0 / 13.0)).rounded_full().bg(rgb(color)))
-                    })
-                    .when(icon_color.is_none(), |view| {
-                        view.when_some(icon_path, |view, path| {
-                            // 绝对路径用 img() 渲染，文件名用内置 svg 图标。
-                            let icon_element: gpui::AnyElement =
-                                if std::path::Path::new(path.as_ref()).is_absolute() {
-                                    gpui::img(std::path::PathBuf::from(path.as_ref()))
-                                        .size(gpui::rems(12.0 / 13.0))
-                                        .object_fit(gpui::ObjectFit::Contain)
-                                        .into_any_element()
-                                } else {
-                                    hover_icon_path(
-                                        icon_group.clone(),
-                                        format!("assets/icons/{}", path),
-                                        12.0,
-                                        foreground,
-                                    )
-                                    .into_any_element()
-                                };
-                            view.child(icon_element)
+            .when(!item.centered, |view| {
+                view.child(
+                    div()
+                        .w(gpui::rems(28.0 / 13.0))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when_some(icon_color, |view, color| {
+                            view.child(
+                                div()
+                                    .size(gpui::rems(8.0 / 13.0))
+                                    .rounded_full()
+                                    .bg(rgb(color)),
+                            )
                         })
-                    }),
-            ))
-            .child(div().whitespace_nowrap().when(item.centered, |view| {
-                view.flex_1().text_center().px_2()
-            }).when(!item.centered, |view| view.flex_none()).child(label))
-            .when(!item.centered, |view| view.child(div().flex_1().min_w(gpui::rems(12.0 / 13.0))))
+                        .when(icon_color.is_none(), |view| {
+                            view.when_some(icon_path, |view, path| {
+                                // 绝对路径用 img() 渲染，文件名用内置 svg 图标。
+                                let icon_element: gpui::AnyElement =
+                                    if std::path::Path::new(path.as_ref()).is_absolute() {
+                                        gpui::img(std::path::PathBuf::from(path.as_ref()))
+                                            .size(gpui::rems(12.0 / 13.0))
+                                            .object_fit(gpui::ObjectFit::Contain)
+                                            .into_any_element()
+                                    } else {
+                                        hover_icon_path(
+                                            icon_group.clone(),
+                                            format!("assets/icons/{}", path),
+                                            12.0,
+                                            foreground,
+                                        )
+                                        .into_any_element()
+                                    };
+                                view.child(icon_element)
+                            })
+                        }),
+                )
+            })
+            .child(
+                div()
+                    .whitespace_nowrap()
+                    .when(item.centered, |view| view.flex_1().text_center().px_2())
+                    .when(!item.centered, |view| view.flex_none())
+                    .child(label),
+            )
+            .when(!item.centered, |view| {
+                view.child(div().flex_1().min_w(gpui::rems(12.0 / 13.0)))
+            })
             .when(checked, |view| {
                 view.child(
                     div()
@@ -412,14 +432,12 @@ impl MenuWindowView {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(
-                            hover_icon_path(
-                                icon_group.clone(),
-                                "assets/icons/check.svg",
-                                12.0,
-                                foreground,
-                            ),
-                        ),
+                        .child(hover_icon_path(
+                            icon_group.clone(),
+                            "assets/icons/check.svg",
+                            12.0,
+                            foreground,
+                        )),
                 )
             })
             .when(has_children, |view| {
@@ -431,17 +449,17 @@ impl MenuWindowView {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(
-                            hover_icon_path(
-                                icon_group,
-                                "assets/icons/chevron-right.svg",
-                                12.0,
-                                foreground,
-                            ),
-                        ),
+                        .child(hover_icon_path(
+                            icon_group,
+                            "assets/icons/chevron-right.svg",
+                            12.0,
+                            foreground,
+                        )),
                 )
             })
-            .when(!has_children && !checked && !item.centered, |view| view.pr(gpui::rems(8.0 / 13.0)))
+            .when(!has_children && !checked && !item.centered, |view| {
+                view.pr(gpui::rems(8.0 / 13.0))
+            })
             .into_any_element()
     }
 }
@@ -521,9 +539,7 @@ fn menu_shell(
 }
 
 pub(super) fn menu_surface(colors: ThemeColor) -> gpui::Div {
-    div()
-        .w_full()
-        .bg(colors.popover)
+    div().w_full().bg(colors.popover)
 }
 
 fn screen_bounds(

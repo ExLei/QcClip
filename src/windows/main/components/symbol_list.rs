@@ -95,7 +95,12 @@ where
 {
     let item_sizes = Rc::new(
         rows.iter()
-            .map(|row| size(px(0.0), px(row_height(row) * crate::ui::scale::theme_scale(cx))))
+            .map(|row| {
+                size(
+                    px(0.0),
+                    px(row_height(row) * crate::ui::scale::theme_scale(cx)),
+                )
+            })
             .collect::<Vec<_>>(),
     );
     render_sized_virtual_list(
@@ -130,23 +135,13 @@ pub(crate) fn render_sized_virtual_list<F>(
     cx: &mut Context<MainWindow>,
 ) -> AnyElement
 where
-    F: Fn(
-            &mut MainWindow,
-            Range<usize>,
-            &mut Window,
-            &mut Context<MainWindow>,
-        ) -> Vec<AnyElement>
+    F: Fn(&mut MainWindow, Range<usize>, &mut Window, &mut Context<MainWindow>) -> Vec<AnyElement>
         + 'static,
 {
     let scroll_height = item_sizes
         .iter()
         .fold(px(0.0), |height, item_size| height + item_size.height);
-    let mut list = v_virtual_list(
-        cx.entity(),
-        list_id,
-        item_sizes,
-        render_range,
-    );
+    let mut list = v_virtual_list(cx.entity(), list_id, item_sizes, render_range);
     list = list
         .track_scroll(&scroll_handle)
         .overflow_hidden()
@@ -166,12 +161,7 @@ where
             on_scroll_wheel(this, event, window, cx);
         }))
         .child(list)
-        .child(
-            div()
-                .h(px(LIST_BOTTOM_BAR_HEIGHT))
-                .w_full()
-                .flex_shrink_0(),
-        )
+        .child(div().h(px(LIST_BOTTOM_BAR_HEIGHT)).w_full().flex_shrink_0())
         .child(Scrollbar::vertical(&scroll_handle).scroll_size(size(px(0.0), scroll_height)))
         .into_any_element()
 }

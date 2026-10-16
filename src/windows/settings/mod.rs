@@ -7,7 +7,7 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, Global, Render, ScrollAnchor,
-    Subscription, TitlebarOptions, ScrollHandle, Window, WindowBackgroundAppearance, WindowBounds,
+    ScrollHandle, Subscription, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds,
     WindowDecorations, WindowHandle, WindowKind, WindowOptions, div, px, size,
 };
 use gpui_component::input::{InputEvent, InputState};
@@ -20,8 +20,7 @@ use crate::{
     config::{
         ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, BACKGROUND_IMAGE_BLUR_MAX,
         BACKGROUND_IMAGE_BLUR_MIN, HistoryConfig, SOUND_VOLUME_MAX, WINDOW_MATERIAL_BRIGHTNESS_MAX,
-        WINDOW_MATERIAL_BRIGHTNESS_MIN, WINDOW_MATERIAL_OPACITY_MAX,
-        WINDOW_MATERIAL_OPACITY_MIN,
+        WINDOW_MATERIAL_BRIGHTNESS_MIN, WINDOW_MATERIAL_OPACITY_MAX, WINDOW_MATERIAL_OPACITY_MIN,
     },
     config_runtime, hotkey, i18n,
     services::data_management::DataManagementStats,
@@ -122,7 +121,9 @@ pub(crate) fn open_settings_window(cx: &mut App) {
             window.bounds_changed(cx);
             crate::window_material::register_window(window, cx);
             let view = cx.new(|cx| SettingsWindowView::new(window, cx));
-            cx.update_global::<SettingsWindowService, _>(|service, _| service.view = Some(view.clone()));
+            cx.update_global::<SettingsWindowService, _>(|service, _| {
+                service.view = Some(view.clone())
+            });
             cx.new(|cx| crate::window_material::new_root(view, window, cx))
         },
     );
@@ -144,24 +145,39 @@ pub(crate) fn open_settings_window(cx: &mut App) {
 }
 
 pub(crate) fn offer_legacy_migration(cx: &mut App) {
-    if crate::state_runtime::state(cx).legacy_migration_prompt_dismissed { return; }
+    if crate::state_runtime::state(cx).legacy_migration_prompt_dismissed {
+        return;
+    }
     let translator = i18n::translator(cx);
     cx.spawn(async move |cx| {
-        let Some(source) = cx.background_executor().spawn(async { crate::services::legacy_migration::detect_source() }).await else { return; };
+        let Some(source) = cx
+            .background_executor()
+            .spawn(async { crate::services::legacy_migration::detect_source() })
+            .await
+        else {
+            return;
+        };
         let answer = cx.update(|cx| {
             let window = crate::windows::main::MainWindowService::window_handle(cx)?;
-            window.update(cx, |_, window, cx| window.prompt(
-                gpui::PromptLevel::Info,
-                &translator.translate("migration.title"),
-                Some(&translator.translate("migration.found")),
-                &[
-                    gpui::PromptButton::ok(translator.translate("migration.review")),
-                    gpui::PromptButton::cancel(translator.translate("migration.later")),
-                    gpui::PromptButton::new(translator.translate("migration.never")),
-                ], cx,
-            )).ok()
+            window
+                .update(cx, |_, window, cx| {
+                    window.prompt(
+                        gpui::PromptLevel::Info,
+                        &translator.translate("migration.title"),
+                        Some(&translator.translate("migration.found")),
+                        &[
+                            gpui::PromptButton::ok(translator.translate("migration.review")),
+                            gpui::PromptButton::cancel(translator.translate("migration.later")),
+                            gpui::PromptButton::new(translator.translate("migration.never")),
+                        ],
+                        cx,
+                    )
+                })
+                .ok()
         });
-        let Some(answer) = answer else { return; };
+        let Some(answer) = answer else {
+            return;
+        };
         let choice = answer.await.unwrap_or(1);
         let accepted = choice == 0;
         let dismissed = choice == 2;
@@ -169,18 +185,25 @@ pub(crate) fn offer_legacy_migration(cx: &mut App) {
             if accepted || dismissed {
                 let mut state = crate::state_runtime::state(cx);
                 state.legacy_migration_prompt_dismissed = true;
-                if let Err(error) = crate::state_runtime::set_state(state, cx) { tracing::warn!("保存旧版迁移提示状态失败：{error}"); }
+                if let Err(error) = crate::state_runtime::set_state(state, cx) {
+                    tracing::warn!("保存旧版迁移提示状态失败：{error}");
+                }
             }
             if accepted {
                 open_settings_window(cx);
-                let view = cx.read_global::<SettingsWindowService, _>(|service, _| service.view.clone());
+                let view =
+                    cx.read_global::<SettingsWindowService, _>(|service, _| service.view.clone());
                 if let Some(view) = view {
-                    view.update(cx, |view, cx| { view.active_page = SettingsPage::DataManagement; cx.notify(); });
+                    view.update(cx, |view, cx| {
+                        view.active_page = SettingsPage::DataManagement;
+                        cx.notify();
+                    });
                     pages::start_source_analysis(view, source, cx);
                 }
             }
         });
-    }).detach();
+    })
+    .detach();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -330,103 +353,565 @@ fn open_settings_directory(path: std::path::PathBuf, title_key: &'static str, cx
                 );
             });
         }
-    }).detach();
+    })
+    .detach();
 }
 
 fn search_target_specs() -> &'static [SearchTargetSpec] {
     use SettingsPage::*;
     &[
-        SearchTargetSpec { page: General, title_key: "settings.general.interface_language", description_key: None, ratio: 0.02 },
-        SearchTargetSpec { page: General, title_key: "settings.general.global_notifications", description_key: Some("settings.general.global_notifications_description"), ratio: 0.12 },
-        SearchTargetSpec { page: General, title_key: "settings.notifications.title", description_key: Some("settings.notifications.search_description"), ratio: 0.22 },
-        SearchTargetSpec { page: General, title_key: "settings.general.launch_at_login", description_key: Some("settings.general.launch_at_login_description"), ratio: 0.32 },
-        SearchTargetSpec { page: General, title_key: "settings.general.run_as_administrator", description_key: Some("settings.general.run_as_administrator_description"), ratio: 0.42 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.mouse_left_behavior", description_key: Some("settings.clipboard.mouse_left_behavior_description"), ratio: 0.02 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.mouse_middle_behavior", description_key: Some("settings.clipboard.mouse_middle_behavior_description"), ratio: 0.09 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.edge_hide", description_key: Some("settings.clipboard.edge_hide_description"), ratio: 0.18 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.edge_hide_show_edge", description_key: Some("settings.clipboard.edge_hide_show_edge_description"), ratio: 0.24 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.hover_preview", description_key: Some("settings.clipboard.hover_preview_description"), ratio: 0.30 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.auto_scroll_to_top", description_key: Some("settings.clipboard.auto_scroll_to_top_description"), ratio: 0.46 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.auto_focus_search", description_key: Some("settings.clipboard.auto_focus_search_description"), ratio: 0.52 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.auto_clear_search", description_key: Some("settings.clipboard.auto_clear_search_description"), ratio: 0.58 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.confirm_favorite_removal", description_key: Some("settings.clipboard.confirm_favorite_removal_description"), ratio: 0.64 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.window_position", description_key: Some("settings.clipboard.window_position_description"), ratio: 0.72 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.display_priority", description_key: Some("settings.clipboard.display_priority_description"), ratio: 0.82 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.preview_priority", description_key: Some("settings.clipboard.preview_priority_description"), ratio: 0.90 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.search_engines", description_key: Some("settings.clipboard.search_engines_description"), ratio: 0.96 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.move_pasted_to_first_in_clipboard", description_key: Some("settings.clipboard.move_pasted_to_first_in_clipboard_description"), ratio: 0.36 },
-        SearchTargetSpec { page: Clipboard, title_key: "settings.clipboard.move_pasted_to_first_in_favorites", description_key: Some("settings.clipboard.move_pasted_to_first_in_favorites_description"), ratio: 0.41 },
-        SearchTargetSpec { page: ApplicationFilter, title_key: "settings.application_filter.enabled", description_key: Some("settings.application_filter.enabled_description"), ratio: 0.02 },
-        SearchTargetSpec { page: ApplicationFilter, title_key: "settings.application_filter.scope", description_key: Some("settings.application_filter.scope_description"), ratio: 0.15 },
-        SearchTargetSpec { page: ApplicationFilter, title_key: "settings.application_filter.disable_clipboard", description_key: Some("settings.application_filter.disable_clipboard_description"), ratio: 0.20 },
-        SearchTargetSpec { page: ApplicationFilter, title_key: "settings.application_filter.disable_hotkeys", description_key: Some("settings.application_filter.disable_hotkeys_description"), ratio: 0.24 },
-        SearchTargetSpec { page: ApplicationFilter, title_key: "settings.application_filter.disable_edge_hide", description_key: Some("settings.application_filter.disable_edge_hide_description"), ratio: 0.28 },
-        SearchTargetSpec { page: ApplicationFilter, title_key: "settings.application_filter.manual", description_key: Some("settings.application_filter.manual_description"), ratio: 0.38 },
-        SearchTargetSpec { page: QuickPaste, title_key: "settings.quick_paste.visible_items", description_key: Some("settings.quick_paste.visible_items_description"), ratio: 0.02 },
-        SearchTargetSpec { page: QuickPaste, title_key: "settings.quick_paste.window_width", description_key: Some("settings.quick_paste.window_width_description"), ratio: 0.18 },
-        SearchTargetSpec { page: QuickPaste, title_key: "settings.quick_paste.select_with_up_down", description_key: Some("settings.quick_paste.select_with_up_down_description"), ratio: 0.34 },
-        SearchTargetSpec { page: QuickPaste, title_key: "settings.quick_paste.switch_list_with_left_right", description_key: Some("settings.quick_paste.switch_list_with_left_right_description"), ratio: 0.48 },
-        SearchTargetSpec { page: QuickPaste, title_key: "settings.quick_paste.keep_last_position", description_key: Some("settings.quick_paste.keep_last_position_description"), ratio: 0.62 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.copy_effect", description_key: Some("settings.sound.effect_description"), ratio: 0.02 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.copy_volume", description_key: Some("settings.sound.volume_description"), ratio: 0.14 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.paste_effect", description_key: Some("settings.sound.effect_description"), ratio: 0.26 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.paste_volume", description_key: Some("settings.sound.volume_description"), ratio: 0.38 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.quick_paste_scroll_effect", description_key: Some("settings.sound.effect_description"), ratio: 0.50 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.quick_paste_scroll_volume", description_key: Some("settings.sound.volume_description"), ratio: 0.62 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.toggle_main_window", description_key: None, ratio: 0.02 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.middle_mouse.enabled", description_key: Some("settings.shortcuts.middle_mouse.description"), ratio: 0.06 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.middle_mouse.threshold", description_key: Some("settings.shortcuts.middle_mouse.description"), ratio: 0.10 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.open_settings", description_key: None, ratio: 0.08 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.toggle_clipboard_monitor", description_key: None, ratio: 0.14 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.plain_text_paste", description_key: None, ratio: 0.20 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.quick_paste", description_key: None, ratio: 0.26 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.quick_paste_1_to_9", description_key: None, ratio: 0.34 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.global_section", description_key: Some("settings.shortcuts.global_description"), ratio: 0.00 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.session_section", description_key: Some("settings.shortcuts.session_description"), ratio: 0.54 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.select_previous_item", description_key: None, ratio: 0.62 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.select_next_item", description_key: None, ratio: 0.66 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.select_first_item", description_key: None, ratio: 0.70 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.select_last_item", description_key: None, ratio: 0.74 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.previous_tab", description_key: None, ratio: 0.78 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.next_tab", description_key: None, ratio: 0.82 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.toggle_window_fixed", description_key: None, ratio: 0.86 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.focus_search", description_key: None, ratio: 0.90 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.execute_paste", description_key: None, ratio: 0.92 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.toggle_favorite", description_key: None, ratio: 0.94 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.toggle_pinned", description_key: None, ratio: 0.96 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.delete_item", description_key: None, ratio: 0.98 },
-        SearchTargetSpec { page: Shortcuts, title_key: "settings.shortcuts.hide_window", description_key: None, ratio: 1.00 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.appearance_mode", description_key: Some("settings.personalization.appearance_mode_description"), ratio: 0.02 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.light_theme", description_key: Some("settings.personalization.light_theme_description"), ratio: 0.08 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.dark_theme", description_key: Some("settings.personalization.dark_theme_description"), ratio: 0.14 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.ui_scale", description_key: Some("settings.personalization.ui_scale_description"), ratio: 0.18 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.app_font", description_key: Some("settings.personalization.app_font_description"), ratio: 0.20 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.titlebar_position", description_key: Some("settings.personalization.titlebar_position_description"), ratio: 0.22 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.tab_bar", description_key: None, ratio: 0.27 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.item_display.title", description_key: None, ratio: 0.29 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.animations", description_key: Some("settings.personalization.animations_description"), ratio: 0.31 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.window_material", description_key: Some("settings.personalization.window_material_description"), ratio: 0.32 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.window_material_opacity", description_key: Some("settings.personalization.window_material_opacity_description"), ratio: 0.40 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.background_image", description_key: Some("settings.personalization.background_image_description"), ratio: 0.50 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.background_image_blur", description_key: Some("settings.personalization.background_image_blur_description"), ratio: 0.58 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.window_material_brightness", description_key: Some("settings.personalization.window_material_brightness_description"), ratio: 0.64 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.list_item_style", description_key: Some("settings.personalization.list_item_style_description"), ratio: 0.72 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.card_item_gap", description_key: Some("settings.personalization.card_item_gap_description"), ratio: 0.78 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.list_item_height", description_key: Some("settings.personalization.list_item_height_description"), ratio: 0.84 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.adaptive_max_lines", description_key: Some("settings.personalization.adaptive_max_lines_description"), ratio: 0.90 },
-        SearchTargetSpec { page: Personalization, title_key: "settings.personalization.only_show_notes", description_key: Some("settings.personalization.only_show_notes_description"), ratio: 0.93 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.data_location", description_key: Some("settings.data_management.data_location_description"), ratio: 0.02 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.retention", description_key: Some("settings.data_management.retention_description"), ratio: 0.14 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.max_items", description_key: Some("settings.data_management.max_items_description"), ratio: 0.22 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.stats_title", description_key: Some("settings.data_management.stats_description"), ratio: 0.46 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.actions_title", description_key: Some("settings.data_management.actions_description"), ratio: 0.78 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.cleanup", description_key: None, ratio: 0.82 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.export", description_key: None, ratio: 0.84 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.import", description_key: None, ratio: 0.86 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.clear_all_history", description_key: None, ratio: 0.86 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.reset_application", description_key: None, ratio: 0.86 },
-        SearchTargetSpec { page: DataManagement, title_key: "settings.data_management.open_directory", description_key: None, ratio: 0.88 },
-        SearchTargetSpec { page: Sound, title_key: "settings.sound.external.title", description_key: Some("settings.sound.external.description"), ratio: 0.76 },
+        SearchTargetSpec {
+            page: General,
+            title_key: "settings.general.interface_language",
+            description_key: None,
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: General,
+            title_key: "settings.general.global_notifications",
+            description_key: Some("settings.general.global_notifications_description"),
+            ratio: 0.12,
+        },
+        SearchTargetSpec {
+            page: General,
+            title_key: "settings.notifications.title",
+            description_key: Some("settings.notifications.search_description"),
+            ratio: 0.22,
+        },
+        SearchTargetSpec {
+            page: General,
+            title_key: "settings.general.launch_at_login",
+            description_key: Some("settings.general.launch_at_login_description"),
+            ratio: 0.32,
+        },
+        SearchTargetSpec {
+            page: General,
+            title_key: "settings.general.run_as_administrator",
+            description_key: Some("settings.general.run_as_administrator_description"),
+            ratio: 0.42,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.mouse_left_behavior",
+            description_key: Some("settings.clipboard.mouse_left_behavior_description"),
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.mouse_middle_behavior",
+            description_key: Some("settings.clipboard.mouse_middle_behavior_description"),
+            ratio: 0.09,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.edge_hide",
+            description_key: Some("settings.clipboard.edge_hide_description"),
+            ratio: 0.18,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.edge_hide_show_edge",
+            description_key: Some("settings.clipboard.edge_hide_show_edge_description"),
+            ratio: 0.24,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.hover_preview",
+            description_key: Some("settings.clipboard.hover_preview_description"),
+            ratio: 0.30,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.auto_scroll_to_top",
+            description_key: Some("settings.clipboard.auto_scroll_to_top_description"),
+            ratio: 0.46,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.auto_focus_search",
+            description_key: Some("settings.clipboard.auto_focus_search_description"),
+            ratio: 0.52,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.auto_clear_search",
+            description_key: Some("settings.clipboard.auto_clear_search_description"),
+            ratio: 0.58,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.confirm_favorite_removal",
+            description_key: Some("settings.clipboard.confirm_favorite_removal_description"),
+            ratio: 0.64,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.window_position",
+            description_key: Some("settings.clipboard.window_position_description"),
+            ratio: 0.72,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.display_priority",
+            description_key: Some("settings.clipboard.display_priority_description"),
+            ratio: 0.82,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.preview_priority",
+            description_key: Some("settings.clipboard.preview_priority_description"),
+            ratio: 0.90,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.search_engines",
+            description_key: Some("settings.clipboard.search_engines_description"),
+            ratio: 0.96,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.move_pasted_to_first_in_clipboard",
+            description_key: Some(
+                "settings.clipboard.move_pasted_to_first_in_clipboard_description",
+            ),
+            ratio: 0.36,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.move_pasted_to_first_in_favorites",
+            description_key: Some(
+                "settings.clipboard.move_pasted_to_first_in_favorites_description",
+            ),
+            ratio: 0.41,
+        },
+        SearchTargetSpec {
+            page: ApplicationFilter,
+            title_key: "settings.application_filter.enabled",
+            description_key: Some("settings.application_filter.enabled_description"),
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: ApplicationFilter,
+            title_key: "settings.application_filter.scope",
+            description_key: Some("settings.application_filter.scope_description"),
+            ratio: 0.15,
+        },
+        SearchTargetSpec {
+            page: ApplicationFilter,
+            title_key: "settings.application_filter.disable_clipboard",
+            description_key: Some("settings.application_filter.disable_clipboard_description"),
+            ratio: 0.20,
+        },
+        SearchTargetSpec {
+            page: ApplicationFilter,
+            title_key: "settings.application_filter.disable_hotkeys",
+            description_key: Some("settings.application_filter.disable_hotkeys_description"),
+            ratio: 0.24,
+        },
+        SearchTargetSpec {
+            page: ApplicationFilter,
+            title_key: "settings.application_filter.disable_edge_hide",
+            description_key: Some("settings.application_filter.disable_edge_hide_description"),
+            ratio: 0.28,
+        },
+        SearchTargetSpec {
+            page: ApplicationFilter,
+            title_key: "settings.application_filter.manual",
+            description_key: Some("settings.application_filter.manual_description"),
+            ratio: 0.38,
+        },
+        SearchTargetSpec {
+            page: QuickPaste,
+            title_key: "settings.quick_paste.visible_items",
+            description_key: Some("settings.quick_paste.visible_items_description"),
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: QuickPaste,
+            title_key: "settings.quick_paste.window_width",
+            description_key: Some("settings.quick_paste.window_width_description"),
+            ratio: 0.18,
+        },
+        SearchTargetSpec {
+            page: QuickPaste,
+            title_key: "settings.quick_paste.select_with_up_down",
+            description_key: Some("settings.quick_paste.select_with_up_down_description"),
+            ratio: 0.34,
+        },
+        SearchTargetSpec {
+            page: QuickPaste,
+            title_key: "settings.quick_paste.switch_list_with_left_right",
+            description_key: Some("settings.quick_paste.switch_list_with_left_right_description"),
+            ratio: 0.48,
+        },
+        SearchTargetSpec {
+            page: QuickPaste,
+            title_key: "settings.quick_paste.keep_last_position",
+            description_key: Some("settings.quick_paste.keep_last_position_description"),
+            ratio: 0.62,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.copy_effect",
+            description_key: Some("settings.sound.effect_description"),
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.copy_volume",
+            description_key: Some("settings.sound.volume_description"),
+            ratio: 0.14,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.paste_effect",
+            description_key: Some("settings.sound.effect_description"),
+            ratio: 0.26,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.paste_volume",
+            description_key: Some("settings.sound.volume_description"),
+            ratio: 0.38,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.quick_paste_scroll_effect",
+            description_key: Some("settings.sound.effect_description"),
+            ratio: 0.50,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.quick_paste_scroll_volume",
+            description_key: Some("settings.sound.volume_description"),
+            ratio: 0.62,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.toggle_main_window",
+            description_key: None,
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.middle_mouse.enabled",
+            description_key: Some("settings.shortcuts.middle_mouse.description"),
+            ratio: 0.06,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.middle_mouse.threshold",
+            description_key: Some("settings.shortcuts.middle_mouse.description"),
+            ratio: 0.10,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.open_settings",
+            description_key: None,
+            ratio: 0.08,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.toggle_clipboard_monitor",
+            description_key: None,
+            ratio: 0.14,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.plain_text_paste",
+            description_key: None,
+            ratio: 0.20,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.quick_paste",
+            description_key: None,
+            ratio: 0.26,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.quick_paste_1_to_9",
+            description_key: None,
+            ratio: 0.34,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.global_section",
+            description_key: Some("settings.shortcuts.global_description"),
+            ratio: 0.00,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.session_section",
+            description_key: Some("settings.shortcuts.session_description"),
+            ratio: 0.54,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.select_previous_item",
+            description_key: None,
+            ratio: 0.62,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.select_next_item",
+            description_key: None,
+            ratio: 0.66,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.select_first_item",
+            description_key: None,
+            ratio: 0.70,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.select_last_item",
+            description_key: None,
+            ratio: 0.74,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.previous_tab",
+            description_key: None,
+            ratio: 0.78,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.next_tab",
+            description_key: None,
+            ratio: 0.82,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.toggle_window_fixed",
+            description_key: None,
+            ratio: 0.86,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.focus_search",
+            description_key: None,
+            ratio: 0.90,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.execute_paste",
+            description_key: None,
+            ratio: 0.92,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.toggle_favorite",
+            description_key: None,
+            ratio: 0.94,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.toggle_pinned",
+            description_key: None,
+            ratio: 0.96,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.delete_item",
+            description_key: None,
+            ratio: 0.98,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.hide_window",
+            description_key: None,
+            ratio: 1.00,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.appearance_mode",
+            description_key: Some("settings.personalization.appearance_mode_description"),
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.light_theme",
+            description_key: Some("settings.personalization.light_theme_description"),
+            ratio: 0.08,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.dark_theme",
+            description_key: Some("settings.personalization.dark_theme_description"),
+            ratio: 0.14,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.ui_scale",
+            description_key: Some("settings.personalization.ui_scale_description"),
+            ratio: 0.18,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.app_font",
+            description_key: Some("settings.personalization.app_font_description"),
+            ratio: 0.20,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.titlebar_position",
+            description_key: Some("settings.personalization.titlebar_position_description"),
+            ratio: 0.22,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.tab_bar",
+            description_key: None,
+            ratio: 0.27,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.item_display.title",
+            description_key: None,
+            ratio: 0.29,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.animations",
+            description_key: Some("settings.personalization.animations_description"),
+            ratio: 0.31,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.window_material",
+            description_key: Some("settings.personalization.window_material_description"),
+            ratio: 0.32,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.window_material_opacity",
+            description_key: Some("settings.personalization.window_material_opacity_description"),
+            ratio: 0.40,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.background_image",
+            description_key: Some("settings.personalization.background_image_description"),
+            ratio: 0.50,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.background_image_blur",
+            description_key: Some("settings.personalization.background_image_blur_description"),
+            ratio: 0.58,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.window_material_brightness",
+            description_key: Some(
+                "settings.personalization.window_material_brightness_description",
+            ),
+            ratio: 0.64,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.list_item_style",
+            description_key: Some("settings.personalization.list_item_style_description"),
+            ratio: 0.72,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.card_item_gap",
+            description_key: Some("settings.personalization.card_item_gap_description"),
+            ratio: 0.78,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.list_item_height",
+            description_key: Some("settings.personalization.list_item_height_description"),
+            ratio: 0.84,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.adaptive_max_lines",
+            description_key: Some("settings.personalization.adaptive_max_lines_description"),
+            ratio: 0.90,
+        },
+        SearchTargetSpec {
+            page: Personalization,
+            title_key: "settings.personalization.only_show_notes",
+            description_key: Some("settings.personalization.only_show_notes_description"),
+            ratio: 0.93,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.data_location",
+            description_key: Some("settings.data_management.data_location_description"),
+            ratio: 0.02,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.retention",
+            description_key: Some("settings.data_management.retention_description"),
+            ratio: 0.14,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.max_items",
+            description_key: Some("settings.data_management.max_items_description"),
+            ratio: 0.22,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.stats_title",
+            description_key: Some("settings.data_management.stats_description"),
+            ratio: 0.46,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.actions_title",
+            description_key: Some("settings.data_management.actions_description"),
+            ratio: 0.78,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.cleanup",
+            description_key: None,
+            ratio: 0.82,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.export",
+            description_key: None,
+            ratio: 0.84,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.import",
+            description_key: None,
+            ratio: 0.86,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.clear_all_history",
+            description_key: None,
+            ratio: 0.86,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.reset_application",
+            description_key: None,
+            ratio: 0.86,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
+            title_key: "settings.data_management.open_directory",
+            description_key: None,
+            ratio: 0.88,
+        },
+        SearchTargetSpec {
+            page: Sound,
+            title_key: "settings.sound.external.title",
+            description_key: Some("settings.sound.external.description"),
+            ratio: 0.76,
+        },
     ]
 }
 
@@ -539,27 +1024,35 @@ struct SettingsWindowView {
 
 impl SettingsWindowView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let middle_mouse_threshold = config_runtime::shortcuts_config(cx).middle_mouse.hold_threshold_ms;
+        let middle_mouse_threshold = config_runtime::shortcuts_config(cx)
+            .middle_mouse
+            .hold_threshold_ms;
         let middle_mouse_threshold_slider = cx.new(|_| {
-            SliderState::new().min(10.0).max(1000.0).step(1.0).default_value(
-                f32::from(middle_mouse_threshold),
-            )
+            SliderState::new()
+                .min(10.0)
+                .max(1000.0)
+                .step(1.0)
+                .default_value(f32::from(middle_mouse_threshold))
         });
         let middle_mouse_threshold_subscription = cx.subscribe_in(
             &middle_mouse_threshold_slider,
             window,
             |view, _, event: &SliderEvent, _, cx| {
-                let SliderEvent::Change(value) = event else { return; };
+                let SliderEvent::Change(value) = event else {
+                    return;
+                };
                 let mut config = config_runtime::shortcuts_config(cx).middle_mouse;
                 let threshold = value.end().round().clamp(10.0, 1000.0) as u16;
                 if !config.enabled || config.hold_threshold_ms == threshold {
                     return;
                 }
                 config.hold_threshold_ms = threshold;
-                let error = hotkey::set_middle_mouse_config(config, cx).err().map(|error| {
-                    tracing::error!("保存鼠标中键长按阈值失败：{error}");
-                    i18n::translator(cx).translate("settings.shortcuts.save_error")
-                });
+                let error = hotkey::set_middle_mouse_config(config, cx)
+                    .err()
+                    .map(|error| {
+                        tracing::error!("保存鼠标中键长按阈值失败：{error}");
+                        i18n::translator(cx).translate("settings.shortcuts.save_error")
+                    });
                 view.shortcut_error = notify_settings_error(SettingsPage::Shortcuts, error, cx);
                 cx.notify();
             },
@@ -572,8 +1065,7 @@ impl SettingsWindowView {
                 .step(1.0)
                 .default_value(f32::from(adaptive_max_lines))
         });
-        let window_material_opacity =
-            config_runtime::appearance_config(cx).window_material_opacity;
+        let window_material_opacity = config_runtime::appearance_config(cx).window_material_opacity;
         let window_material_opacity_slider = cx.new(|_| {
             SliderState::new()
                 .min(WINDOW_MATERIAL_OPACITY_MIN)
@@ -620,8 +1112,8 @@ impl SettingsWindowView {
                 .default_value(f32::from(sound_config.copy.volume))
         });
         let history_config = config_runtime::history_config(cx);
-        let unlimited_placeholder = i18n::translator(cx)
-            .translate("settings.data_management.unlimited");
+        let unlimited_placeholder =
+            i18n::translator(cx).translate("settings.data_management.unlimited");
         let history_retention_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(unlimited_placeholder.clone())
@@ -638,8 +1130,7 @@ impl SettingsWindowView {
         });
         let application_filter_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(
-                i18n::translator(cx)
-                    .translate("settings.application_filter.manual_placeholder"),
+                i18n::translator(cx).translate("settings.application_filter.manual_placeholder"),
             )
         });
         let update_proxy_input = cx.new(|cx| {
@@ -663,7 +1154,10 @@ impl SettingsWindowView {
                     view.search_results_visible = !input.read(cx).value().trim().is_empty();
                     cx.notify();
                 }
-                InputEvent::PressEnter { secondary: false, shift: false } => {
+                InputEvent::PressEnter {
+                    secondary: false,
+                    shift: false,
+                } => {
                     let query = input.read(cx).value().to_string();
                     if let Some(target) = search_targets(&i18n::translator(cx), &query)
                         .into_iter()
@@ -694,9 +1188,14 @@ impl SettingsWindowView {
                     Ok(_) => view.data_error = None,
                     Err(error) => {
                         tracing::error!("保存历史保留时间失败：{error}");
-                        view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(i18n::translator(cx).translate(
-                            "settings.data_management.history_save_error",
-                        )), cx);
+                        view.data_error = notify_settings_error(
+                            SettingsPage::DataManagement,
+                            Some(
+                                i18n::translator(cx)
+                                    .translate("settings.data_management.history_save_error"),
+                            ),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -721,9 +1220,14 @@ impl SettingsWindowView {
                     Ok(_) => view.data_error = None,
                     Err(error) => {
                         tracing::error!("保存最大历史条数失败：{error}");
-                        view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(i18n::translator(cx).translate(
-                            "settings.data_management.history_save_error",
-                        )), cx);
+                        view.data_error = notify_settings_error(
+                            SettingsPage::DataManagement,
+                            Some(
+                                i18n::translator(cx)
+                                    .translate("settings.data_management.history_save_error"),
+                            ),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -771,8 +1275,7 @@ impl SettingsWindowView {
                 );
             },
         );
-        let blur_save_error =
-            i18n::translator(cx).translate("settings.personalization.save_error");
+        let blur_save_error = i18n::translator(cx).translate("settings.personalization.save_error");
         let background_image_blur_subscription = cx.subscribe_in(
             &background_image_blur_slider,
             window,
@@ -1073,11 +1576,7 @@ impl SettingsWindowView {
         .detach();
     }
 
-    fn select_search_result(
-        &mut self,
-        target: SearchTarget,
-        cx: &mut Context<Self>,
-    ) {
+    fn select_search_result(&mut self, target: SearchTarget, cx: &mut Context<Self>) {
         self.active_page = target.page;
         self.search_results_visible = false;
         self.pending_search_scroll = Some((target.page, target.ratio));
@@ -1162,9 +1661,11 @@ impl SettingsWindowView {
                     }
                     Err(error) => {
                         tracing::error!("读取数据统计失败：{error}");
-                        view.data_error = notify_settings_error(SettingsPage::DataManagement, Some(translator.translate(
-                            "settings.data_management.stats_error",
-                        )), cx);
+                        view.data_error = notify_settings_error(
+                            SettingsPage::DataManagement,
+                            Some(translator.translate("settings.data_management.stats_error")),
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -1185,11 +1686,12 @@ impl SettingsWindowView {
 
     fn sync_window_material_opacity_slider(&self, window: &mut Window, cx: &mut Context<Self>) {
         let opacity = config_runtime::appearance_config(cx).window_material_opacity;
-        self.window_material_opacity_slider.update(cx, |slider, cx| {
-            if slider.value() != SliderValue::Single(opacity) {
-                slider.set_value(opacity, window, cx);
-            }
-        });
+        self.window_material_opacity_slider
+            .update(cx, |slider, cx| {
+                if slider.value() != SliderValue::Single(opacity) {
+                    slider.set_value(opacity, window, cx);
+                }
+            });
     }
 
     fn sync_background_image_blur_slider(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1201,11 +1703,7 @@ impl SettingsWindowView {
         });
     }
 
-    fn sync_window_material_brightness_slider(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn sync_window_material_brightness_slider(&self, window: &mut Window, cx: &mut Context<Self>) {
         let brightness = crate::window_material::current_brightness(cx);
         self.window_material_brightness_slider
             .update(cx, |slider, cx| {
@@ -1282,7 +1780,11 @@ impl Render for SettingsWindowView {
         }
         self.sync_history_inputs(window, cx);
         self.sync_adaptive_max_lines_slider(window, cx);
-        let threshold = f32::from(config_runtime::shortcuts_config(cx).middle_mouse.hold_threshold_ms);
+        let threshold = f32::from(
+            config_runtime::shortcuts_config(cx)
+                .middle_mouse
+                .hold_threshold_ms,
+        );
         self.middle_mouse_threshold_slider.update(cx, |slider, cx| {
             if slider.value() != SliderValue::Single(threshold) {
                 slider.set_value(threshold, window, cx);
@@ -1312,7 +1814,8 @@ impl Render for SettingsWindowView {
                     let _ = view.update(cx, |view, cx| {
                         if view.search_highlight_generation == highlighted_generation
                             && view.highlighted_search_page == Some(highlighted_page)
-                            && view.highlighted_search.as_deref() == Some(highlighted_title.as_str())
+                            && view.highlighted_search.as_deref()
+                                == Some(highlighted_title.as_str())
                         {
                             view.search_highlight_visible = true;
                             view.schedule_search_highlight_hide(cx);

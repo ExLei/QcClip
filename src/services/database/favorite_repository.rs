@@ -3,7 +3,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params, params_from_iter, types::Value};
+use rusqlite::{
+    OptionalExtension, Transaction, TransactionBehavior, params, params_from_iter, types::Value,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -14,11 +16,10 @@ use super::{
     Database,
     models::{LIST_ORDER_BASE, LIST_ORDER_GAP},
     query::{
-        HistoryContentFilter, HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot,
-        PasteFilter, collect_order_snapshot,
-        append_search_filter, append_tag_filter, load_preview_options, parse_application_icon_source,
-        parse_content_kind,
-        parse_tag_ids, preview_text_expression,
+        HistoryContentFilter, HistoryListRecord, HistoryQuery, HistoryQueryError,
+        ListOrderSnapshot, PasteFilter, append_search_filter, append_tag_filter,
+        collect_order_snapshot, load_preview_options, parse_application_icon_source,
+        parse_content_kind, parse_tag_ids, preview_text_expression,
     },
 };
 
@@ -392,13 +393,11 @@ impl FavoriteRepository {
              WHERE {}",
             conditions.join(" AND ")
         );
-        let count: i64 = connection.query_row(
-            &sql,
-            params_from_iter(parameters.iter()),
-            |row| row.get(0),
-        )?;
-        usize::try_from(count)
-            .map_err(|_| HistoryQueryError::InvalidNonNegativeValue("pinned_favorite_count".to_owned()))
+        let count: i64 =
+            connection.query_row(&sql, params_from_iter(parameters.iter()), |row| row.get(0))?;
+        usize::try_from(count).map_err(|_| {
+            HistoryQueryError::InvalidNonNegativeValue("pinned_favorite_count".to_owned())
+        })
     }
 
     pub fn item_ids_for_favorite_ids(
@@ -438,7 +437,10 @@ impl FavoriteRepository {
         Ok(self.query_order(query, false)?.ids)
     }
 
-    pub fn ordered_snapshot(&self, query: &HistoryQuery) -> Result<ListOrderSnapshot, HistoryQueryError> {
+    pub fn ordered_snapshot(
+        &self,
+        query: &HistoryQuery,
+    ) -> Result<ListOrderSnapshot, HistoryQueryError> {
         self.query_order(query, true)
     }
 
@@ -492,7 +494,11 @@ impl FavoriteRepository {
             .is_some_and(|value| !value.is_empty())
             .then_some("LEFT JOIN clipboard_history AS h ON h.item_id = f.item_id\n             ")
             .unwrap_or_default();
-        let columns = if include_heat { "f.id, f.paste_count" } else { "f.id" };
+        let columns = if include_heat {
+            "f.id, f.paste_count"
+        } else {
+            "f.id"
+        };
         let sql = format!(
             "SELECT {columns}
              FROM favorites AS f
@@ -505,7 +511,10 @@ impl FavoriteRepository {
             conditions.join(" AND ")
         );
         let mut statement = connection.prepare(&sql)?;
-        collect_order_snapshot(statement.query(params_from_iter(parameters.iter()))?, include_heat)
+        collect_order_snapshot(
+            statement.query(params_from_iter(parameters.iter()))?,
+            include_heat,
+        )
     }
 
     fn query_internal(
@@ -564,7 +573,11 @@ impl FavoriteRepository {
         let limit = favorite_ids
             .map(|favorite_ids| favorite_ids.len())
             .unwrap_or_else(|| query.limit.min(500) as usize);
-        let offset = if favorite_ids.is_some() { 0 } else { query.offset as usize };
+        let offset = if favorite_ids.is_some() {
+            0
+        } else {
+            query.offset as usize
+        };
         parameters.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
         parameters.push(Value::Integer(i64::try_from(offset).unwrap_or(i64::MAX)));
         let preview_text = preview_text_expression("i.preview_text", query.preview_char_limit);
@@ -705,12 +718,8 @@ fn shift_favorite_order(
     if source_order == target_order {
         return Ok(());
     }
-    let mut destination_order = favorite_order_between(
-        transaction,
-        is_pinned,
-        source_order,
-        target_order,
-    )?;
+    let mut destination_order =
+        favorite_order_between(transaction, is_pinned, source_order, target_order)?;
     if destination_order.is_none() {
         rebalance_favorite_order(transaction, is_pinned)?;
         let (source_order, target_order): (i64, i64) = transaction.query_row(
@@ -720,12 +729,8 @@ fn shift_favorite_order(
             params![favorite_id, target_favorite_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        destination_order = favorite_order_between(
-            transaction,
-            is_pinned,
-            source_order,
-            target_order,
-        )?;
+        destination_order =
+            favorite_order_between(transaction, is_pinned, source_order, target_order)?;
     }
     let destination_order = destination_order.ok_or(FavoriteReorderError::SortOrderOverflow)?;
     let timestamp = current_timestamp_millis();
@@ -787,9 +792,8 @@ fn rebalance_favorite_order(
     transaction: &Transaction<'_>,
     is_pinned: bool,
 ) -> Result<(), FavoriteReorderError> {
-    let mut statement = transaction.prepare(
-        "SELECT id FROM favorites WHERE is_pinned = ?1 ORDER BY sort_order DESC",
-    )?;
+    let mut statement = transaction
+        .prepare("SELECT id FROM favorites WHERE is_pinned = ?1 ORDER BY sort_order DESC")?;
     let ordered_ids = statement
         .query_map([is_pinned], |row| row.get::<_, i64>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -802,8 +806,8 @@ fn rebalance_favorite_order(
         [is_pinned],
         |row| row.get(0),
     )?;
-    let row_count = i64::try_from(ordered_ids.len())
-        .map_err(|_| FavoriteReorderError::SortOrderOverflow)?;
+    let row_count =
+        i64::try_from(ordered_ids.len()).map_err(|_| FavoriteReorderError::SortOrderOverflow)?;
     let temporary_offset = max_order
         .checked_add(LIST_ORDER_BASE)
         .and_then(|value| value.checked_add(row_count))
@@ -817,7 +821,10 @@ fn rebalance_favorite_order(
         .checked_add(row_count)
         .and_then(|value| value.checked_mul(LIST_ORDER_GAP))
         .ok_or(FavoriteReorderError::SortOrderOverflow)?;
-    if temporary_offset <= max_order || temporary_max < temporary_offset || final_max >= temporary_offset {
+    if temporary_offset <= max_order
+        || temporary_max < temporary_offset
+        || final_max >= temporary_offset
+    {
         return Err(FavoriteReorderError::SortOrderOverflow);
     }
     transaction.execute(
@@ -826,8 +833,8 @@ fn rebalance_favorite_order(
     )?;
     let timestamp = current_timestamp_millis();
     for (index, favorite_id) in ordered_ids.iter().rev().enumerate() {
-        let reverse_index = i64::try_from(index)
-            .map_err(|_| FavoriteReorderError::SortOrderOverflow)?;
+        let reverse_index =
+            i64::try_from(index).map_err(|_| FavoriteReorderError::SortOrderOverflow)?;
         let sort_order = LIST_ORDER_BASE
             .checked_add(reverse_index)
             .and_then(|value| value.checked_mul(LIST_ORDER_GAP))
@@ -900,17 +907,20 @@ mod tests {
                 .expect("收藏 ID 排序失败"),
             vec![2, 1]
         );
-        connection.execute(
-            "UPDATE favorites SET paste_count = 23 WHERE id = 2", [],
-        ).expect("无法更新收藏粘贴次数");
-        let snapshot = favorite_repository.ordered_snapshot(&HistoryQuery::default())
+        connection
+            .execute("UPDATE favorites SET paste_count = 23 WHERE id = 2", [])
+            .expect("无法更新收藏粘贴次数");
+        let snapshot = favorite_repository
+            .ordered_snapshot(&HistoryQuery::default())
             .expect("无法读取收藏热度快照");
         assert_eq!(snapshot.ids, vec![2, 1]);
         assert_eq!(snapshot.paste_counts, vec![23, 0]);
-        let filtered = favorite_repository.ordered_snapshot(&HistoryQuery {
-            paste_filter: Some(PasteFilter::Pasted),
-            ..HistoryQuery::default()
-        }).expect("无法筛选收藏热度");
+        let filtered = favorite_repository
+            .ordered_snapshot(&HistoryQuery {
+                paste_filter: Some(PasteFilter::Pasted),
+                ..HistoryQuery::default()
+            })
+            .expect("无法筛选收藏热度");
         assert_eq!(filtered.ids, vec![2]);
         assert_eq!(filtered.paste_counts, vec![23]);
 
@@ -1008,7 +1018,11 @@ mod tests {
             .expect("无法保存第三条收藏");
         let repository = FavoriteRepository::new(database.clone());
         for item_id in [first, second, third] {
-            assert!(repository.add_to_favorites(item_id).expect("无法添加测试收藏"));
+            assert!(
+                repository
+                    .add_to_favorites(item_id)
+                    .expect("无法添加测试收藏")
+            );
         }
         let favorite_ids = database
             .connect()

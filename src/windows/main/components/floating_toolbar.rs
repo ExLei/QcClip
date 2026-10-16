@@ -1,10 +1,10 @@
 use crate::ui::scale::ui_rem;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnimationExt, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
     SpringAnimation, SpringConfig, StatefulInteractiveElement, Styled, div, px,
 };
-use gpui::prelude::FluentBuilder as _;
 use gpui_component::{ActiveTheme as _, VirtualListScrollHandle, tooltip::Tooltip};
 
 use crate::{
@@ -53,10 +53,8 @@ pub fn render(
     cx: &mut Context<MainWindow>,
 ) -> gpui::AnyElement {
     let theme = cx.theme().colors;
-    let animations_enabled = crate::config_runtime::animation_enabled(
-        cx,
-        crate::config::AnimationKind::FloatingToolbar,
-    );
+    let animations_enabled =
+        crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::FloatingToolbar);
     let translator = i18n::translator(cx);
     let show_scroll_top = scroll_handle.offset().y < px(-SCROLL_TOP_THRESHOLD);
     let ui_scale = crate::ui::scale::theme_scale(cx);
@@ -189,12 +187,9 @@ pub fn render(
                     };
                     let delta_y = drag.start_mouse_y - event.position.y;
                     let mut new_bottom = drag.start_bottom + delta_y;
-                    let container_height =
-                        this.floating_toolbar_container_bounds.size.height;
-                    let max_bottom = (container_height
-                        - px(toolbar_height)
-                        - px(MIN_BOTTOM))
-                    .max(px(MIN_BOTTOM));
+                    let container_height = this.floating_toolbar_container_bounds.size.height;
+                    let max_bottom = (container_height - px(toolbar_height) - px(MIN_BOTTOM))
+                        .max(px(MIN_BOTTOM));
                     new_bottom = new_bottom.clamp(px(MIN_BOTTOM), max_bottom);
                     if new_bottom != this.floating_toolbar_bottom {
                         this.floating_toolbar_bottom = new_bottom;
@@ -247,9 +242,7 @@ pub fn render(
                 } else {
                     scroll_top_container.into_any_element()
                 };
-                buttons = buttons.child(
-                    scroll_top_container,
-                );
+                buttons = buttons.child(scroll_top_container);
             }
             buttons.child(drag_handle)
         });

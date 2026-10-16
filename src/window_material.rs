@@ -9,8 +9,8 @@ use gpui_component::{ActiveTheme as _, Root, Theme, ThemeColor};
 
 use crate::{
     config::{
-        AppearanceConfig, WINDOW_MATERIAL_BRIGHTNESS_MAX, WINDOW_MATERIAL_BRIGHTNESS_MIN,
-        BACKGROUND_IMAGE_BLUR_DEFAULT, WINDOW_MATERIAL_BRIGHTNESS_DEFAULT,
+        AppearanceConfig, BACKGROUND_IMAGE_BLUR_DEFAULT, WINDOW_MATERIAL_BRIGHTNESS_DEFAULT,
+        WINDOW_MATERIAL_BRIGHTNESS_MAX, WINDOW_MATERIAL_BRIGHTNESS_MIN,
         WINDOW_MATERIAL_OPACITY_MAX, WINDOW_MATERIAL_OPACITY_MIN, WindowMaterial,
     },
     platform::{
@@ -103,9 +103,12 @@ pub(crate) fn with_background(
     cx: &App,
 ) -> impl IntoElement {
     let background = background_element(window, cx);
-    div().relative().size_full()
+    div()
+        .relative()
+        .size_full()
         .font_family(cx.theme().font_family.clone())
-        .child(background).child(view)
+        .child(background)
+        .child(view)
 }
 
 pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement {
@@ -128,8 +131,8 @@ pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement 
         }
         return div().absolute().inset_0().into_any_element();
     }
-    let Some(image) = cx
-        .read_global::<WindowMaterialRuntime, _>(|runtime, _| runtime.background_image.clone())
+    let Some(image) =
+        cx.read_global::<WindowMaterialRuntime, _>(|runtime, _| runtime.background_image.clone())
     else {
         return div().absolute().inset_0().into_any_element();
     };
@@ -401,10 +404,7 @@ fn apply_theme_colors(cx: &mut App) {
 }
 
 /// 将界面不透明度直接乘到主题表面原有的 Alpha 上，保留主题各角色的颜色和层次。
-fn material_colors(
-    base: ThemeColor,
-    window_opacity: f32,
-) -> ThemeColor {
+fn material_colors(base: ThemeColor, window_opacity: f32) -> ThemeColor {
     let window_alpha =
         window_opacity.clamp(WINDOW_MATERIAL_OPACITY_MIN, WINDOW_MATERIAL_OPACITY_MAX);
     let mut colors = base;

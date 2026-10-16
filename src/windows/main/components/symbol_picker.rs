@@ -40,12 +40,15 @@ pub(crate) fn render(
     if let Some(category) = scroll_target {
         if let Some(index) = main.symbol_category_row_indices.get(&category).copied() {
             let mut offset = main.symbol_scroll_handle.offset();
-            offset.y = px(-symbol_list::row_top(&rows, index) * crate::ui::scale::window_scale(window));
+            offset.y =
+                px(-symbol_list::row_top(&rows, index) * crate::ui::scale::window_scale(window));
             main.symbol_scroll_handle.set_offset(offset);
         }
     } else if main.symbol_search_query.trim().is_empty()
-        && let Some(category) =
-            symbol_list::category_at_scroll(&rows, main.symbol_scroll_handle.offset().y / crate::ui::scale::window_scale(window))
+        && let Some(category) = symbol_list::category_at_scroll(
+            &rows,
+            main.symbol_scroll_handle.offset().y / crate::ui::scale::window_scale(window),
+        )
     {
         main.symbol_group = category;
     }

@@ -24,8 +24,7 @@ impl MainWindow {
                 .multi_selection_anchor
                 .or(self.selected_item_id)
                 .unwrap_or(history_id);
-            let Some(anchor_index) = self.list_order_positions.get(&anchor).copied()
-            else {
+            let Some(anchor_index) = self.list_order_positions.get(&anchor).copied() else {
                 self.multi_selected_item_ids.clear();
                 self.multi_selected_item_ids.push(history_id);
                 self.multi_selection_anchor = Some(history_id);
@@ -65,8 +64,8 @@ impl MainWindow {
             } else {
                 self.multi_selected_item_ids.push(history_id);
             }
-            self.multi_selection_anchor = (!self.multi_selected_item_ids.is_empty())
-                .then_some(history_id);
+            self.multi_selection_anchor =
+                (!self.multi_selected_item_ids.is_empty()).then_some(history_id);
         } else {
             if let Some(index) = self
                 .multi_selected_item_ids
@@ -108,8 +107,7 @@ impl MainWindow {
     pub(crate) fn can_follow_mouse_hover(&mut self) -> bool {
         if keyboard_hover_is_suppressed(
             self.keyboard_selection_mouse_move_sequence,
-            crate::platform::input::pointer_snapshot()
-                .map(|snapshot| snapshot.mouse_move_sequence),
+            crate::platform::input::pointer_snapshot().map(|snapshot| snapshot.mouse_move_sequence),
         ) {
             return false;
         }
@@ -171,8 +169,8 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.keyboard_selection_mouse_move_sequence = crate::platform::input::pointer_snapshot()
-            .map(|snapshot| snapshot.mouse_move_sequence);
+        self.keyboard_selection_mouse_move_sequence =
+            crate::platform::input::pointer_snapshot().map(|snapshot| snapshot.mouse_move_sequence);
         self.selected_item_id = Some(history_id);
         self.reconcile_selection();
         self.list_scroll_handle
@@ -194,7 +192,10 @@ impl MainWindow {
         if tabs.is_empty() {
             return;
         }
-        let index = tabs.iter().position(|tab| tab.id == self.active_tab).unwrap_or(0);
+        let index = tabs
+            .iter()
+            .position(|tab| tab.id == self.active_tab)
+            .unwrap_or(0);
         let count = tabs.len();
         let next_index = (index as isize + direction).rem_euclid(count as isize) as usize;
         self.select_tab(tabs[next_index].id, cx);
@@ -237,12 +238,7 @@ impl MainWindow {
         let Some(item) = self.selected_list_item() else {
             return;
         };
-        self.set_item_pinned(
-            item.history_id,
-            item.favorite_id,
-            !item.is_pinned,
-            cx,
-        );
+        self.set_item_pinned(item.history_id, item.favorite_id, !item.is_pinned, cx);
     }
 
     pub(crate) fn delete_selected_item(&mut self, cx: &mut Context<Self>) {
@@ -460,7 +456,8 @@ impl MainWindow {
         if self.list_drag_source_id != Some(target.source_id) {
             return false;
         }
-        let Some(target_position) = self.list_order_positions.get(&target.target_id).copied() else {
+        let Some(target_position) = self.list_order_positions.get(&target.target_id).copied()
+        else {
             return false;
         };
         let Some(source_position) = self.list_order_positions.get(&target.source_id).copied()
@@ -533,19 +530,21 @@ impl MainWindow {
         let source_origin = self.list_drag_origin_position?;
         let source_position = self.list_order_positions.get(&source_id).copied()?;
 
-        Some(if source_position < source_origin
-            && current_position > source_position
-            && current_position <= source_origin
-        {
-            current_position - 1
-        } else if source_position > source_origin
-            && current_position >= source_origin
-            && current_position < source_position
-        {
-            current_position + 1
-        } else {
-            current_position
-        })
+        Some(
+            if source_position < source_origin
+                && current_position > source_position
+                && current_position <= source_origin
+            {
+                current_position - 1
+            } else if source_position > source_origin
+                && current_position >= source_origin
+                && current_position < source_position
+            {
+                current_position + 1
+            } else {
+                current_position
+            },
+        )
     }
 
     pub(crate) fn cancel_reorder_preview(&mut self) -> bool {
@@ -591,9 +590,7 @@ impl MainWindow {
                     .and_then(|position| self.list_order_ids.get(position))
                     .copied()
             } else if source_position < origin_position {
-                self.list_order_ids
-                    .get(source_position + 1)
-                    .copied()
+                self.list_order_ids.get(source_position + 1).copied()
             } else {
                 None
             }
@@ -718,5 +715,4 @@ impl MainWindow {
         self.reconcile_selection();
         true
     }
-
 }

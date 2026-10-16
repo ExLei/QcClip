@@ -603,11 +603,7 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn handle_window_shown(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn handle_window_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let clipboard = crate::config_runtime::clipboard_config(cx);
         if clipboard.auto_scroll_to_top && self.active_tab != TabId::Emoji {
             self.list_scroll_handle
@@ -676,9 +672,7 @@ impl MainWindow {
             "main.symbol.search_placeholder"
         };
         let placeholder = translator.translate(placeholder_key);
-        let input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(placeholder.clone())
-        });
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder.clone()));
         let subscription =
             cx.subscribe_in(
                 &input,
@@ -794,9 +788,13 @@ impl MainWindow {
     }
 
     fn can_auto_close_tags_panel(&self, window: &Window, cx: &Context<Self>) -> bool {
-        let search_focused = self.tags_search_input.as_ref()
+        let search_focused = self
+            .tags_search_input
+            .as_ref()
             .is_some_and(|input| input.focus_handle(cx).is_focused(window));
-        if search_focused || self.tags_panel_pinned || !self.tags_panel_open
+        if search_focused
+            || self.tags_panel_pinned
+            || !self.tags_panel_open
             || self.tags_panel_resize_start.is_some()
         {
             return false;
@@ -865,8 +863,8 @@ impl MainWindow {
                     this.tags_panel_open = false;
                     cx.notify();
                 }
-            }).ok();
+            })
+            .ok();
         }));
     }
-
 }

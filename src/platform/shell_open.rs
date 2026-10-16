@@ -8,14 +8,8 @@ fn shell_execute(target: &str, operation: &str) -> Result<(), String> {
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::PCWSTR;
 
-    let operation: Vec<u16> = operation
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    let file: Vec<u16> = target
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let operation: Vec<u16> = operation.encode_utf16().chain(std::iter::once(0)).collect();
+    let file: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
     // SAFETY: operation/file 均为以 NUL 结尾的 UTF-16 缓冲区，ShellExecuteW 不持有指针。
     let result = unsafe {
         ShellExecuteW(

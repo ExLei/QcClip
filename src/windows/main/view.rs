@@ -8,8 +8,8 @@ use crate::{
 
 use super::{
     components::{
-        clipboard_list, emoji_picker, gallery_picker, multi_selection_bar, symbol_picker,
-        tab_bar, tags_panel, title_bar,
+        clipboard_list, emoji_picker, gallery_picker, multi_selection_bar, symbol_picker, tab_bar,
+        tags_panel, title_bar,
     },
     state::{AdaptiveHeightCacheKey, MainWindow},
     tabs::TabId,
@@ -17,7 +17,9 @@ use super::{
 };
 
 fn is_sidebar_layout(window: &Window) -> bool {
-    uses_sidebar_layout(f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window))
+    uses_sidebar_layout(
+        f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window),
+    )
 }
 
 impl Render for MainWindow {
@@ -31,12 +33,15 @@ impl Render for MainWindow {
         }
         if !layout.is_visible(self.symbol_category.layout_button()) {
             let categories = super::tabs::ordered_symbol_categories(layout);
-            let fallback = categories.first().map(|category| category.id)
+            let fallback = categories
+                .first()
+                .map(|category| category.id)
                 .unwrap_or(super::tabs::SymbolCategoryId::Emoji);
             self.select_symbol_category(fallback, cx);
         }
         let filter_count = self.selected_filters.len();
-        self.selected_filters.retain(|filter| layout.is_visible(filter.layout_button()));
+        self.selected_filters
+            .retain(|filter| layout.is_visible(filter.layout_button()));
         let mut filters_changed = self.selected_filters.len() != filter_count;
         if !layout.is_visible(crate::config::TabBarButton::Tags) {
             self.tags_panel_open = false;
@@ -94,9 +99,7 @@ impl Render for MainWindow {
             self.sync_symbol_search_placeholder(window, cx);
             match self.symbol_category {
                 super::tabs::SymbolCategoryId::Symbols => symbol_picker::render(self, window, cx),
-                super::tabs::SymbolCategoryId::Gallery => {
-                    gallery_picker::render(self, window, cx)
-                }
+                super::tabs::SymbolCategoryId::Gallery => gallery_picker::render(self, window, cx),
                 super::tabs::SymbolCategoryId::Emoji => emoji_picker::render(self, window, cx),
             }
         } else {

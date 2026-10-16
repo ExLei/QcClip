@@ -43,7 +43,10 @@ pub(crate) fn is_win_v_hotkey_disabled() -> bool {
     };
     match read_disabled_hotkeys(&reg_key) {
         Ok(value) => contains_key(&value, 'V'),
-        Err(error) => { tracing::warn!(%error, "读取系统 Win+V 状态失败"); false }
+        Err(error) => {
+            tracing::warn!(%error, "读取系统 Win+V 状态失败");
+            false
+        }
     }
 }
 
@@ -90,14 +93,17 @@ fn read_disabled_hotkeys(key: &RegKey) -> Result<String, String> {
 
 #[cfg(target_os = "windows")]
 fn contains_key(value: &str, key: char) -> bool {
-    value.chars().any(|current| current.eq_ignore_ascii_case(&key))
+    value
+        .chars()
+        .any(|current| current.eq_ignore_ascii_case(&key))
 }
 
 #[cfg(target_os = "windows")]
 fn restart_explorer() -> Result<(), String> {
     let output = Command::new("taskkill")
         .args(["/F", "/IM", "explorer.exe"])
-        .output().map_err(|error| format!("无法执行 Explorer 停止命令：{error}"))?;
+        .output()
+        .map_err(|error| format!("无法执行 Explorer 停止命令：{error}"))?;
     if !output.status.success() {
         tracing::warn!(status = ?output.status.code(), "Explorer 停止命令未成功，Win+V 设置可能尚未生效");
     }

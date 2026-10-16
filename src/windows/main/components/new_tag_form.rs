@@ -27,7 +27,12 @@ enum TagFormError {
 
 impl From<TagCreateError> for TagFormError {
     fn from(error: TagCreateError) -> Self {
-        if matches!(&error, TagCreateError::Database(_) | TagCreateError::Sql(_) | TagCreateError::SortOrderOverflow) {
+        if matches!(
+            &error,
+            TagCreateError::Database(_)
+                | TagCreateError::Sql(_)
+                | TagCreateError::SortOrderOverflow
+        ) {
             tracing::error!(%error, "创建标签失败");
         }
         match error {

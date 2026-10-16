@@ -4,22 +4,18 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, ElementId, IntoElement,
-    MouseButton, SpringAnimation, SpringConfig, Window, deferred, div, img, px,
+    Animation, AnimationExt, AnyElement, Context, ElementId, IntoElement, MouseButton,
+    SpringAnimation, SpringConfig, Window, deferred, div, img, px,
 };
-use gpui_component::input::Input;
 use gpui_component::Sizable as _;
+use gpui_component::input::Input;
 use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::{
-    ActiveTheme as _, InteractiveElementExt as _, h_flex, v_flex,
-};
+use gpui_component::{ActiveTheme as _, InteractiveElementExt as _, h_flex, v_flex};
 
-use super::{
-    SETTINGS_TITLE_BAR_HEIGHT, SettingsPage, SettingsWindowView,
-};
-use crate::{config_runtime, i18n};
-use crate::ui::hover_icon_path;
+use super::{SETTINGS_TITLE_BAR_HEIGHT, SettingsPage, SettingsWindowView};
 use crate::ui::common::window_title_bar;
+use crate::ui::hover_icon_path;
+use crate::{config_runtime, i18n};
 use gpui::ColorExt as _;
 
 const SETTINGS_NAV_BUTTON_HEIGHT: f32 = 34.0;
@@ -37,8 +33,7 @@ fn navigation_active_indicator(
     color: gpui::Hsla,
     animations_enabled: bool,
 ) -> AnyElement {
-    let top = SETTINGS_NAV_PADDING
-        + index as f32 * (SETTINGS_NAV_BUTTON_HEIGHT + SETTINGS_NAV_GAP);
+    let top = SETTINGS_NAV_PADDING + index as f32 * (SETTINGS_NAV_BUTTON_HEIGHT + SETTINGS_NAV_GAP);
     let id = id.into();
     let indicator = div()
         .absolute()
@@ -47,11 +42,7 @@ fn navigation_active_indicator(
         .right(ui_rem(SETTINGS_NAV_PADDING))
         .h(ui_rem(SETTINGS_NAV_BUTTON_HEIGHT))
         .child({
-            let bar = div()
-                .size_full()
-                .rounded(px(6.0))
-                .bg(color)
-                .shadow_sm();
+            let bar = div().size_full().rounded(px(6.0)).bg(color).shadow_sm();
             if animations_enabled {
                 bar.with_animation(
                     (id.clone(), format!("stretch-{index}")),
@@ -69,7 +60,9 @@ fn navigation_active_indicator(
         });
     if animations_enabled {
         indicator
-            .with_spring((id, "top"), spring(top), |this, value| this.top(ui_rem(value)))
+            .with_spring((id, "top"), spring(top), |this, value| {
+                this.top(ui_rem(value))
+            })
             .into_any_element()
     } else {
         indicator.into_any_element()
@@ -105,7 +98,9 @@ impl SettingsWindowView {
             .rounded(px(6.0))
             .text_sm()
             .cursor_pointer()
-            .when(active, |this| this.text_color(theme.sidebar_primary_foreground))
+            .when(active, |this| {
+                this.text_color(theme.sidebar_primary_foreground)
+            })
             .when(!active, |this| {
                 this.text_color(theme.sidebar_foreground).hover(|style| {
                     style
@@ -122,20 +117,28 @@ impl SettingsWindowView {
                     }
                 });
             })
-            .child(
-                hover_icon_path(
-                    format!("settings-page-{}", page.id()),
-                    format!("assets/icons/{}.svg", page.icon_name()),
-                    16.0,
-                    icon_color,
-                ),
-            )
+            .child(hover_icon_path(
+                format!("settings-page-{}", page.id()),
+                format!("assets/icons/{}.svg", page.icon_name()),
+                16.0,
+                icon_color,
+            ))
             .child(translator.translate(page.title_key()))
-            .when(page == SettingsPage::About && crate::services::updates::UpdateService::available(cx).is_some(), |view| {
-                view.child(div().text_xs().text_color(theme.success)
-                    .bg(theme.success.opacity(0.12)).rounded(px(3.0)).px_1()
-                    .child(translator.translate("updates.tag")))
-            })
+            .when(
+                page == SettingsPage::About
+                    && crate::services::updates::UpdateService::available(cx).is_some(),
+                |view| {
+                    view.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.success)
+                            .bg(theme.success.opacity(0.12))
+                            .rounded(px(3.0))
+                            .px_1()
+                            .child(translator.translate("updates.tag")),
+                    )
+                },
+            )
             .into_any_element()
     }
 
@@ -159,7 +162,13 @@ impl SettingsWindowView {
             .occlude()
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 let _ = search_view.update(cx, |view, cx| {
-                    if !view.settings_search_input.read(cx).value().trim().is_empty() {
+                    if !view
+                        .settings_search_input
+                        .read(cx)
+                        .value()
+                        .trim()
+                        .is_empty()
+                    {
                         view.search_results_visible = true;
                         cx.notify();
                     }
@@ -180,20 +189,19 @@ impl SettingsWindowView {
                     )),
             );
 
-        window_title_bar(title, window, cx)
-            .child(
-                div()
-                    .absolute()
-                    .top(px(0.0))
-                    .right(px(0.0))
-                    .bottom(px(0.0))
-                    .left(px(0.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .mx(ui_rem(150.0))
-                    .child(search_box),
-            )
+        window_title_bar(title, window, cx).child(
+            div()
+                .absolute()
+                .top(px(0.0))
+                .right(px(0.0))
+                .bottom(px(0.0))
+                .left(px(0.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .mx(ui_rem(150.0))
+                .child(search_box),
+        )
     }
 
     pub(super) fn render_search_results(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -352,10 +360,7 @@ impl SettingsWindowView {
                     .border_t_1()
                     .border_color(theme.sidebar_border)
                     .pt_3()
-                    .child(
-                        img("assets/icon1024.png")
-                            .size(ui_rem(SETTINGS_APP_INFO_ICON_SIZE)),
-                    )
+                    .child(img("assets/icon1024.png").size(ui_rem(SETTINGS_APP_INFO_ICON_SIZE)))
                     .child(
                         v_flex()
                             .min_w_0()
@@ -429,11 +434,8 @@ impl SettingsWindowView {
                 .child(content)
                 .with_animation(
                     format!("settings-page-transition-{}", page.id()),
-                    Animation::new(Duration::from_millis(180))
-                        .with_easing(gpui::ease_out_quint()),
-                    |this, progress| {
-                        this.left(px(-24.0 * (1.0 - progress))).opacity(progress)
-                    },
+                    Animation::new(Duration::from_millis(180)).with_easing(gpui::ease_out_quint()),
+                    |this, progress| this.left(px(-24.0 * (1.0 - progress))).opacity(progress),
                 )
                 .into_any_element()
         } else {

@@ -29,19 +29,32 @@ impl SingleInstance {
     pub(crate) fn acquire_at(directory: &Path, wait: Duration) -> io::Result<Option<Self>> {
         fs::create_dir_all(directory)?;
         // 锁文件必须保留；删除后可能让不同进程锁住不同文件，失去互斥。
-        let lock = OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
             .open(directory.join("single-instance.lock"))?;
         let activation_path = directory.join("activate-main-window");
         let deadline = Instant::now() + wait;
         loop {
             match lock.try_lock() {
-                Ok(()) => return Ok(Some(Self { _lock: lock, activation_path })),
+                Ok(()) => {
+                    return Ok(Some(Self {
+                        _lock: lock,
+                        activation_path,
+                    }));
+                }
                 Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 Err(TryLockError::WouldBlock) if wait.is_zero() => {
                     // 文件通知会保留到主窗口就绪，多次启动合并成一次显示请求。
-                    match OpenOptions::new().write(true).create_new(true).open(activation_path) {
+                    match OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(activation_path)
+                    {
                         Ok(_) => {}
                         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                         Err(error) => return Err(error),
@@ -49,7 +62,10 @@ impl SingleInstance {
                     return Ok(None);
                 }
                 Err(TryLockError::WouldBlock) => {
-                    return Err(io::Error::new(io::ErrorKind::TimedOut, "等待旧实例退出超时"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "等待旧实例退出超时",
+                    ));
                 }
                 Err(TryLockError::Error(error)) => return Err(error),
             }

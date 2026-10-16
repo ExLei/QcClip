@@ -4,9 +4,9 @@ use std::{
 };
 
 use gpui::{
-    App, AppContext as _, BorrowAppContext as _, Context, DispatchPhase, Entity, IntoElement,
-    InteractiveElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Point, Styled,
-    Window, canvas,
+    App, AppContext as _, BorrowAppContext as _, Context, DispatchPhase, Entity,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Point, Styled, Window, canvas,
 };
 
 use crate::{
@@ -46,54 +46,48 @@ pub(crate) fn event_listener(
         |_, _, _| (),
         move |bounds, _, window, _| {
             let main_window_for_down = main_window.clone();
-            window.on_mouse_event(
-                move |event: &MouseDownEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Capture
-                        && event.button == MouseButton::Left
-                        && bounds.contains(&event.position)
-                    {
-                        main_window_for_down.update(cx, |main, _| {
-                            main.window_drag_start = Some(event.position);
-                        });
-                    }
-                },
-            );
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+                if phase == DispatchPhase::Capture
+                    && event.button == MouseButton::Left
+                    && bounds.contains(&event.position)
+                {
+                    main_window_for_down.update(cx, |main, _| {
+                        main.window_drag_start = Some(event.position);
+                    });
+                }
+            });
 
             let main_window_for_move = main_window.clone();
-            window.on_mouse_event(
-                move |event: &MouseMoveEvent, phase, window, cx| {
-                    if phase != DispatchPhase::Bubble || !event.dragging() {
-                        return;
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || !event.dragging() {
+                    return;
+                }
+                let should_start = main_window_for_move.update(cx, |main, _| {
+                    let Some(start) = main.window_drag_start else {
+                        return false;
+                    };
+                    let dx = f32::from(event.position.x) - f32::from(start.x);
+                    let dy = f32::from(event.position.y) - f32::from(start.y);
+                    if dx * dx + dy * dy < WINDOW_DRAG_THRESHOLD * WINDOW_DRAG_THRESHOLD {
+                        return false;
                     }
-                    let should_start = main_window_for_move.update(cx, |main, _| {
-                        let Some(start) = main.window_drag_start else {
-                            return false;
-                        };
-                        let dx = f32::from(event.position.x) - f32::from(start.x);
-                        let dy = f32::from(event.position.y) - f32::from(start.y);
-                        if dx * dx + dy * dy < WINDOW_DRAG_THRESHOLD * WINDOW_DRAG_THRESHOLD {
-                            return false;
-                        }
-                        main.window_drag_start = None;
-                        true
-                    });
-                    if should_start {
-                        cx.stop_propagation();
-                        begin_or_start_window_move(window, edge_hide_enabled, cx);
-                    }
-                },
-            );
+                    main.window_drag_start = None;
+                    true
+                });
+                if should_start {
+                    cx.stop_propagation();
+                    begin_or_start_window_move(window, edge_hide_enabled, cx);
+                }
+            });
 
             let main_window_for_up = main_window.clone();
-            window.on_mouse_event(
-                move |event: &MouseUpEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
-                        main_window_for_up.update(cx, |main, _| {
-                            main.window_drag_start = None;
-                        });
-                    }
-                },
-            );
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                    main_window_for_up.update(cx, |main, _| {
+                        main.window_drag_start = None;
+                    });
+                }
+            });
         },
     )
     .absolute()
@@ -117,7 +111,10 @@ pub(crate) fn begin(window: &mut Window, cx: &mut App) {
                 service.window_state.is_visibility_transition_active(),
             )
         });
-    if attachment.is_none() && transition_active && let Some(bounds) = normal_bounds {
+    if attachment.is_none()
+        && transition_active
+        && let Some(bounds) = normal_bounds
+    {
         if let Err(error) = platform_window::set_client_bounds(window, bounds) {
             tracing::error!("开始拖拽时恢复主窗口尺寸失败：{error}");
             return;
@@ -252,8 +249,9 @@ pub(crate) fn restore_persisted_edge(
     };
     let cursor = platform_window::physical_cursor_position()
         .or_else(|| crate::platform::input::pointer_snapshot().map(|snapshot| snapshot.position));
-    let display = platform_window::display_for_key(cx, persisted.display_key)
-        .or_else(|| cursor.and_then(|point| platform_window::display_for_physical_point(cx, point)));
+    let display = platform_window::display_for_key(cx, persisted.display_key).or_else(|| {
+        cursor.and_then(|point| platform_window::display_for_physical_point(cx, point))
+    });
     let Some(display) = display else {
         return Ok(None);
     };
@@ -352,8 +350,9 @@ pub(crate) fn startup_edge_bounds(
     let logical_size = state.main_window.restored_size();
     let cursor = platform_window::physical_cursor_position()
         .or_else(|| crate::platform::input::pointer_snapshot().map(|snapshot| snapshot.position));
-    let display = platform_window::display_for_key(cx, persisted.display_key)
-        .or_else(|| cursor.and_then(|point| platform_window::display_for_physical_point(cx, point)))?;
+    let display = platform_window::display_for_key(cx, persisted.display_key).or_else(|| {
+        cursor.and_then(|point| platform_window::display_for_physical_point(cx, point))
+    })?;
     Some(startup_edge_bounds_for_persisted(
         persisted,
         logical_size,
@@ -366,10 +365,7 @@ fn startup_edge_bounds_for_persisted(
     persisted: PersistedEdgePosition,
     logical_size: PersistedWindowSize,
     display: platform_window::DisplayPlacement,
-) -> (
-    gpui::Bounds<gpui::Pixels>,
-    gpui::DisplayId,
-) {
+) -> (gpui::Bounds<gpui::Pixels>, gpui::DisplayId) {
     let converter = platform_window::CoordinateConverter::new(display.scale_factor);
     let screen = converter.logical_display_bounds(display.bounds);
     let width = logical_size.width.max(1.0);
@@ -420,7 +416,10 @@ pub(crate) fn attach_if_near_edge(
 
 pub(crate) fn sync_window_size_after_native_resize(cx: &mut App) {
     let (window, can_record) = cx.read_global::<MainWindowService, _>(|service, _| {
-        (service.window, service.window_state.can_record_window_geometry())
+        (
+            service.window,
+            service.window_state.can_record_window_geometry(),
+        )
     });
     let Some(window) = window else {
         return;
@@ -436,13 +435,18 @@ pub(crate) fn sync_window_size_after_native_resize(cx: &mut App) {
     });
     match result {
         Ok(Ok(Some((bounds, logical_size)))) => {
-            let size = PersistedWindowSize { width: logical_size.0, height: logical_size.1 };
+            let size = PersistedWindowSize {
+                width: logical_size.0,
+                height: logical_size.1,
+            };
             if !size.is_valid() {
                 return;
             }
             cx.update_global::<MainWindowService, _>(|service, _| {
                 if service.window_state.edge_attachment().is_none() {
-                    service.window_state.remember_normal_geometry(bounds, logical_size);
+                    service
+                        .window_state
+                        .remember_normal_geometry(bounds, logical_size);
                 }
             });
             crate::state_runtime::set_main_window_size(size, cx);
@@ -539,12 +543,9 @@ fn apply_release_snap(
         else {
             return Ok::<Option<window_state::EdgeAttachment>, String>(None);
         };
-        let scale_factor = platform_window::display_for_physical_point(
-            cx,
-            position,
-        )
-        .map(|display| display.scale_factor)
-        .unwrap_or_else(|| window.scale_factor());
+        let scale_factor = platform_window::display_for_physical_point(cx, position)
+            .map(|display| display.scale_factor)
+            .unwrap_or_else(|| window.scale_factor());
         let Some((snapped, side)) = snapped_bounds(bounds, monitor, scale_factor) else {
             return Ok(None);
         };
@@ -822,7 +823,10 @@ mod tests {
     #[test]
     fn edge_restore_uses_default_size_for_a_saved_animation_frame() {
         let state = crate::state_runtime::PersistedMainWindowState {
-            size: Some(PersistedWindowSize { width: 360.0, height: 1.0 }),
+            size: Some(PersistedWindowSize {
+                width: 360.0,
+                height: 1.0,
+            }),
             ..Default::default()
         };
         let edge = PersistedEdgePosition {

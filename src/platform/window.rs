@@ -188,9 +188,10 @@ fn stable_display_key(display: &dyn PlatformDisplay) -> Option<u64> {
 
 fn stable_display_key_from_name(name: &str) -> u64 {
     // FNV-1a 的固定初始值保证写入 state.json 后下次启动仍能得到同一个键。
-    name.bytes().fold(14_695_981_039_346_656_037u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(1_099_511_628_211)
-    })
+    name.bytes()
+        .fold(14_695_981_039_346_656_037u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(1_099_511_628_211)
+        })
 }
 
 #[cfg(target_os = "windows")]
@@ -440,21 +441,22 @@ pub(crate) fn open_borderless_normal_window<V>(
 where
     V: 'static + Render,
 {
-    let window = cx.open_window(
-        borderless_normal_window_options(initial_bounds, display_id),
-        move |window, cx| {
-            configure_frameless_window(window, false);
-            // 客户区在调整框架后变大，窗口创建时读到的 viewport 尺寸已经过期。
-            window.bounds_changed(cx);
-            let normal_window = BorderlessNormalWindow::configure(window);
-            crate::ui::theme::attach_system_appearance_watch(window, cx);
-            crate::window_material::register_window(window, cx);
-            let view = build_root_view(window, cx, normal_window);
-            window.refresh();
-            view
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    let window = cx
+        .open_window(
+            borderless_normal_window_options(initial_bounds, display_id),
+            move |window, cx| {
+                configure_frameless_window(window, false);
+                // 客户区在调整框架后变大，窗口创建时读到的 viewport 尺寸已经过期。
+                window.bounds_changed(cx);
+                let normal_window = BorderlessNormalWindow::configure(window);
+                crate::ui::theme::attach_system_appearance_watch(window, cx);
+                crate::window_material::register_window(window, cx);
+                let view = build_root_view(window, cx, normal_window);
+                window.refresh();
+                view
+            },
+        )
+        .map_err(|error| error.to_string())?;
     window
         .update(cx, |_, window, _| window.activate_window())
         .map_err(|error| error.to_string())?;
@@ -567,7 +569,11 @@ fn set_acrylic_gradient_color(hwnd: windows::Win32::Foundation::HWND, color: u32
     // 属性值仅保存 32 位 tint；加一以保留 color=0 时的有效属性标记。
     // SAFETY: hwnd 来自当前 GPUI 窗口，属性值只作为整数保存，不会被解引用。
     unsafe {
-        let _ = SetPropW(hwnd, ACRYLIC_TINT_PROP, Some(HANDLE((color as usize + 1) as _)));
+        let _ = SetPropW(
+            hwnd,
+            ACRYLIC_TINT_PROP,
+            Some(HANDLE((color as usize + 1) as _)),
+        );
     }
 }
 
@@ -600,10 +606,7 @@ fn acrylic_gradient_color_for_hwnd(hwnd: windows::Win32::Foundation::HWND) -> u3
     use windows::Win32::UI::WindowsAndMessaging::GetPropW;
 
     let stored = unsafe { GetPropW(hwnd, ACRYLIC_TINT_PROP).0 as usize };
-    stored
-        .checked_sub(1)
-        .map(|color| color as u32)
-        .unwrap_or(0)
+    stored.checked_sub(1).map(|color| color as u32).unwrap_or(0)
 }
 
 #[cfg(target_os = "windows")]
@@ -1265,8 +1268,7 @@ fn is_resize_hit_test_value(hit_test: isize) -> bool {
 fn is_native_resize_mouse_down(message: u32, hit_test: isize) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN};
 
-    matches!(message, WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK)
-        && is_resize_hit_test_value(hit_test)
+    matches!(message, WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK) && is_resize_hit_test_value(hit_test)
 }
 
 #[cfg(test)]
@@ -1276,21 +1278,37 @@ mod window_resize_hit_test_tests {
     fn native_resize_press_preserves_edges_without_taking_client_or_titlebar_clicks() {
         use windows::Win32::UI::WindowsAndMessaging::{
             HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTCLOSE, HTLEFT,
-            HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
-            WM_LBUTTONDOWN, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
-            WM_NCMOUSEMOVE, WM_NCRBUTTONDOWN,
+            HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_LBUTTONDOWN,
+            WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSEMOVE, WM_NCRBUTTONDOWN,
         };
 
-        for edge in [HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT] {
+        for edge in [
+            HTLEFT,
+            HTRIGHT,
+            HTTOP,
+            HTTOPLEFT,
+            HTTOPRIGHT,
+            HTBOTTOM,
+            HTBOTTOMLEFT,
+            HTBOTTOMRIGHT,
+        ] {
             for message in [WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK] {
                 assert!(super::is_native_resize_mouse_down(message, edge as isize));
             }
-            for message in [WM_LBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSEMOVE, WM_NCRBUTTONDOWN] {
+            for message in [
+                WM_LBUTTONDOWN,
+                WM_NCLBUTTONUP,
+                WM_NCMOUSEMOVE,
+                WM_NCRBUTTONDOWN,
+            ] {
                 assert!(!super::is_native_resize_mouse_down(message, edge as isize));
             }
         }
         for area in [HTCLIENT, HTCAPTION, HTCLOSE, HTMAXBUTTON, HTMINBUTTON] {
-            assert!(!super::is_native_resize_mouse_down(WM_NCLBUTTONDOWN, area as isize));
+            assert!(!super::is_native_resize_mouse_down(
+                WM_NCLBUTTONDOWN,
+                area as isize
+            ));
         }
     }
 
@@ -1993,12 +2011,8 @@ mod borderless_popup_options_tests {
 
     #[test]
     fn notification_popup_can_be_shown_during_creation() {
-        let options = borderless_popup_options(
-            Bounds::default(),
-            Some(DisplayId::new(1)),
-            true,
-            true,
-        );
+        let options =
+            borderless_popup_options(Bounds::default(), Some(DisplayId::new(1)), true, true);
 
         assert!(options.show);
         assert!(!options.focus);
@@ -2155,8 +2169,8 @@ pub(crate) fn configure_frameless_window(window: &Window, keep_min_max: bool) {
     use windows::Win32::{
         Foundation::HWND,
         Graphics::Dwm::{
-            DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
-            DWMNCRP_USEWINDOWSTYLE, DwmSetWindowAttribute,
+            DWMNCRP_USEWINDOWSTYLE, DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE,
+            DWMWCP_ROUND, DwmSetWindowAttribute,
         },
         UI::WindowsAndMessaging::{
             GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
@@ -2233,7 +2247,7 @@ pub(crate) fn configure_frameless_window(window: &Window, keep_min_max: bool) {
 fn notify_client_size_changed(hwnd: windows::Win32::Foundation::HWND) {
     use windows::Win32::{
         Foundation::{LPARAM, RECT, WPARAM},
-        UI::WindowsAndMessaging::{GetClientRect, SendMessageW, SIZE_RESTORED, WM_SIZE},
+        UI::WindowsAndMessaging::{GetClientRect, SIZE_RESTORED, SendMessageW, WM_SIZE},
     };
 
     let mut client = RECT::default();
@@ -2348,12 +2362,12 @@ unsafe extern "system" fn frameless_window_proc(
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        DefWindowProcW, GetPropW, HTCLIENT, IsIconic, IsZoomed, RemovePropW,
-        SIZE_MINIMIZED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCCALCSIZE, WM_NCDESTROY,
-        WM_NCHITTEST, WM_SIZE, WM_SIZING,
-    };
     use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DefWindowProcW, GetPropW, HTCLIENT, IsIconic, IsZoomed, RemovePropW, SIZE_MINIMIZED,
+        WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WM_SIZE,
+        WM_SIZING,
+    };
 
     // SAFETY: 属性由本模块安装，指针在窗口销毁前有效。
     let hook = unsafe { GetPropW(hwnd, FRAMELESS_PROC_PROP) }.0 as *mut FramelessWindowHook;
@@ -2369,8 +2383,7 @@ unsafe extern "system" fn frameless_window_proc(
         }
     }
     // 最大化与最小化时交回 GPUI 处理，避免与系统的工作区计算冲突。
-    let is_zoom_or_minimized =
-        unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() };
+    let is_zoom_or_minimized = unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() };
 
     if !is_zoom_or_minimized
         && !hook.is_null()
@@ -2414,10 +2427,7 @@ unsafe extern "system" fn frameless_window_proc(
         }
     }
 
-    if message == WM_SIZE
-        && wparam.0 != SIZE_MINIMIZED as usize
-        && acrylic_material_enabled(hwnd)
-    {
+    if message == WM_SIZE && wparam.0 != SIZE_MINIMIZED as usize && acrylic_material_enabled(hwnd) {
         refresh_acrylic_material(hwnd);
     }
 
@@ -2440,8 +2450,8 @@ mod native_resize_tests {
     use windows::Win32::{
         Foundation::{HWND, LPARAM, RECT, WPARAM},
         UI::WindowsAndMessaging::{
-            CreateWindowExW, DestroyWindow, SendMessageW, SetWindowPos, SWP_NOACTIVATE,
-            SWP_NOZORDER, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING, WS_POPUP,
+            CreateWindowExW, DestroyWindow, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW,
+            SetWindowPos, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING, WS_POPUP,
         },
     };
 
@@ -2462,9 +2472,18 @@ mod native_resize_tests {
                 Default::default(),
                 windows::core::w!("STATIC"),
                 windows::core::w!("尺寸保存测试"),
-                WS_POPUP, 0, 0, 360, 520, None, None, None, None,
+                WS_POPUP,
+                0,
+                0,
+                360,
+                520,
+                None,
+                None,
+                None,
+                None,
             )
-        }.expect("无法创建尺寸保存测试窗口");
+        }
+        .expect("无法创建尺寸保存测试窗口");
         let window = TestWindow(hwnd);
         install_frameless_client_area_hook(window.0, true);
 
@@ -2482,7 +2501,12 @@ mod native_resize_tests {
         }
         assert!(!take_window_resize_finished_for_hwnd(window.0));
 
-        let mut bounds = RECT { left: 0, top: 0, right: 480, bottom: 640 };
+        let mut bounds = RECT {
+            left: 0,
+            top: 0,
+            right: 480,
+            bottom: 640,
+        };
         // SAFETY: WM_SIZING 的矩形指针在同步消息处理期间有效。
         unsafe {
             SendMessageW(window.0, WM_ENTERSIZEMOVE, None, None);
@@ -2492,12 +2516,22 @@ mod native_resize_tests {
                 Some(WPARAM(8)),
                 Some(LPARAM(&mut bounds as *mut RECT as isize)),
             );
-            SetWindowPos(window.0, None, 0, 0, 480, 640, SWP_NOACTIVATE | SWP_NOZORDER)
-                .expect("无法模拟手动缩放窗口");
+            SetWindowPos(
+                window.0,
+                None,
+                0,
+                0,
+                480,
+                640,
+                SWP_NOACTIVATE | SWP_NOZORDER,
+            )
+            .expect("无法模拟手动缩放窗口");
         }
         assert!(!take_window_resize_finished_for_hwnd(window.0));
         // SAFETY: 缩放结束消息不携带指针参数。
-        unsafe { SendMessageW(window.0, WM_EXITSIZEMOVE, None, None); }
+        unsafe {
+            SendMessageW(window.0, WM_EXITSIZEMOVE, None, None);
+        }
         assert!(take_window_resize_finished_for_hwnd(window.0));
         assert!(!take_window_resize_finished_for_hwnd(window.0));
     }
@@ -2673,14 +2707,13 @@ fn configure_borderless_popup(window: &Window, mouse_passthrough: bool) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Graphics::Dwm::{
         DWMNCRP_DISABLED, DWMNCRP_USEWINDOWSTYLE, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-        DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
-        DWMWCP_ROUND, DwmSetWindowAttribute,
+        DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DwmSetWindowAttribute,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
         SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos,
-        WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
-        WS_VISIBLE,
+        WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
     };
 
     let Ok(handle) = HasWindowHandle::window_handle(window) else {

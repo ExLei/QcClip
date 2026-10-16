@@ -32,7 +32,8 @@ pub fn reconcile_startup(
         tracing::info!("数据库处于兼容模式，已暂停启动恢复和未完成文件清理");
         return Ok(StartupRecoveryReport::default());
     }
-    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let pending_files_removed = blob_store.cleanup_pending_files()?;
     let pending_items_marked_corrupt = transaction.execute(
         "UPDATE clipboard_items

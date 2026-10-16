@@ -145,15 +145,12 @@ impl MenuService {
     }
 
     pub(crate) fn hover_animation_allowed(cx: &mut App) -> bool {
-        let Some((menu_open, suppressed_sequence)) = cx
-            .try_global::<Self>()
-            .map(|service| {
-                (
-                    !service.windows.is_empty(),
-                    service.hover_suppressed_since_mouse_move,
-                )
-            })
-        else {
+        let Some((menu_open, suppressed_sequence)) = cx.try_global::<Self>().map(|service| {
+            (
+                !service.windows.is_empty(),
+                service.hover_suppressed_since_mouse_move,
+            )
+        }) else {
             return true;
         };
         if menu_open {
@@ -162,8 +159,8 @@ impl MenuService {
         let Some(suppressed_sequence) = suppressed_sequence else {
             return true;
         };
-        let Some(mouse_move_sequence) = input::pointer_snapshot()
-            .map(|snapshot| snapshot.mouse_move_sequence)
+        let Some(mouse_move_sequence) =
+            input::pointer_snapshot().map(|snapshot| snapshot.mouse_move_sequence)
         else {
             return true;
         };
@@ -381,8 +378,8 @@ impl MenuService {
 fn sync_mouse_leave_state_after_close(menu_closed: bool, cx: &mut App) {
     if menu_closed {
         cx.update_global::<MenuService, _>(|service, _| {
-            service.hover_suppressed_since_mouse_move = input::pointer_snapshot()
-                .map(|snapshot| snapshot.mouse_move_sequence);
+            service.hover_suppressed_since_mouse_move =
+                input::pointer_snapshot().map(|snapshot| snapshot.mouse_move_sequence);
         });
         crate::windows::main::sync_mouse_leave_state(cx);
         crate::windows::main::MainWindowService::notify_main_view(cx);

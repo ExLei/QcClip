@@ -5,14 +5,18 @@ use std::collections::HashSet;
 
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FontWeight, IntoElement, PromptButton,
-    PromptLevel, Render, Subscription, Window,
-    WindowControlArea, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind,
-    WindowOptions, TitlebarOptions, div, px, relative, rgb, size,
+    PromptLevel, Render, Subscription, TitlebarOptions, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowControlArea, WindowDecorations, WindowKind, WindowOptions, div, px,
+    relative, rgb, size,
 };
 use gpui_component::{
-    ActiveTheme as _, InteractiveElementExt as _, Sizable as _, collapsible::Collapsible,
-    button::ButtonVariants as _, input::{Editor, EditorState, Input, InputEvent, InputState},
-    scroll::ScrollableElement, h_flex, v_flex,
+    ActiveTheme as _, InteractiveElementExt as _, Sizable as _,
+    button::ButtonVariants as _,
+    collapsible::Collapsible,
+    h_flex,
+    input::{Editor, EditorState, Input, InputEvent, InputState},
+    scroll::ScrollableElement,
+    v_flex,
 };
 
 use crate::{
@@ -94,50 +98,51 @@ fn open_with_title(
     cx: &mut App,
 ) -> Result<(), String> {
     let title = i18n::translator(cx).translate(title_key);
-    let window = cx.open_window(
-        WindowOptions {
-            window_bounds: Some(WindowBounds::centered(
-                size(px(EDITOR_WINDOW_WIDTH), px(EDITOR_WINDOW_HEIGHT)),
-                cx,
-            )),
-            titlebar: Some(TitlebarOptions {
-                title: Some(title.clone().into()),
-                appears_transparent: true,
-                ..Default::default()
-            }),
-            kind: WindowKind::Normal,
-            focus: true,
-            is_movable: true,
-            is_resizable: true,
-            is_minimizable: true,
-            window_background: WindowBackgroundAppearance::Transparent,
-            window_min_size: Some(size(
-                px(EDITOR_WINDOW_MIN_WIDTH),
-                px(EDITOR_WINDOW_MIN_HEIGHT),
-            )),
-            window_decorations: Some(WindowDecorations::Client),
-            ..Default::default()
-        },
-        move |window, cx| {
-            crate::platform::window::configure_frameless_window(window, true);
-            window.bounds_changed(cx);
-            crate::window_material::register_window(window, cx);
-            let view = cx.new(|cx| {
-                CustomTextEditor::new(
-                    window,
+    let window = cx
+        .open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::centered(
+                    size(px(EDITOR_WINDOW_WIDTH), px(EDITOR_WINDOW_HEIGHT)),
                     cx,
-                    text,
-                    title,
-                    tags,
-                    selected_tag_ids,
-                    on_confirm,
-                    on_restore,
-                )
-            });
-            cx.new(|cx| crate::window_material::new_root(view, window, cx))
-        },
-    )
-    .map_err(|error| error.to_string())?;
+                )),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(title.clone().into()),
+                    appears_transparent: true,
+                    ..Default::default()
+                }),
+                kind: WindowKind::Normal,
+                focus: true,
+                is_movable: true,
+                is_resizable: true,
+                is_minimizable: true,
+                window_background: WindowBackgroundAppearance::Transparent,
+                window_min_size: Some(size(
+                    px(EDITOR_WINDOW_MIN_WIDTH),
+                    px(EDITOR_WINDOW_MIN_HEIGHT),
+                )),
+                window_decorations: Some(WindowDecorations::Client),
+                ..Default::default()
+            },
+            move |window, cx| {
+                crate::platform::window::configure_frameless_window(window, true);
+                window.bounds_changed(cx);
+                crate::window_material::register_window(window, cx);
+                let view = cx.new(|cx| {
+                    CustomTextEditor::new(
+                        window,
+                        cx,
+                        text,
+                        title,
+                        tags,
+                        selected_tag_ids,
+                        on_confirm,
+                        on_restore,
+                    )
+                });
+                cx.new(|cx| crate::window_material::new_root(view, window, cx))
+            },
+        )
+        .map_err(|error| error.to_string())?;
     window
         .update(cx, |_, window, _| window.activate_window())
         .map_err(|error| error.to_string())
@@ -177,15 +182,12 @@ impl CustomTextEditor {
             InputState::new(window, cx)
                 .placeholder(translator.translate("main.editor.tags_search_placeholder"))
         });
-        let tag_search_subscription = cx.subscribe_in(
-            &tag_search_input,
-            window,
-            |_, _, event, _, cx| {
+        let tag_search_subscription =
+            cx.subscribe_in(&tag_search_input, window, |_, _, event, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     cx.notify();
                 }
-            },
-        );
+            });
         let editor_for_focus = editor.clone();
         window.defer(cx, move |window, cx| {
             editor_for_focus.update(cx, |editor, cx| editor.focus(window, cx));
@@ -272,13 +274,14 @@ impl CustomTextEditor {
                         this.bg(theme.secondary_hover)
                     }
                 })
-                .child(div().size(ui_rem(8.0)).flex_none().rounded_full().bg(tag_color))
                 .child(
                     div()
-                        .max_w(px(180.0))
-                        .truncate()
-                        .child(tag_name),
+                        .size(ui_rem(8.0))
+                        .flex_none()
+                        .rounded_full()
+                        .bg(tag_color),
                 )
+                .child(div().max_w(px(180.0)).truncate().child(tag_name))
                 .on_click(move |_, _, cx| {
                     editor.update(cx, |this, cx| {
                         if !this.selected_tag_ids.insert(tag_id) {
@@ -312,21 +315,18 @@ impl CustomTextEditor {
                 .min_h_0()
                 .overflow_hidden()
                 .child(
-                    v_flex()
-                        .size_full()
-                        .overflow_y_scrollbar()
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .flex_wrap()
-                                .items_start()
-                                .content_start()
-                                .gap(px(6.0))
-                                .px(px(8.0))
-                                .py(px(6.0))
-                                .children(tag_chips),
-                        ),
+                    v_flex().size_full().overflow_y_scrollbar().child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .flex_wrap()
+                            .items_start()
+                            .content_start()
+                            .gap(px(6.0))
+                            .px(px(8.0))
+                            .py(px(6.0))
+                            .children(tag_chips),
+                    ),
                 )
                 .into_any_element()
         };
@@ -428,11 +428,8 @@ impl Render for CustomTextEditor {
                     let translator = i18n::translator(cx);
                     let title = translator.translate("main.editor.restore_confirm_title");
                     let detail = translator.translate("main.editor.restore_confirm_detail");
-                    let cancel = PromptButton::cancel(
-                        translator.translate("main.form.cancel"),
-                    );
-                    let confirm =
-                        PromptButton::ok(translator.translate("main.form.confirm"));
+                    let cancel = PromptButton::cancel(translator.translate("main.form.cancel"));
+                    let confirm = PromptButton::ok(translator.translate("main.form.confirm"));
                     let answer = window.prompt(
                         PromptLevel::Warning,
                         &title,
@@ -522,19 +519,14 @@ impl Render for CustomTextEditor {
                             .border_color(editor_border)
                             .bg(editor_surface)
                             .child(
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .w_full()
-                                    .overflow_hidden()
-                                    .child(
-                                        Editor::new(&self.editor)
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .editor_background(editor_surface)
-                                            .editor_gutter_background(gpui::transparent_black())
-                                            .h(relative(1.)),
-                                    ),
+                                div().flex_1().min_h_0().w_full().overflow_hidden().child(
+                                    Editor::new(&self.editor)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .editor_background(editor_surface)
+                                        .editor_gutter_background(gpui::transparent_black())
+                                        .h(relative(1.)),
+                                ),
                             )
                             .child(self.render_tags_section(
                                 window,
@@ -705,11 +697,6 @@ fn editor_window_control_button(
             });
         })
         .group(group.clone())
-        .child(hover_icon_path(
-            group,
-            icon_path,
-            16.0,
-            icon_color,
-        ))
+        .child(hover_icon_path(group, icon_path, 16.0, icon_color))
         .into_any_element()
 }

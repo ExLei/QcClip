@@ -330,18 +330,31 @@ const THEME_TRANSITION_FRAME: Duration = Duration::from_millis(16);
 const QC_CLIP_TITLE_BAR_HEIGHT: gpui::Pixels = px(36.0);
 
 fn apply_ui_scale(theme: &mut Theme, scale: f32) {
-    let config = if theme.mode.is_dark() { &theme.dark_theme } else { &theme.light_theme };
+    let config = if theme.mode.is_dark() {
+        &theme.dark_theme
+    } else {
+        &theme.light_theme
+    };
     let default = Theme::default();
     // 未声明字号的主题不会覆盖旧值，必须从配置或默认字号重新计算。
     theme.font_size = config.font_size.map(px).unwrap_or(default.font_size) * scale;
-    theme.mono_font_size = config.mono_font_size.map(px).unwrap_or(default.mono_font_size) * scale;
+    theme.mono_font_size = config
+        .mono_font_size
+        .map(px)
+        .unwrap_or(default.mono_font_size)
+        * scale;
     theme.sheet.margin_top = QC_CLIP_TITLE_BAR_HEIGHT * (f32::from(theme.font_size) / 16.0);
 }
 
 fn apply_app_font(theme: &mut Theme, family: Option<&str>) {
-    let config = if theme.mode.is_dark() { &theme.dark_theme } else { &theme.light_theme };
+    let config = if theme.mode.is_dark() {
+        &theme.dark_theme
+    } else {
+        &theme.light_theme
+    };
     // 恢复默认或切换主题时重新取主题字体，避免沿用上一次的用户选择。
-    theme.font_family = family.map(|family| family.to_owned().into())
+    theme.font_family = family
+        .map(|family| family.to_owned().into())
         .or_else(|| config.font_family.clone())
         .unwrap_or_else(|| Theme::default().font_family);
 }
@@ -772,7 +785,10 @@ mod tests {
         assert_eq!(theme.font_family.as_ref(), "主题字体");
         theme.mode = ThemeMode::Dark;
         super::apply_app_font(&mut theme, None);
-        assert_eq!(theme.font_family, gpui_component::Theme::default().font_family);
+        assert_eq!(
+            theme.font_family,
+            gpui_component::Theme::default().font_family
+        );
     }
 
     #[test]

@@ -837,7 +837,9 @@ mod tests {
         let blob = store.commit_pending(&pending).expect("无法保存原始图片");
         let service = ImagePreviewService::new(store);
         for source in [
-            ImagePreviewSource::Inline { bytes: bytes.into() },
+            ImagePreviewSource::Inline {
+                bytes: bytes.into(),
+            },
             ImagePreviewSource::External {
                 sha256: *blob.sha256(),
                 byte_length: blob.byte_length(),
@@ -849,7 +851,13 @@ mod tests {
                 .expect("无法加载原始图片预览");
             assert_eq!(loaded.byte_length, Some(bytes.len() as u64));
             assert!(loaded.source_path.is_none());
-            assert_eq!(loaded.dimensions, Some(ImageDimensions { width: 128, height: 128 }));
+            assert_eq!(
+                loaded.dimensions,
+                Some(ImageDimensions {
+                    width: 128,
+                    height: 128
+                })
+            );
         }
     }
 

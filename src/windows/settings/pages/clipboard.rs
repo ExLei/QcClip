@@ -1,6 +1,6 @@
 use crate::ui::scale::ui_rem;
 
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, ColorExt as _, Context, Entity, div, img, px};
 
@@ -8,6 +8,7 @@ use super::super::{
     SettingsWindowView,
     components::{settings_dropdown, settings_error_row, settings_page_header},
 };
+use crate::ui::{hover_icon, icon};
 use crate::{
     config::{
         ClipboardConfig, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
@@ -15,13 +16,11 @@ use crate::{
         SearchEngine,
     },
     config_runtime, i18n,
-
     windows::menu::{DropdownItem, DropdownItemId},
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
 use gpui_component::switch::Switch;
-use crate::ui::{hover_icon, icon};
 use gpui_component::{ActiveTheme as _, Sizable as _, collapsible::Collapsible, h_flex, v_flex};
 
 impl SettingsWindowView {
@@ -46,7 +45,8 @@ impl SettingsWindowView {
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
-                    view.clipboard_error = notify_settings_error(SettingsPage::Clipboard, error_message, cx);
+                    view.clipboard_error =
+                        notify_settings_error(SettingsPage::Clipboard, error_message, cx);
                     cx.notify();
                 });
             });
@@ -270,46 +270,44 @@ impl SettingsWindowView {
                     );
                 }
             });
-        let move_pasted_to_first_in_clipboard_switch = Switch::new(
-            "settings-clipboard-move-pasted-to-first-in-clipboard",
-        )
-            .large()
-            .checked(clipboard.move_pasted_to_first_in_clipboard)
-            .accessibility_label(translator.translate(
-                "settings.clipboard.move_pasted_to_first_in_clipboard",
-            ))
-            .on_click({
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |checked, _, cx| {
-                    persist_clipboard_change(
-                        view.clone(),
-                        move |clipboard| clipboard.move_pasted_to_first_in_clipboard = *checked,
-                        save_error.clone(),
-                        cx,
-                    );
-                }
-            });
-        let move_pasted_to_first_in_favorites_switch = Switch::new(
-            "settings-clipboard-move-pasted-to-first-in-favorites",
-        )
-            .large()
-            .checked(clipboard.move_pasted_to_first_in_favorites)
-            .accessibility_label(translator.translate(
-                "settings.clipboard.move_pasted_to_first_in_favorites",
-            ))
-            .on_click({
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |checked, _, cx| {
-                    persist_clipboard_change(
-                        view.clone(),
-                        move |clipboard| clipboard.move_pasted_to_first_in_favorites = *checked,
-                        save_error.clone(),
-                        cx,
-                    );
-                }
-            });
+        let move_pasted_to_first_in_clipboard_switch =
+            Switch::new("settings-clipboard-move-pasted-to-first-in-clipboard")
+                .large()
+                .checked(clipboard.move_pasted_to_first_in_clipboard)
+                .accessibility_label(
+                    translator.translate("settings.clipboard.move_pasted_to_first_in_clipboard"),
+                )
+                .on_click({
+                    let view = view.clone();
+                    let save_error = save_error.clone();
+                    move |checked, _, cx| {
+                        persist_clipboard_change(
+                            view.clone(),
+                            move |clipboard| clipboard.move_pasted_to_first_in_clipboard = *checked,
+                            save_error.clone(),
+                            cx,
+                        );
+                    }
+                });
+        let move_pasted_to_first_in_favorites_switch =
+            Switch::new("settings-clipboard-move-pasted-to-first-in-favorites")
+                .large()
+                .checked(clipboard.move_pasted_to_first_in_favorites)
+                .accessibility_label(
+                    translator.translate("settings.clipboard.move_pasted_to_first_in_favorites"),
+                )
+                .on_click({
+                    let view = view.clone();
+                    let save_error = save_error.clone();
+                    move |checked, _, cx| {
+                        persist_clipboard_change(
+                            view.clone(),
+                            move |clipboard| clipboard.move_pasted_to_first_in_favorites = *checked,
+                            save_error.clone(),
+                            cx,
+                        );
+                    }
+                });
         let auto_scroll_to_top_switch = Switch::new("settings-clipboard-auto-scroll-to-top")
             .large()
             .checked(clipboard.auto_scroll_to_top)
@@ -358,22 +356,25 @@ impl SettingsWindowView {
                     );
                 }
             });
-        let confirm_favorite_removal_switch = Switch::new("settings-clipboard-confirm-favorite-removal")
-            .large()
-            .checked(clipboard.confirm_favorite_removal)
-            .accessibility_label(translator.translate("settings.clipboard.confirm_favorite_removal"))
-            .on_click({
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |checked, _, cx| {
-                    persist_clipboard_change(
-                        view.clone(),
-                        move |clipboard| clipboard.confirm_favorite_removal = *checked,
-                        save_error.clone(),
-                        cx,
-                    );
-                }
-            });
+        let confirm_favorite_removal_switch =
+            Switch::new("settings-clipboard-confirm-favorite-removal")
+                .large()
+                .checked(clipboard.confirm_favorite_removal)
+                .accessibility_label(
+                    translator.translate("settings.clipboard.confirm_favorite_removal"),
+                )
+                .on_click({
+                    let view = view.clone();
+                    let save_error = save_error.clone();
+                    move |checked, _, cx| {
+                        persist_clipboard_change(
+                            view.clone(),
+                            move |clipboard| clipboard.confirm_favorite_removal = *checked,
+                            save_error.clone(),
+                            cx,
+                        );
+                    }
+                });
 
         let mut section = v_flex()
             .w_full()
@@ -390,150 +391,178 @@ impl SettingsWindowView {
                 translator.translate("settings.clipboard.description"),
                 reset_button,
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.mouse_left_behavior"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.mouse_left_behavior_description")
-                        .into(),
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.mouse_left_behavior"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.mouse_left_behavior_description")
+                            .into(),
+                    ),
+                    mouse_left_behavior_selector,
                 ),
-                mouse_left_behavior_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.mouse_middle_behavior"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.mouse_middle_behavior_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.mouse_middle_behavior"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.mouse_middle_behavior_description")
+                            .into(),
+                    ),
+                    mouse_middle_behavior_selector,
                 ),
-                mouse_middle_behavior_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.edge_hide"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.edge_hide_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.edge_hide"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.edge_hide_description")
+                            .into(),
+                    ),
+                    edge_hide_switch,
                 ),
-                edge_hide_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.edge_hide_show_edge"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.edge_hide_show_edge_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.edge_hide_show_edge"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.edge_hide_show_edge_description")
+                            .into(),
+                    ),
+                    edge_hide_show_edge_switch,
                 ),
-                edge_hide_show_edge_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.window_position"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.window_position_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.window_position"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.window_position_description")
+                            .into(),
+                    ),
+                    window_position_selector,
                 ),
-                window_position_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.display_priority"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.display_priority_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.display_priority"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.display_priority_description")
+                            .into(),
+                    ),
+                    priority_selector,
                 ),
-                priority_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.preview_priority"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.preview_priority_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.preview_priority"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.preview_priority_description")
+                            .into(),
+                    ),
+                    preview_priority_selector,
                 ),
-                preview_priority_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.hover_preview"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.hover_preview_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.hover_preview"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.hover_preview_description")
+                            .into(),
+                    ),
+                    hover_preview_switch,
                 ),
-                hover_preview_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.move_pasted_to_first_in_clipboard"),
-                Some(
-                    translator
-                        .translate(
-                            "settings.clipboard.move_pasted_to_first_in_clipboard_description",
-                        )
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.move_pasted_to_first_in_clipboard"),
+                    Some(
+                        translator
+                            .translate(
+                                "settings.clipboard.move_pasted_to_first_in_clipboard_description",
+                            )
+                            .into(),
+                    ),
+                    move_pasted_to_first_in_clipboard_switch,
                 ),
-                move_pasted_to_first_in_clipboard_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.move_pasted_to_first_in_favorites"),
-                Some(
-                    translator
-                        .translate(
-                            "settings.clipboard.move_pasted_to_first_in_favorites_description",
-                        )
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.move_pasted_to_first_in_favorites"),
+                    Some(
+                        translator
+                            .translate(
+                                "settings.clipboard.move_pasted_to_first_in_favorites_description",
+                            )
+                            .into(),
+                    ),
+                    move_pasted_to_first_in_favorites_switch,
                 ),
-                move_pasted_to_first_in_favorites_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.auto_scroll_to_top"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.auto_scroll_to_top_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.auto_scroll_to_top"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.auto_scroll_to_top_description")
+                            .into(),
+                    ),
+                    auto_scroll_to_top_switch,
                 ),
-                auto_scroll_to_top_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.auto_focus_search"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.auto_focus_search_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.auto_focus_search"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.auto_focus_search_description")
+                            .into(),
+                    ),
+                    auto_focus_search_switch,
                 ),
-                auto_focus_search_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.auto_clear_search"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.auto_clear_search_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.auto_clear_search"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.auto_clear_search_description")
+                            .into(),
+                    ),
+                    auto_clear_search_switch,
                 ),
-                auto_clear_search_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.clipboard.confirm_favorite_removal"),
-                Some(
-                    translator
-                        .translate("settings.clipboard.confirm_favorite_removal_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.confirm_favorite_removal"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.confirm_favorite_removal_description")
+                            .into(),
+                    ),
+                    confirm_favorite_removal_switch,
                 ),
-                confirm_favorite_removal_switch,
-            ))
+            )
             .child(self.render_search_engines(&translator, &save_error, cx));
         if let Some(error) = &self.clipboard_error {
             section = section.child(settings_error_row(theme, error));
@@ -563,9 +592,7 @@ impl SettingsWindowView {
                     .gap_2()
                     .px_4()
                     .py_2()
-                    .when(index > 0, |row| {
-                        row.border_t_1().border_color(theme.border)
-                    })
+                    .when(index > 0, |row| row.border_t_1().border_color(theme.border))
                     .child(search_engine_icon(engine, theme))
                     .child(
                         div()
@@ -589,15 +616,12 @@ impl SettingsWindowView {
                         Button::new(("search-engine-remove", index as u64))
                             .ghost()
                             .small()
-                            .label(translator.translate(
-                                "settings.clipboard.remove_search_engine",
-                            ))
+                            .label(translator.translate("settings.clipboard.remove_search_engine"))
                             .on_click(move |_, _, cx| {
                                 persist_clipboard_change(
                                     remove_view.clone(),
                                     move |clipboard| {
-                                        let mut engines =
-                                            clipboard.search_engines_or_default();
+                                        let mut engines = clipboard.search_engines_or_default();
                                         if index < engines.len() {
                                             engines.remove(index);
                                         }
@@ -706,10 +730,7 @@ impl SettingsWindowView {
                             .text_sm()
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(theme.foreground)
-                            .child(
-                                translator
-                                    .translate("settings.clipboard.search_engines"),
-                            ),
+                            .child(translator.translate("settings.clipboard.search_engines")),
                     )
                     .child(
                         div()
@@ -717,9 +738,8 @@ impl SettingsWindowView {
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(
-                                translator.translate(
-                                    "settings.clipboard.search_engines_description",
-                                ),
+                                translator
+                                    .translate("settings.clipboard.search_engines_description"),
                             ),
                     ),
             )
@@ -732,23 +752,17 @@ impl SettingsWindowView {
                     .bg(theme.accent.opacity(0.6))
                     .text_xs()
                     .text_color(theme.accent_foreground)
-                    .child(
-                        translator.translate_with_args(
-                            "settings.clipboard.search_engine_count",
-                            &[("count", engine_count.to_string())],
-                        ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(hover_icon(
-                        "search-engines-header",
-                        chevron_name,
-                        14.0,
-                        theme.muted_foreground,
+                    .child(translator.translate_with_args(
+                        "settings.clipboard.search_engine_count",
+                        &[("count", engine_count.to_string())],
                     )),
-            );
+            )
+            .child(div().flex_shrink_0().child(hover_icon(
+                "search-engines-header",
+                chevron_name,
+                14.0,
+                theme.muted_foreground,
+            )));
 
         let form_row = h_flex()
             .w_full()
@@ -802,9 +816,7 @@ impl SettingsWindowView {
                 Button::new("search-engine-pick-icon")
                     .ghost()
                     .small()
-                    .label(
-                        translator.translate("settings.clipboard.choose_search_engine_icon"),
-                    )
+                    .label(translator.translate("settings.clipboard.choose_search_engine_icon"))
                     .on_click({
                         let icon_view = view.clone();
                         move |_, _, cx| choose_search_engine_icon(icon_view.clone(), cx)
@@ -869,10 +881,7 @@ const fn clipboard_display_priority_label_key(priority: ClipboardDisplayPriority
 }
 
 /// 返回搜索引擎行的图标元素。
-fn search_engine_icon(
-    engine: &SearchEngine,
-    theme: gpui_component::ThemeColor,
-) -> AnyElement {
+fn search_engine_icon(engine: &SearchEngine, theme: gpui_component::ThemeColor) -> AnyElement {
     // 图标优先级：用户上传图标（本地文件）> 内置品牌图标 > 通用 search 图标。
     if let Some(path) = engine.icon_path.as_ref().filter(|p| !p.is_empty()) {
         return img(std::path::PathBuf::from(path))
@@ -892,10 +901,7 @@ const SEARCH_ENGINE_ICON_EXTENSIONS: &[&str] =
 fn choose_search_engine_icon(view: Entity<SettingsWindowView>, cx: &mut App) {
     let dialog = rfd::AsyncFileDialog::new()
         .set_title("选择搜索引擎图标")
-        .add_filter(
-            "图片文件",
-            SEARCH_ENGINE_ICON_EXTENSIONS,
-        );
+        .add_filter("图片文件", SEARCH_ENGINE_ICON_EXTENSIONS);
     cx.spawn(async move |cx| {
         let Some(file) = dialog.pick_file().await else {
             return;
@@ -920,7 +926,8 @@ fn choose_search_engine_icon(view: Entity<SettingsWindowView>, cx: &mut App) {
                     let message = crate::i18n::translator(cx)
                         .translate("settings.clipboard.invalid_search_engine_icon");
                     tracing::error!("搜索引擎图标类型不支持");
-                    view.clipboard_error = notify_settings_error(SettingsPage::Clipboard, Some(message), cx);
+                    view.clipboard_error =
+                        notify_settings_error(SettingsPage::Clipboard, Some(message), cx);
                 }
                 cx.notify();
             });
@@ -981,9 +988,7 @@ const fn clipboard_mouse_middle_behavior_label_key(
     }
 }
 
-const fn clipboard_window_position_label_key(
-    position: ClipboardWindowPosition,
-) -> &'static str {
+const fn clipboard_window_position_label_key(position: ClipboardWindowPosition) -> &'static str {
     match position {
         ClipboardWindowPosition::MouseCenter => "settings.clipboard.window_position.mouse_center",
         ClipboardWindowPosition::MouseNearby => "settings.clipboard.window_position.mouse_nearby",

@@ -24,8 +24,8 @@ use crate::{
     },
     services::{
         database::{
-            Database, FavoriteReorderError, FavoriteRepository, HistoryRepository,
-            HistoryReorderError,
+            Database, FavoriteReorderError, FavoriteRepository, HistoryReorderError,
+            HistoryRepository,
         },
         image_preview::parse_file_list,
         storage::{RawBlob, RawBlobError, RawBlobStore},
@@ -98,7 +98,10 @@ enum MergeSource {
         image_file: ImageTempFile,
         html: String,
     },
-    Text { text: String, html: Option<String> },
+    Text {
+        text: String,
+        html: Option<String>,
+    },
 }
 
 impl PasteService {
@@ -155,8 +158,7 @@ impl PasteService {
             let payload = payloads
                 .iter()
                 .find(|payload| {
-                    payload.format_namespace == format_namespace
-                        && payload.format_key == format_key
+                    payload.format_namespace == format_namespace && payload.format_key == format_key
                 })
                 .cloned()
                 .ok_or(PasteError::NoRestorableFormat)?;
@@ -384,12 +386,7 @@ impl PasteService {
         // 文件类型优先：取第一个文件路径直接用默认程序打开。
         if let Some(path) = payloads
             .iter()
-            .find(|payload| {
-                matches!(
-                    payload_role(payload),
-                    FormatRole::FileList
-                )
-            })
+            .find(|payload| matches!(payload_role(payload), FormatRole::FileList))
             .and_then(|payload| parse_file_list(&payload.bytes).into_iter().next())
         {
             return open_with_default_program(&path).map_err(PasteError::Clipboard);
@@ -610,11 +607,7 @@ impl PasteService {
         Ok(())
     }
 
-    fn move_item_to_first(
-        &self,
-        item_id: i64,
-        target: PasteOrderTarget,
-    ) -> Result<(), PasteError> {
+    fn move_item_to_first(&self, item_id: i64, target: PasteOrderTarget) -> Result<(), PasteError> {
         match target {
             PasteOrderTarget::Clipboard => {
                 HistoryRepository::new(self.database.clone(), self.blob_store.clone())
@@ -647,9 +640,7 @@ fn normalize_merge_source(
     {
         let paths = parse_file_list(&file_payload.bytes);
         if paths.is_empty() {
-            return Err(PasteError::Merge(format!(
-                "第 {item_id} 项没有可用的文件"
-            )));
+            return Err(PasteError::Merge(format!("第 {item_id} 项没有可用的文件")));
         }
         if paths.iter().any(|path| !path.exists()) {
             return Err(PasteError::Merge(format!(
@@ -675,8 +666,9 @@ fn normalize_merge_source(
 
     if text.is_none() && html.is_none() {
         if let Some(image_payload) = image_payload {
-            let image_file = ImageTempFile::from_bytes(&image_payload.bytes, &image_payload.format_key)
-                .map_err(PasteError::Merge)?;
+            let image_file =
+                ImageTempFile::from_bytes(&image_payload.bytes, &image_payload.format_key)
+                    .map_err(PasteError::Merge)?;
             let html = image_file_to_html(&image_file)?;
             return Ok(MergeSource::Image { image_file, html });
         }
@@ -689,7 +681,11 @@ fn normalize_merge_source(
     let has_plain_text = text.is_some();
     let text = text
         .clone()
-        .or_else(|| html.as_deref().map(strip_html_tags).filter(|text| !text.is_empty()))
+        .or_else(|| {
+            html.as_deref()
+                .map(strip_html_tags)
+                .filter(|text| !text.is_empty())
+        })
         .or_else(|| image_html.as_ref().map(|_| "[图片]".to_owned()))
         .unwrap_or_default();
     let html = match (html, image_html) {
@@ -719,9 +715,7 @@ fn determine_merge_payload(sources: Vec<MergeSource>) -> Result<MergedPayload, P
         .iter()
         .any(|source| matches!(source, MergeSource::Image { .. }));
     if has_files && has_text {
-        return Err(PasteError::Merge(
-            "文件不能与文本混合合并".to_owned(),
-        ));
+        return Err(PasteError::Merge("文件不能与文本混合合并".to_owned()));
     }
 
     if has_files || (has_images && !has_text) {
@@ -737,9 +731,7 @@ fn determine_merge_payload(sources: Vec<MergeSource>) -> Result<MergedPayload, P
                     image_html.push(wrap_merge_html_block(&html));
                 }
                 MergeSource::Text { .. } => {
-                    return Err(PasteError::Merge(
-                        "文件不能与文本混合合并".to_owned(),
-                    ));
+                    return Err(PasteError::Merge("文件不能与文本混合合并".to_owned()));
                 }
             }
         }
@@ -792,9 +784,7 @@ fn determine_merge_payload(sources: Vec<MergeSource>) -> Result<MergedPayload, P
                 html_segments.push(wrap_merge_html_block(&html));
             }
             MergeSource::Files(_) => {
-                return Err(PasteError::Merge(
-                    "文件不能与文本混合合并".to_owned(),
-                ));
+                return Err(PasteError::Merge("文件不能与文本混合合并".to_owned()));
             }
         }
     }
@@ -895,7 +885,7 @@ fn normalize_html_fragment(raw: &str) -> String {
     if let (Some(start), Some(end)) = (
         raw.find("<!--StartFragment-->")
             .map(|index| index + "<!--StartFragment-->".len()),
-        raw.find("<!--EndFragment-->")
+        raw.find("<!--EndFragment-->"),
     ) && start < end
     {
         return raw[start..end].to_owned();
@@ -947,8 +937,16 @@ fn strip_html_tags(html: &str) -> String {
                     || (tag.trim_start().starts_with('/')
                         && matches!(
                             tag_name.as_str(),
-                            "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4"
-                                | "h5" | "h6" | "blockquote"
+                            "p" | "div"
+                                | "li"
+                                | "tr"
+                                | "h1"
+                                | "h2"
+                                | "h3"
+                                | "h4"
+                                | "h5"
+                                | "h6"
+                                | "blockquote"
                         ))
                 {
                     text.push('\n');
@@ -1036,10 +1034,8 @@ fn payload_role(payload: &ClipboardPayload) -> FormatRole {
 
 /// 选择要展示或粘贴的纯文本格式，避免按系统枚举顺序误选 ANSI 文本。
 fn plain_text_payload_priority(payload: &ClipboardPayload) -> u8 {
-    if crate::domain::capture::is_custom_text_format(
-        &payload.format_namespace,
-        &payload.format_key,
-    ) {
+    if crate::domain::capture::is_custom_text_format(&payload.format_namespace, &payload.format_key)
+    {
         return 0;
     }
     match payload.format_key.to_ascii_lowercase().as_str() {
@@ -1102,28 +1098,45 @@ mod tests {
     #[test]
     fn read_only_database_loads_payloads_without_updating_paste_counts() {
         let directory = tempfile::tempdir().expect("无法创建临时目录");
-        let database = Database::open(directory.path().join("test.sqlite3")).expect("无法创建数据库");
+        let database =
+            Database::open(directory.path().join("test.sqlite3")).expect("无法创建数据库");
         let store = RawBlobStore::new(directory.path()).expect("无法创建存储");
         let history_id = CaptureService::new(database.clone(), store.clone())
             .store_captured_clipboard(&MockClipboardSource::text("只读文本").capture())
             .expect("无法捕获文本");
         let connection = database.connect().expect("无法连接数据库");
-        let item_id: i64 = connection.query_row(
-            "SELECT item_id FROM clipboard_history WHERE id = ?1", [history_id], |row| row.get(0),
-        ).expect("无法查询内容 ID");
-        connection.execute_batch(
-            "UPDATE database_compatibility SET minimum_write_version = 2;
+        let item_id: i64 = connection
+            .query_row(
+                "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                [history_id],
+                |row| row.get(0),
+            )
+            .expect("无法查询内容 ID");
+        connection
+            .execute_batch(
+                "UPDATE database_compatibility SET minimum_write_version = 2;
              PRAGMA user_version = 2;",
-        ).expect("无法模拟只读兼容数据库");
+            )
+            .expect("无法模拟只读兼容数据库");
         drop(connection);
         let service = PasteService::new(database.clone(), store);
-        assert!(!service.load_payloads_for_item(item_id).expect("无法读取只读载荷").is_empty());
+        assert!(
+            !service
+                .load_payloads_for_item(item_id)
+                .expect("无法读取只读载荷")
+                .is_empty()
+        );
         let connection = database.connect().expect("无法连接只读数据库");
-        service.update_paste_counts(&connection, item_id, Some(PasteOrderTarget::Clipboard))
+        service
+            .update_paste_counts(&connection, item_id, Some(PasteOrderTarget::Clipboard))
             .expect("只读模式应跳过计数和排序写入");
-        let count: i64 = connection.query_row(
-            "SELECT paste_count FROM clipboard_history WHERE id = ?1", [history_id], |row| row.get(0),
-        ).expect("无法查询粘贴计数");
+        let count: i64 = connection
+            .query_row(
+                "SELECT paste_count FROM clipboard_history WHERE id = ?1",
+                [history_id],
+                |row| row.get(0),
+            )
+            .expect("无法查询粘贴计数");
         assert_eq!(count, 0);
     }
 
@@ -1241,7 +1254,11 @@ mod tests {
             "CF_UNICODETEXT",
             "CF_UNICODETEXT",
             FormatKind::Text,
-            "原始文本".encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect(),
+            "原始文本"
+                .encode_utf16()
+                .chain([0])
+                .flat_map(u16::to_le_bytes)
+                .collect(),
             0,
             true,
         );

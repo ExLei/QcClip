@@ -23,7 +23,10 @@ impl AppFontMetrics {
         for weight in [FontWeight::NORMAL, FontWeight::MEDIUM, FontWeight::BOLD] {
             style.font_weight = weight;
             let line = text_system.shape_line(
-                sample.into(), font_size, &[style.to_run(sample.len())], None,
+                sample.into(),
+                font_size,
+                &[style.to_run(sample.len())],
+                None,
             );
             line_height = line_height.max(line.ascent + line.descent);
         }
@@ -42,7 +45,11 @@ impl AppFontMetrics {
 
     #[cfg(test)]
     pub(crate) fn for_test(line_height_scale: f32, scale_factor: f32) -> Self {
-        Self { font_id: FontId(0), line_height_scale, scale_factor }
+        Self {
+            font_id: FontId(0),
+            line_height_scale,
+            scale_factor,
+        }
     }
 }
 
@@ -63,18 +70,19 @@ fn sort_font_names(names: &mut Vec<String>) {
 
 fn font_priority(name: &str) -> u8 {
     match name.to_lowercase().as_str() {
-        "microsoft yahei ui" | "微软雅黑 ui" | "microsoft yahei" | "微软雅黑"
-        | "pingfang sc" | "苹方-简" | "noto sans cjk sc" | "noto sans sc"
-        | "source han sans sc" | "思源黑体" | "思源黑体 cn"
-        | "segoe ui" | "segoe ui variable" | "arial" => return 0,
+        "microsoft yahei ui" | "微软雅黑 ui" | "microsoft yahei" | "微软雅黑" | "pingfang sc"
+        | "苹方-简" | "noto sans cjk sc" | "noto sans sc" | "source han sans sc" | "思源黑体"
+        | "思源黑体 cn" | "segoe ui" | "segoe ui variable" | "arial" => return 0,
         _ => {}
     }
     if !name.chars().next().is_some_and(char::is_alphabetic) {
         return 3;
     }
-    if name.chars().any(|ch| matches!(ch as u32,
-        0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff | 0x20000..=0x323af
-    )) {
+    if name.chars().any(|ch| {
+        matches!(ch as u32,
+            0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff | 0x20000..=0x323af
+        )
+    }) {
         return 1;
     }
     2
@@ -82,7 +90,9 @@ fn font_priority(name: &str) -> u8 {
 
 #[cfg(not(target_os = "windows"))]
 fn enumerate_system_fonts(cx: &App) -> Vec<String> {
-    cx.text_system().all_font_names().into_iter()
+    cx.text_system()
+        .all_font_names()
+        .into_iter()
         .filter(|name| !name.starts_with('.'))
         .collect()
 }
@@ -101,11 +111,13 @@ fn enumerate_system_fonts(_cx: &App) -> Vec<String> {
 #[cfg(target_os = "windows")]
 fn windows_font_names() -> windows::core::Result<Vec<String>> {
     use windows::{
-        core::{BOOL, HSTRING, w},
         Win32::{
             Globalization::GetUserDefaultLocaleName,
-            Graphics::DirectWrite::{DWriteCreateFactory, IDWriteFactory, DWRITE_FACTORY_TYPE_SHARED},
+            Graphics::DirectWrite::{
+                DWRITE_FACTORY_TYPE_SHARED, DWriteCreateFactory, IDWriteFactory,
+            },
         },
+        core::{BOOL, HSTRING, w},
     };
 
     // 仅查询字体族名称，不创建字体实例，也不读取或注册字体文件。
@@ -114,7 +126,9 @@ fn windows_font_names() -> windows::core::Result<Vec<String>> {
         let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let mut collection = None;
         factory.GetSystemFontCollection(&mut collection, false)?;
-        let Some(collection) = collection else { return Ok(Vec::new()); };
+        let Some(collection) = collection else {
+            return Ok(Vec::new());
+        };
         let mut locale = [0u16; 85];
         let locale_len = GetUserDefaultLocaleName(&mut locale);
         let locale = if locale_len > 1 {
@@ -131,7 +145,9 @@ fn windows_font_names() -> windows::core::Result<Vec<String>> {
                 names.FindLocaleName(&locale, &mut index, &mut exists)?;
                 if !exists.as_bool() {
                     names.FindLocaleName(w!("en-US"), &mut index, &mut exists)?;
-                    if !exists.as_bool() { index = 0; }
+                    if !exists.as_bool() {
+                        index = 0;
+                    }
                 }
                 let length = names.GetStringLength(index)? as usize;
                 let mut buffer = vec![0u16; length + 1];
@@ -152,7 +168,10 @@ mod tests {
     #[test]
     fn app_font_line_height_fits_tall_fonts_and_aligns_to_device_pixels() {
         let metrics = super::AppFontMetrics::for_test(1.6, 1.25);
-        assert_eq!(metrics.line_height(gpui::px(14.0), gpui::px(17.5)), gpui::px(22.4));
+        assert_eq!(
+            metrics.line_height(gpui::px(14.0), gpui::px(17.5)),
+            gpui::px(22.4)
+        );
         let height = metrics.line_height(gpui::px(11.0), gpui::px(20.0));
         assert_eq!(height, gpui::px(20.0));
         let fractional = metrics.line_height(gpui::px(9.0), gpui::px(17.5));
@@ -162,11 +181,36 @@ mod tests {
 
     #[test]
     fn app_font_order_prioritizes_readable_families_and_keeps_numbered_fonts() {
-        let mut names = ["04b03", "Arial", "叶根友微宋", "00Antix", "微软雅黑",
-            "宋体", "zebra", "Calibri", "@宋体", "Arial", ""].map(str::to_owned).to_vec();
+        let mut names = [
+            "04b03",
+            "Arial",
+            "叶根友微宋",
+            "00Antix",
+            "微软雅黑",
+            "宋体",
+            "zebra",
+            "Calibri",
+            "@宋体",
+            "Arial",
+            "",
+        ]
+        .map(str::to_owned)
+        .to_vec();
         super::sort_font_names(&mut names);
-        assert_eq!(names, ["Arial", "微软雅黑", "叶根友微宋", "宋体", "Calibri",
-            "zebra", "00Antix", "04b03", "@宋体"]);
+        assert_eq!(
+            names,
+            [
+                "Arial",
+                "微软雅黑",
+                "叶根友微宋",
+                "宋体",
+                "Calibri",
+                "zebra",
+                "00Antix",
+                "04b03",
+                "@宋体"
+            ]
+        );
     }
 
     #[cfg(target_os = "windows")]

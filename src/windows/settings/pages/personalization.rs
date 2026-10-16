@@ -1,6 +1,6 @@
 use crate::ui::scale::ui_rem;
 
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context};
 
@@ -8,14 +8,14 @@ use super::super::SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH;
 use super::super::{
     SettingsWindowView,
     components::{
-        clickable_setting_row, compact_clickable_setting_row, setting_row, settings_dropdown, settings_error_row,
-        settings_page_header, settings_dropdown_with_font,
+        clickable_setting_row, compact_clickable_setting_row, setting_row, settings_dropdown,
+        settings_dropdown_with_font, settings_error_row, settings_page_header,
     },
 };
 use crate::{
     config::{
-        AnimationConfig, AppearanceConfig, AppearanceMode, CardItemGap,
-        ListItemHeight, ListItemStyle, TitlebarPosition, WindowMaterial,
+        AnimationConfig, AppearanceConfig, AppearanceMode, CardItemGap, ListItemHeight,
+        ListItemStyle, TitlebarPosition, WindowMaterial,
     },
     config_runtime, i18n,
     ui::theme::{ThemeOption, available_theme_options},
@@ -24,12 +24,10 @@ use crate::{
 };
 use gpui::{App, Entity, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::slider::Slider;
 use gpui_component::switch::Switch;
-use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::{
-    ActiveTheme as _, Sizable as _, ThemeMode, WindowExt as _, h_flex, v_flex,
-};
+use gpui_component::{ActiveTheme as _, Sizable as _, ThemeMode, WindowExt as _, h_flex, v_flex};
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_personalization(
@@ -57,7 +55,8 @@ impl SettingsWindowView {
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
-                    view.appearance_error = notify_settings_error(SettingsPage::Personalization, error_message, cx);
+                    view.appearance_error =
+                        notify_settings_error(SettingsPage::Personalization, error_message, cx);
                     cx.notify();
                 });
             });
@@ -67,10 +66,16 @@ impl SettingsWindowView {
             scale_presets.push(appearance.ui_scale_percent);
             scale_presets.sort_unstable();
         }
-        let scale_items = scale_presets.into_iter().map(|percent| {
-            DropdownItem::option(DropdownItemId::new(percent.to_string()), format!("{percent}%"))
+        let scale_items = scale_presets
+            .into_iter()
+            .map(|percent| {
+                DropdownItem::option(
+                    DropdownItemId::new(percent.to_string()),
+                    format!("{percent}%"),
+                )
                 .selected(percent == appearance.ui_scale_percent)
-        }).collect();
+            })
+            .collect();
         let scale_selector = settings_dropdown(
             "settings-ui-scale-select",
             appearance.ui_scale_percent.to_string(),
@@ -79,11 +84,15 @@ impl SettingsWindowView {
                 let view = view.clone();
                 let save_error = translator.translate("settings.personalization.save_error");
                 move |id, cx| {
-                    let Ok(percent) = id.as_str().parse::<u16>() else { return; };
+                    let Ok(percent) = id.as_str().parse::<u16>() else {
+                        return;
+                    };
                     persist_appearance_change(
-                        view.clone(), "界面缩放",
+                        view.clone(),
+                        "界面缩放",
                         move |appearance| appearance.ui_scale_percent = percent,
-                        save_error.clone(), cx,
+                        save_error.clone(),
+                        cx,
                     );
                 }
             },
@@ -91,14 +100,21 @@ impl SettingsWindowView {
         );
 
         let current_font = appearance.app_font_family.as_deref().unwrap_or("");
-        let mut font_items = vec![DropdownItem::option(
-            DropdownItemId::new(""),
-            translator.translate("settings.personalization.app_font_default"),
-        ).selected(current_font.is_empty())];
-        font_items.extend(crate::ui::fonts::system_font_names(cx).iter().map(|family| {
-            DropdownItem::option(DropdownItemId::new(family.clone()), family.clone())
-                .selected(family == current_font)
-        }));
+        let mut font_items = vec![
+            DropdownItem::option(
+                DropdownItemId::new(""),
+                translator.translate("settings.personalization.app_font_default"),
+            )
+            .selected(current_font.is_empty()),
+        ];
+        font_items.extend(
+            crate::ui::fonts::system_font_names(cx)
+                .iter()
+                .map(|family| {
+                    DropdownItem::option(DropdownItemId::new(family.clone()), family.clone())
+                        .selected(family == current_font)
+                }),
+        );
         let font_selector = settings_dropdown_with_font(
             "settings-app-font-select",
             current_font.to_owned(),
@@ -110,9 +126,11 @@ impl SettingsWindowView {
                 move |id, cx| {
                     let family = (!id.as_str().is_empty()).then(|| id.as_str().to_owned());
                     persist_appearance_change(
-                        view.clone(), "应用字体",
+                        view.clone(),
+                        "应用字体",
                         move |appearance| appearance.app_font_family = family,
-                        save_error.clone(), cx,
+                        save_error.clone(),
+                        cx,
                     );
                 }
             },
@@ -252,7 +270,10 @@ impl SettingsWindowView {
                     .text_sm()
                     .text_center()
                     .text_color(theme.foreground)
-                    .child(format!("{}px", appearance.background_image_blur.round() as i32)),
+                    .child(format!(
+                        "{}px",
+                        appearance.background_image_blur.round() as i32
+                    )),
             );
         let background_image_selector = Button::new("settings-background-image-choose")
             .small()
@@ -281,53 +302,62 @@ impl SettingsWindowView {
         // 材质面板中的所有设置共用紧凑的标签和控件布局。
         let slider_row = |label: String, control: AnyElement| {
             let title = label.clone();
-            self.highlight_element(theme, title, h_flex()
+            self.highlight_element(
+                theme,
+                title,
+                h_flex()
+                    .w_full()
+                    .gap_3()
+                    .items_center()
+                    .child(
+                        div()
+                            .w(ui_rem(96.0))
+                            .flex_shrink_0()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(label),
+                    )
+                    .child(div().flex_1().min_w_0().child(control)),
+            )
+        };
+        let background_image_title =
+            translator.translate("settings.personalization.background_image");
+        let background_image_row = self.highlight_element(
+            theme,
+            background_image_title.clone(),
+            h_flex()
                 .w_full()
-                .gap_3()
                 .items_center()
+                .justify_between()
+                .gap_3()
                 .child(
                     div()
                         .w(ui_rem(96.0))
                         .flex_shrink_0()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child(label),
+                        .child(background_image_title),
                 )
-                .child(div().flex_1().min_w_0().child(control)))
-        };
-        let background_image_title =
-            translator.translate("settings.personalization.background_image");
-        let background_image_row = self.highlight_element(theme, background_image_title.clone(), h_flex()
-            .w_full()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .child(
-                div()
-                    .w(ui_rem(96.0))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(background_image_title),
-            )
-            .child(background_image_selector));
+                .child(background_image_selector),
+        );
 
         let window_material_panel = v_flex()
             .w_full()
             .gap_3()
             .child(
-                self.highlight_element(theme, translator.translate("settings.personalization.window_material"), h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.foreground)
-                            .child(translator.translate("settings.personalization.window_material")),
-                    )
-                    .child(window_material_selector)),
+                self.highlight_element(
+                    theme,
+                    translator.translate("settings.personalization.window_material"),
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(div().text_sm().text_color(theme.foreground).child(
+                            translator.translate("settings.personalization.window_material"),
+                        ))
+                        .child(window_material_selector),
+                ),
             )
             .when(material_enabled, |this| {
                 this.child(slider_row(
@@ -355,16 +385,14 @@ impl SettingsWindowView {
                         .border_color(theme.border)
                         .pt_3()
                         .child(
-                            v_flex()
-                                .w_full()
-                                .gap_3()
-                                .child(background_image_row)
-                                .child(slider_row(
+                            v_flex().w_full().gap_3().child(background_image_row).child(
+                                slider_row(
                                     translator.translate(
                                         "settings.personalization.background_image_blur",
                                     ),
                                     background_image_blur_selector.into_any_element(),
-                                )),
+                                ),
+                            ),
                         ),
                 )
             });
@@ -506,11 +534,15 @@ impl SettingsWindowView {
             .on_click({
                 let view = view.clone();
                 let save_error = save_error.clone();
-                move |checked, _, cx| persist_appearance_change(
-                    view.clone(), "仅显示备注",
-                    move |appearance| appearance.only_show_notes = *checked,
-                    save_error.clone(), cx,
-                )
+                move |checked, _, cx| {
+                    persist_appearance_change(
+                        view.clone(),
+                        "仅显示备注",
+                        move |appearance| appearance.only_show_notes = *checked,
+                        save_error.clone(),
+                        cx,
+                    )
+                }
             });
 
         let mut section = v_flex()
@@ -528,58 +560,78 @@ impl SettingsWindowView {
                 translator.translate("settings.personalization.description"),
                 reset_button,
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.appearance_mode"),
-                Some(
-                    translator
-                        .translate("settings.personalization.appearance_mode_description")
-                        .into(),
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.appearance_mode"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.appearance_mode_description")
+                            .into(),
+                    ),
+                    mode_selector,
                 ),
-                mode_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.light_theme"),
-                Some(
-                    translator
-                        .translate("settings.personalization.light_theme_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.light_theme"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.light_theme_description")
+                            .into(),
+                    ),
+                    light_selector,
                 ),
-                light_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.dark_theme"),
-                Some(
-                    translator
-                        .translate("settings.personalization.dark_theme_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.dark_theme"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.dark_theme_description")
+                            .into(),
+                    ),
+                    dark_selector,
                 ),
-                dark_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.ui_scale"),
-                Some(translator.translate("settings.personalization.ui_scale_description").into()),
-                scale_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.app_font"),
-                Some(translator.translate("settings.personalization.app_font_description").into()),
-                font_selector,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.titlebar_position"),
-                Some(
-                    translator
-                        .translate("settings.personalization.titlebar_position_description")
-                        .into(),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.ui_scale"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.ui_scale_description")
+                            .into(),
+                    ),
+                    scale_selector,
                 ),
-                titlebar_position_selector,
-            ))
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.app_font"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.app_font_description")
+                            .into(),
+                    ),
+                    font_selector,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.titlebar_position"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.titlebar_position_description")
+                            .into(),
+                    ),
+                    titlebar_position_selector,
+                ),
+            )
             .child(self.highlight_element(
                 theme,
                 translator.translate("settings.personalization.tab_bar"),
@@ -595,29 +647,35 @@ impl SettingsWindowView {
                     {
                         let view = view.clone();
                         move |_, window, cx| {
-                            super::item_display_editor::open_item_display_sheet(view.clone(), window, cx)
+                            super::item_display_editor::open_item_display_sheet(
+                                view.clone(),
+                                window,
+                                cx,
+                            )
                         }
                     },
                 ),
             ))
-            .child(self.highlight_element(
-                theme,
-                translator.translate("settings.personalization.animations"),
-                clickable_setting_row(
-                    "settings-personalization-animations",
+            .child(
+                self.highlight_element(
                     theme,
                     translator.translate("settings.personalization.animations"),
-                    Some(
-                        translator
-                            .translate("settings.personalization.animations_description")
-                            .into(),
+                    clickable_setting_row(
+                        "settings-personalization-animations",
+                        theme,
+                        translator.translate("settings.personalization.animations"),
+                        Some(
+                            translator
+                                .translate("settings.personalization.animations_description")
+                                .into(),
+                        ),
+                        {
+                            let view = view.clone();
+                            move |_, window, cx| open_animations_sheet(view.clone(), window, cx)
+                        },
                     ),
-                    {
-                        let view = view.clone();
-                        move |_, window, cx| open_animations_sheet(view.clone(), window, cx)
-                    },
                 ),
-            ))
+            )
             .child(
                 div()
                     .w_full()
@@ -627,59 +685,69 @@ impl SettingsWindowView {
                     .py_3()
                     .child(window_material_panel),
             )
-            .child(self.setting_row(
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.list_item_style"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.list_item_style_description")
+                            .into(),
+                    ),
+                    list_style_selector,
+                ),
+            );
+        section = section.child(
+            self.setting_row(
                 theme,
-                translator.translate("settings.personalization.list_item_style"),
+                translator.translate("settings.personalization.list_item_height"),
                 Some(
                     translator
-                        .translate("settings.personalization.list_item_style_description")
+                        .translate("settings.personalization.list_item_height_description")
                         .into(),
                 ),
-                list_style_selector,
-            ));
-        section = section.child(self.setting_row(
-            theme,
-            translator.translate("settings.personalization.list_item_height"),
-            Some(
-                translator
-                    .translate("settings.personalization.list_item_height_description")
-                    .into(),
+                list_item_height_selector,
             ),
-            list_item_height_selector,
-        ));
+        );
         if appearance.list_item_height == ListItemHeight::Adaptive {
-            section = section.child(self.setting_row(
-                theme,
-                translator.translate("settings.personalization.adaptive_max_lines"),
-                Some(
-                    translator
-                        .translate("settings.personalization.adaptive_max_lines_description")
-                        .into(),
+            section = section.child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.adaptive_max_lines"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.adaptive_max_lines_description")
+                            .into(),
+                    ),
+                    adaptive_max_lines_selector,
                 ),
-                adaptive_max_lines_selector,
-            ));
+            );
         }
-        section = section.child(self.setting_row(
-            theme,
-            translator.translate("settings.personalization.only_show_notes"),
-            Some(
-                translator
-                    .translate("settings.personalization.only_show_notes_description")
-                    .into(),
-            ),
-            only_show_notes_switch,
-        ));
-        if appearance.list_item_style == ListItemStyle::Card {
-            section = section.child(self.setting_row(
+        section = section.child(
+            self.setting_row(
                 theme,
-                translator.translate("settings.personalization.card_item_gap"),
+                translator.translate("settings.personalization.only_show_notes"),
                 Some(
                     translator
-                        .translate("settings.personalization.card_item_gap_description")
+                        .translate("settings.personalization.only_show_notes_description")
                         .into(),
                 ),
-                card_gap_selector,
-            ));
+                only_show_notes_switch,
+            ),
+        );
+        if appearance.list_item_style == ListItemStyle::Card {
+            section = section.child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.card_item_gap"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.card_item_gap_description")
+                            .into(),
+                    ),
+                    card_gap_selector,
+                ),
+            );
         }
         if let Some(error) = &self.appearance_error {
             section = section.child(settings_error_row(theme, error));
@@ -688,11 +756,7 @@ impl SettingsWindowView {
     }
 }
 
-fn open_animations_sheet(
-    view: Entity<SettingsWindowView>,
-    window: &mut Window,
-    cx: &mut App,
-) {
+fn open_animations_sheet(view: Entity<SettingsWindowView>, window: &mut Window, cx: &mut App) {
     let save_error = i18n::translator(cx).translate("settings.personalization.save_error");
     window.open_sheet(cx, move |sheet, _, cx| {
         let theme = cx.theme().colors;
@@ -754,12 +818,7 @@ fn open_animations_sheet(
                         );
                     }
                 });
-            content = content.child(setting_row(
-                theme,
-                label,
-                Some(description.into()),
-                switch,
-            ));
+            content = content.child(setting_row(theme, label, Some(description.into()), switch));
         }
 
         sheet
@@ -794,7 +853,8 @@ fn set_all_animations(
         }
     };
     view.update(cx, |view, cx| {
-        view.appearance_error = notify_settings_error(SettingsPage::Personalization, error_message, cx);
+        view.appearance_error =
+            notify_settings_error(SettingsPage::Personalization, error_message, cx);
         cx.notify();
     });
 }
@@ -818,16 +878,13 @@ pub(super) fn persist_appearance_change<F>(
         }
     };
     view.update(cx, |view, cx| {
-        view.appearance_error = notify_settings_error(SettingsPage::Personalization, error_message, cx);
+        view.appearance_error =
+            notify_settings_error(SettingsPage::Personalization, error_message, cx);
         cx.notify();
     });
 }
 
-fn choose_background_image(
-    view: Entity<SettingsWindowView>,
-    save_error: String,
-    cx: &mut App,
-) {
+fn choose_background_image(view: Entity<SettingsWindowView>, save_error: String, cx: &mut App) {
     let dialog = rfd::AsyncFileDialog::new()
         .set_title("选择背景图片")
         .add_filter(
@@ -850,7 +907,8 @@ fn choose_background_image(
                 }
             };
             view.update(cx, |view, cx| {
-                view.appearance_error = notify_settings_error(SettingsPage::Personalization, error_message, cx);
+                view.appearance_error =
+                    notify_settings_error(SettingsPage::Personalization, error_message, cx);
                 cx.notify();
             });
         });
@@ -869,13 +927,17 @@ pub(in crate::windows::settings) fn persist_appearance_change_in_view<F>(
 {
     let mut appearance = config_runtime::appearance_config(cx);
     update(&mut appearance);
-    view.appearance_error = notify_settings_error(SettingsPage::Personalization, match config_runtime::set_appearance_config(appearance, cx) {
-        Ok(_) => None,
-        Err(error) => {
-            tracing::error!("保存{field_name}失败：{error}");
-            Some(save_error)
-        }
-    }, cx);
+    view.appearance_error = notify_settings_error(
+        SettingsPage::Personalization,
+        match config_runtime::set_appearance_config(appearance, cx) {
+            Ok(_) => None,
+            Err(error) => {
+                tracing::error!("保存{field_name}失败：{error}");
+                Some(save_error)
+            }
+        },
+        cx,
+    );
     cx.notify();
 }
 

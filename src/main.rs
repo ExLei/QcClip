@@ -1,4 +1,7 @@
-#![cfg_attr(all(target_os = "windows", qcclip_release_gui), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", qcclip_release_gui),
+    windows_subsystem = "windows"
+)]
 
 mod app;
 mod app_paths;

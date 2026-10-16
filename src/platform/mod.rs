@@ -1,8 +1,8 @@
-pub mod clipboard;
 pub(crate) mod auto_start;
-pub(crate) mod elevation;
+pub mod clipboard;
 #[cfg(target_os = "windows")]
 pub mod drag_preview;
+pub(crate) mod elevation;
 #[cfg(target_os = "windows")]
 pub mod external_drag;
 #[cfg(target_os = "windows")]

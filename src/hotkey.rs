@@ -8,7 +8,8 @@ use gpui::{App, AppContext as _, BorrowAppContext as _, Global, Keystroke, Modif
 use gpui_component::kbd::Kbd;
 
 use crate::config::{
-    MiddleMouseShortcutConfig, QuickPasteConfig, QuickPasteShortcutConfig, SessionShortcutId, ShortcutBinding, ShortcutsConfig,
+    MiddleMouseShortcutConfig, QuickPasteConfig, QuickPasteShortcutConfig, SessionShortcutId,
+    ShortcutBinding, ShortcutsConfig,
 };
 
 #[cfg(target_os = "windows")]
@@ -171,7 +172,8 @@ impl HotkeyRuntime {
         let mut runtime = Self {
             #[cfg(target_os = "windows")]
             middle_mouse: middle_mouse::MiddleMouseRuntime::install(
-                crate::config_runtime::shortcuts_config(cx).middle_mouse, cx,
+                crate::config_runtime::shortcuts_config(cx).middle_mouse,
+                cx,
             ),
             manager,
             main_hotkey: None,
@@ -235,20 +237,16 @@ impl HotkeyRuntime {
                     if let Some(navigation) = quick_paste_navigation_for_event(event, cx) {
                         match event.state {
                             HotKeyState::Pressed => {
-                                let generation = cx.update_global::<HotkeyRuntime, _>(
-                                    |runtime, _| {
+                                let generation =
+                                    cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
                                         runtime.mark_quick_paste_navigation_pressed(event)
-                                    },
-                                );
+                                    });
                                 if let Some(generation) = generation {
                                     crate::windows::quick_paste::QuickPasteWindowService::navigate(
                                         navigation, cx,
                                     );
                                     spawn_quick_paste_navigation_repeat(
-                                        navigation,
-                                        event,
-                                        generation,
-                                        cx,
+                                        navigation, event, generation, cx,
                                     );
                                 }
                             }
@@ -262,141 +260,148 @@ impl HotkeyRuntime {
                     }
 
                     match (event.active.command, event.state) {
-                    (HotkeyCommand::ToggleMainWindow, HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        crate::windows::main::toggle_main_window(cx)
-                    }
-                    (HotkeyCommand::OpenSettings, HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        crate::windows::settings::open_settings_window(cx)
-                    }
-                    (HotkeyCommand::ToggleClipboardMonitor, HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        crate::windows::main::MainWindowService::toggle_clipboard_listener(cx)
-                    }
-                    (HotkeyCommand::PlainTextPaste, HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        set_plain_text_paste_trigger_key(event, cx);
-                        let repeat_generation = cx.update_global::<HotkeyRuntime, _>(
-                            |runtime, _| runtime.mark_plain_text_paste_pressed(event),
-                        );
-                        if let Some(generation) = repeat_generation {
-                            crate::windows::main::MainWindowService::paste_plain_text_shortcut(cx);
-                            spawn_plain_text_paste_repeat(event, generation, cx);
-                        }
-                    }
-                    (HotkeyCommand::PlainTextPaste, HotKeyState::Released)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        #[cfg(target_os = "windows")]
-                        let released =
-                            !plain_text_paste_is_physically_pressed(event, cx);
-                        #[cfg(not(target_os = "windows"))]
-                        let released = true;
-                        if released {
-                            cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
-                                runtime.mark_plain_text_paste_released(event)
-                            });
-                            #[cfg(target_os = "windows")]
-                            crate::platform::input::clear_trigger_key();
-                        }
-                    }
-                    (HotkeyCommand::QuickPaste, HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        set_quick_paste_trigger_key(event, cx);
-                        let started = cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
-                            runtime.mark_quick_paste_pressed(event)
-                        });
-                        if started {
-                            crate::windows::quick_paste::QuickPasteWindowService::show(cx);
-                        }
-                    }
-                    (HotkeyCommand::QuickPaste, HotKeyState::Released)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        #[cfg(target_os = "windows")]
-                        spawn_quick_paste_release(event, cx);
-                        #[cfg(not(target_os = "windows"))]
+                        (HotkeyCommand::ToggleMainWindow, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
                         {
-                            let was_pressed = cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
-                                runtime.mark_quick_paste_released(event)
-                            });
-                            if was_pressed {
-                                crate::windows::quick_paste::QuickPasteWindowService::finish(cx);
+                            crate::windows::main::toggle_main_window(cx)
+                        }
+                        (HotkeyCommand::OpenSettings, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            crate::windows::settings::open_settings_window(cx)
+                        }
+                        (HotkeyCommand::ToggleClipboardMonitor, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            crate::windows::main::MainWindowService::toggle_clipboard_listener(cx)
+                        }
+                        (HotkeyCommand::PlainTextPaste, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            set_plain_text_paste_trigger_key(event, cx);
+                            let repeat_generation =
+                                cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                    runtime.mark_plain_text_paste_pressed(event)
+                                });
+                            if let Some(generation) = repeat_generation {
+                                crate::windows::main::MainWindowService::paste_plain_text_shortcut(
+                                    cx,
+                                );
+                                spawn_plain_text_paste_repeat(event, generation, cx);
                             }
                         }
-                    }
-                    (HotkeyCommand::Session(id), HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        let repeat_generation = cx.update_global::<HotkeyRuntime, _>(
-                            |runtime, _| runtime.mark_session_hotkey_pressed(event),
-                        );
-                        if crate::windows::main::MainWindowService::is_logically_visible(cx) {
-                            let should_dispatch = cx.update_global::<HotkeyRuntime, _>(
-                                |runtime, _| runtime.should_dispatch_session(id),
-                            );
-                            if should_dispatch {
+                        (HotkeyCommand::PlainTextPaste, HotKeyState::Released)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            #[cfg(target_os = "windows")]
+                            let released = !plain_text_paste_is_physically_pressed(event, cx);
+                            #[cfg(not(target_os = "windows"))]
+                            let released = true;
+                            if released {
+                                cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                    runtime.mark_plain_text_paste_released(event)
+                                });
                                 #[cfg(target_os = "windows")]
-                                let trigger_key = if id == SessionShortcutId::ExecutePaste {
-                                    cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
-                                        runtime
-                                            .session_hotkeys
-                                            .get(&id)
-                                            .copied()
-                                            .filter(|hotkey| hotkey.id() == event.id)
-                                            .map(|hotkey| hotkey.key)
-                                    })
-                                } else {
-                                    None
-                                };
-                                #[cfg(target_os = "windows")]
-                                if let Some(trigger_key) = trigger_key {
-                                    crate::platform::input::set_trigger_key_code(trigger_key);
+                                crate::platform::input::clear_trigger_key();
+                            }
+                        }
+                        (HotkeyCommand::QuickPaste, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            set_quick_paste_trigger_key(event, cx);
+                            let started = cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                runtime.mark_quick_paste_pressed(event)
+                            });
+                            if started {
+                                crate::windows::quick_paste::QuickPasteWindowService::show(cx);
+                            }
+                        }
+                        (HotkeyCommand::QuickPaste, HotKeyState::Released)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            #[cfg(target_os = "windows")]
+                            spawn_quick_paste_release(event, cx);
+                            #[cfg(not(target_os = "windows"))]
+                            {
+                                let was_pressed =
+                                    cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                        runtime.mark_quick_paste_released(event)
+                                    });
+                                if was_pressed {
+                                    crate::windows::quick_paste::QuickPasteWindowService::finish(
+                                        cx,
+                                    );
                                 }
-                                crate::windows::main::dispatch_session_shortcut(id, cx);
                             }
                         }
-                        if let Some(generation) = repeat_generation {
-                            spawn_session_shortcut_repeat(id, event, generation, cx);
-                        }
-                    }
-                    (HotkeyCommand::Session(_), HotKeyState::Released)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
-                            runtime.mark_session_hotkey_released(event)
-                        });
-                        #[cfg(target_os = "windows")]
-                        if event.active.command
-                            == HotkeyCommand::Session(SessionShortcutId::ExecutePaste)
+                        (HotkeyCommand::Session(id), HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
                         {
-                            crate::platform::input::clear_trigger_key();
+                            let repeat_generation =
+                                cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                    runtime.mark_session_hotkey_pressed(event)
+                                });
+                            if crate::windows::main::MainWindowService::is_logically_visible(cx) {
+                                let should_dispatch =
+                                    cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                        runtime.should_dispatch_session(id)
+                                    });
+                                if should_dispatch {
+                                    #[cfg(target_os = "windows")]
+                                    let trigger_key = if id == SessionShortcutId::ExecutePaste {
+                                        cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
+                                            runtime
+                                                .session_hotkeys
+                                                .get(&id)
+                                                .copied()
+                                                .filter(|hotkey| hotkey.id() == event.id)
+                                                .map(|hotkey| hotkey.key)
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                    #[cfg(target_os = "windows")]
+                                    if let Some(trigger_key) = trigger_key {
+                                        crate::platform::input::set_trigger_key_code(trigger_key);
+                                    }
+                                    crate::windows::main::dispatch_session_shortcut(id, cx);
+                                }
+                            }
+                            if let Some(generation) = repeat_generation {
+                                spawn_session_shortcut_repeat(id, event, generation, cx);
+                            }
                         }
-                    }
-                    (HotkeyCommand::QuickPasteIndex(index), HotKeyState::Pressed)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        set_quick_paste_index_trigger_key(event, cx);
-                        crate::windows::main::MainWindowService::paste_history_index(index, cx);
-                    }
-                    (HotkeyCommand::QuickPasteIndex(_), HotKeyState::Released)
-                        if is_hotkey_event_active(event, cx) =>
-                    {
-                        #[cfg(target_os = "windows")]
-                        let released = !quick_paste_index_is_physically_pressed(event, cx);
-                        #[cfg(not(target_os = "windows"))]
-                        let released = true;
-                        if released {
+                        (HotkeyCommand::Session(_), HotKeyState::Released)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+                                runtime.mark_session_hotkey_released(event)
+                            });
                             #[cfg(target_os = "windows")]
-                            crate::platform::input::clear_trigger_key();
+                            if event.active.command
+                                == HotkeyCommand::Session(SessionShortcutId::ExecutePaste)
+                            {
+                                crate::platform::input::clear_trigger_key();
+                            }
                         }
-                    }
+                        (HotkeyCommand::QuickPasteIndex(index), HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            set_quick_paste_index_trigger_key(event, cx);
+                            crate::windows::main::MainWindowService::paste_history_index(index, cx);
+                        }
+                        (HotkeyCommand::QuickPasteIndex(_), HotKeyState::Released)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            #[cfg(target_os = "windows")]
+                            let released = !quick_paste_index_is_physically_pressed(event, cx);
+                            #[cfg(not(target_os = "windows"))]
+                            let released = true;
+                            if released {
+                                #[cfg(target_os = "windows")]
+                                crate::platform::input::clear_trigger_key();
+                            }
+                        }
                         _ => {}
                     }
                 });
@@ -506,10 +511,7 @@ impl HotkeyRuntime {
         Ok(())
     }
 
-    fn apply_clipboard_monitor(
-        &mut self,
-        binding: Option<&ShortcutBinding>,
-    ) -> Result<(), String> {
+    fn apply_clipboard_monitor(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
         let next = binding.map(binding_to_hotkey).transpose()?;
 
         if self.clipboard_monitor_hotkey == next {
@@ -554,10 +556,7 @@ impl HotkeyRuntime {
         Ok(())
     }
 
-    fn apply_plain_text_paste(
-        &mut self,
-        binding: Option<&ShortcutBinding>,
-    ) -> Result<(), String> {
+    fn apply_plain_text_paste(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
         let next = binding.map(binding_to_hotkey).transpose()?;
 
         if self.plain_text_paste_hotkey == next {
@@ -661,10 +660,7 @@ impl HotkeyRuntime {
         for hotkey in current.into_values() {
             self.remove_active_command(hotkey.id());
             if let Err(error) = self.unregister(hotkey) {
-                failures.insert(
-                    hotkey.to_string(),
-                    format!("注销快捷键失败：{error}"),
-                );
+                failures.insert(hotkey.to_string(), format!("注销快捷键失败：{error}"));
             }
         }
         self.failed_quick_paste_index_hotkeys = failures;
@@ -723,10 +719,7 @@ impl HotkeyRuntime {
         };
     }
 
-    fn activate_quick_paste_navigation(
-        &mut self,
-        config: QuickPasteConfig,
-    ) -> Result<(), String> {
+    fn activate_quick_paste_navigation(&mut self, config: QuickPasteConfig) -> Result<(), String> {
         self.deactivate_quick_paste_navigation()?;
         if !self.global_enabled
             || self.suspended
@@ -753,9 +746,8 @@ impl HotkeyRuntime {
             if let Some(active) = existing_command
                 && !matches!(active.command, HotkeyCommand::Session(_))
             {
-                first_error.get_or_insert_with(|| {
-                    format!("便捷粘贴方向键 {} 与另一条快捷键重复", hotkey)
-                });
+                first_error
+                    .get_or_insert_with(|| format!("便捷粘贴方向键 {} 与另一条快捷键重复", hotkey));
                 continue;
             }
             if registered_by_quick_paste {
@@ -1002,7 +994,8 @@ impl HotkeyRuntime {
         }
         self.global_enabled = enabled;
         #[cfg(target_os = "windows")]
-        self.middle_mouse.configure(shortcuts.middle_mouse, enabled && !self.suspended);
+        self.middle_mouse
+            .configure(shortcuts.middle_mouse, enabled && !self.suspended);
         if !enabled {
             return self.unregister_all();
         }
@@ -1028,7 +1021,8 @@ impl HotkeyRuntime {
             .collect();
         self.suspended = true;
         #[cfg(target_os = "windows")]
-        self.middle_mouse.configure(crate::config::MiddleMouseShortcutConfig::default(), false);
+        self.middle_mouse
+            .configure(crate::config::MiddleMouseShortcutConfig::default(), false);
         let first_error = self.unregister_all().err();
         self.status = RegistrationStatus::Suspended;
         self.quick_paste_index_status = RegistrationStatus::Suspended;
@@ -1043,7 +1037,8 @@ impl HotkeyRuntime {
     ) -> Result<(), String> {
         self.suspended = false;
         #[cfg(target_os = "windows")]
-        self.middle_mouse.configure(shortcuts.middle_mouse, self.global_enabled);
+        self.middle_mouse
+            .configure(shortcuts.middle_mouse, self.global_enabled);
         self.suspended_main_status = None;
         self.suspended_settings_status = None;
         self.suspended_clipboard_monitor_status = None;
@@ -1066,14 +1061,11 @@ impl HotkeyRuntime {
                 .copied()
                 .unwrap_or(RegistrationStatus::Inactive)
         } else if self.session_hotkeys.contains_key(&id)
-            && self
-                .active_commands
-                .read()
-                .is_ok_and(|commands| {
-                    commands
-                        .values()
-                        .any(|active| active.command == HotkeyCommand::Session(id))
-                })
+            && self.active_commands.read().is_ok_and(|commands| {
+                commands
+                    .values()
+                    .any(|active| active.command == HotkeyCommand::Session(id))
+            })
         {
             RegistrationStatus::Registered
         } else if self.failed_session_hotkeys.contains_key(&id) {
@@ -1096,7 +1088,10 @@ impl HotkeyRuntime {
         match self.active_commands.write() {
             Ok(mut commands) => match command {
                 Some(command) => {
-                    if commands.get(&id).is_some_and(|active| active.command == command) {
+                    if commands
+                        .get(&id)
+                        .is_some_and(|active| active.command == command)
+                    {
                         return;
                     }
                     self.next_generation = self.next_generation.wrapping_add(1);
@@ -1169,21 +1164,17 @@ impl HotkeyRuntime {
     }
 
     fn is_session_hotkey_pressed(&self, event: HotkeyEvent, generation: u64) -> bool {
-        self.pressed_session_hotkeys
-            .get(&event.id)
-            .is_some_and(|(active_generation, press_generation)| {
+        self.pressed_session_hotkeys.get(&event.id).is_some_and(
+            |(active_generation, press_generation)| {
                 *active_generation == event.active.generation && *press_generation == generation
-            })
+            },
+        )
     }
 
     fn mark_plain_text_paste_pressed(&mut self, event: HotkeyEvent) -> Option<u64> {
         self.next_press_generation = self.next_press_generation.wrapping_add(1);
         let generation = self.next_press_generation;
-        self.pressed_plain_text_paste = Some((
-            event.id,
-            event.active.generation,
-            generation,
-        ));
+        self.pressed_plain_text_paste = Some((event.id, event.active.generation, generation));
         Some(generation)
     }
 
@@ -1199,19 +1190,21 @@ impl HotkeyRuntime {
     }
 
     fn is_plain_text_paste_pressed(&self, event: HotkeyEvent, generation: u64) -> bool {
-        self.pressed_plain_text_paste.is_some_and(
-            |(id, active_generation, press_generation)| {
+        self.pressed_plain_text_paste
+            .is_some_and(|(id, active_generation, press_generation)| {
                 id == event.id
                     && active_generation == event.active.generation
                     && press_generation == generation
-            },
-        )
+            })
     }
 
     fn mark_quick_paste_pressed(&mut self, event: HotkeyEvent) -> bool {
-        if self.pressed_quick_paste.is_some_and(|(id, active_generation, _)| {
-            id == event.id && active_generation == event.active.generation
-        }) {
+        if self
+            .pressed_quick_paste
+            .is_some_and(|(id, active_generation, _)| {
+                id == event.id && active_generation == event.active.generation
+            })
+        {
             return false;
         }
         self.next_press_generation = self.next_press_generation.wrapping_add(1);
@@ -1224,9 +1217,12 @@ impl HotkeyRuntime {
     }
 
     fn mark_quick_paste_released(&mut self, event: HotkeyEvent) -> bool {
-        if self.pressed_quick_paste.is_some_and(|(id, active_generation, _)| {
-            id == event.id && active_generation == event.active.generation
-        }) {
+        if self
+            .pressed_quick_paste
+            .is_some_and(|(id, active_generation, _)| {
+                id == event.id && active_generation == event.active.generation
+            })
+        {
             self.pressed_quick_paste = None;
             true
         } else {
@@ -1264,11 +1260,12 @@ impl HotkeyRuntime {
     fn is_quick_paste_navigation_pressed(&self, event: HotkeyEvent, generation: u64) -> bool {
         self.quick_paste_navigation_hotkeys.contains_key(&event.id)
             && self.active_command(event.id) == Some(event.active)
-            && self.pressed_quick_paste_navigation.get(&event.id).is_some_and(
-                |(active_generation, press_generation)| {
+            && self
+                .pressed_quick_paste_navigation
+                .get(&event.id)
+                .is_some_and(|(active_generation, press_generation)| {
                     *active_generation == event.active.generation && *press_generation == generation
-                },
-            )
+                })
     }
 }
 
@@ -1407,11 +1404,7 @@ fn spawn_quick_paste_release(event: HotkeyEvent, cx: &mut App) {
     .detach();
 }
 
-fn spawn_plain_text_paste_repeat(
-    event: HotkeyEvent,
-    generation: u64,
-    cx: &mut App,
-) {
+fn spawn_plain_text_paste_repeat(event: HotkeyEvent, generation: u64, cx: &mut App) {
     cx.spawn(async move |cx| {
         cx.background_executor()
             .timer(PLAIN_TEXT_PASTE_INITIAL_REPEAT_DELAY)
@@ -1509,7 +1502,9 @@ fn session_shortcut_is_throttled(
 ) -> bool {
     session_shortcut_cooldown(id)
         .zip(last_dispatch)
-        .is_some_and(|(cooldown, last_dispatch)| now.saturating_duration_since(last_dispatch) < cooldown)
+        .is_some_and(|(cooldown, last_dispatch)| {
+            now.saturating_duration_since(last_dispatch) < cooldown
+        })
 }
 
 pub(crate) fn registration_status(cx: &App) -> RegistrationStatus {
@@ -1580,10 +1575,7 @@ pub(crate) fn quick_paste_registration_status(cx: &App) -> RegistrationStatus {
     })
 }
 
-pub(crate) fn session_registration_status(
-    id: SessionShortcutId,
-    cx: &App,
-) -> RegistrationStatus {
+pub(crate) fn session_registration_status(id: SessionShortcutId, cx: &App) -> RegistrationStatus {
     let configured = crate::config_runtime::shortcuts_config(cx)
         .session(id)
         .binding
@@ -1593,9 +1585,10 @@ pub(crate) fn session_registration_status(
 
 fn is_hotkey_event_active(event: HotkeyEvent, cx: &App) -> bool {
     cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
-        runtime.active_commands.read().is_ok_and(|commands| {
-            commands.get(&event.id) == Some(&event.active)
-        })
+        runtime
+            .active_commands
+            .read()
+            .is_ok_and(|commands| commands.get(&event.id) == Some(&event.active))
     })
 }
 
@@ -1625,14 +1618,10 @@ pub(crate) fn quick_paste_index_registration_failures(cx: &App) -> Vec<String> {
     })
 }
 
-fn quick_paste_navigation_for_event(
-    event: HotkeyEvent,
-    cx: &App,
-) -> Option<QuickPasteNavigation> {
+fn quick_paste_navigation_for_event(event: HotkeyEvent, cx: &App) -> Option<QuickPasteNavigation> {
     cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
         let registration = runtime.quick_paste_navigation_hotkeys.get(&event.id)?;
-        (runtime.active_command(event.id) == Some(event.active))
-            .then_some(registration.navigation)
+        (runtime.active_command(event.id) == Some(event.active)).then_some(registration.navigation)
     })
 }
 
@@ -1689,11 +1678,7 @@ pub(crate) fn deactivate_quick_paste_navigation(cx: &mut App) {
     sync_session_shortcuts(window_visible, pointer_inside, cx);
 }
 
-pub(crate) fn sync_session_shortcuts(
-    window_visible: bool,
-    pointer_inside: bool,
-    cx: &mut App,
-) {
+pub(crate) fn sync_session_shortcuts(window_visible: bool, pointer_inside: bool, cx: &mut App) {
     let shortcuts = crate::config_runtime::shortcuts_config(cx);
     let previous = cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
         (
@@ -1772,7 +1757,9 @@ pub(crate) fn set_middle_mouse_config(
         .map_err(|error| error.to_string())?;
     #[cfg(target_os = "windows")]
     cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
-        runtime.middle_mouse.configure(config, runtime.global_enabled && !runtime.suspended);
+        runtime
+            .middle_mouse
+            .configure(config, runtime.global_enabled && !runtime.suspended);
     });
     #[cfg(not(target_os = "windows"))]
     let _ = config;
@@ -1908,9 +1895,11 @@ fn validate_shortcuts_config(shortcuts: &ShortcutsConfig) -> Result<(), String> 
     ));
     bindings.push(("全局纯文本粘贴", shortcuts.plain_text_paste.as_ref()));
     bindings.push(("全局便捷粘贴", shortcuts.quick_paste.as_ref()));
-    bindings.extend(SessionShortcutId::ALL.into_iter().map(|id| {
-        (id.label_key(), shortcuts.session(id).binding.as_ref())
-    }));
+    bindings.extend(
+        SessionShortcutId::ALL
+            .into_iter()
+            .map(|id| (id.label_key(), shortcuts.session(id).binding.as_ref())),
+    );
 
     for (name, binding) in bindings {
         let Some(binding) = binding else {
@@ -1941,9 +1930,7 @@ pub(crate) fn reset_open_settings_shortcut(cx: &mut App) -> Result<(), String> {
     set_open_settings_shortcut(None, cx)
 }
 
-pub(crate) fn reset_toggle_clipboard_monitor_shortcut(
-    cx: &mut App,
-) -> Result<(), String> {
+pub(crate) fn reset_toggle_clipboard_monitor_shortcut(cx: &mut App) -> Result<(), String> {
     set_toggle_clipboard_monitor_shortcut(None, cx)
 }
 
@@ -2248,13 +2235,9 @@ mod tests {
         for id in SessionShortcutId::ALL {
             let shortcut = shortcuts.session(id);
             assert!(!shortcut.only_in_window);
-            let hotkey = binding_to_hotkey(
-                shortcut
-                    .binding
-                    .as_ref()
-                    .expect("默认窗口快捷键应有绑定"),
-            )
-            .expect("默认窗口快捷键应有效");
+            let hotkey =
+                binding_to_hotkey(shortcut.binding.as_ref().expect("默认窗口快捷键应有绑定"))
+                    .expect("默认窗口快捷键应有效");
             assert!(!registered_ids.contains(&hotkey.id()), "默认快捷键不能重复");
             registered_ids.push(hotkey.id());
         }

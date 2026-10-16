@@ -139,19 +139,21 @@ pub fn render(
             .border_1()
             .border_color(input_border)
             .bg(theme.title_bar)
-            .capture_any_mouse_down(cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                this.window_drag_start = None;
-                if event.button != MouseButton::Left || window.is_window_active() {
-                    return;
-                }
+            .capture_any_mouse_down(
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.window_drag_start = None;
+                    if event.button != MouseButton::Left || window.is_window_active() {
+                        return;
+                    }
 
-                if let Err(error) = crate::services::focus::focus_input_window(window) {
-                    tracing::error!("点击搜索输入框时激活窗口失败：{error}");
-                    return;
-                }
+                    if let Err(error) = crate::services::focus::focus_input_window(window) {
+                        tracing::error!("点击搜索输入框时激活窗口失败：{error}");
+                        return;
+                    }
 
-                search_input_for_mouse.update(cx, |input, cx| input.focus(window, cx));
-            }))
+                    search_input_for_mouse.update(cx, |input, cx| input.focus(window, cx));
+                }),
+            )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
         if is_vertical {
@@ -288,17 +290,38 @@ pub fn render(
                 .justify_center()
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .child(img("assets/icon64.png").size(ui_rem(20.0)))
-                .when(crate::services::updates::UpdateService::available(cx).is_some(), |view| {
-                    let tooltip = i18n::translator(cx).translate("updates.open_release");
-                    view.cursor_pointer()
-                        .tooltip(move |_, cx| cx.new(|_| gpui_component::tooltip::Tooltip::new(tooltip.clone())).into())
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(|_, _, cx| crate::services::updates::UpdateService::open_release(cx))
-                        .child(div().absolute().right(ui_rem(-2.0)).bottom(ui_rem(-2.0))
-                            .size(ui_rem(13.0)).rounded_full().bg(theme.success)
-                            .flex().items_center().justify_center()
-                            .child(crate::ui::icon("arrow-bar-to-up", 10.0, theme.background)))
-                }),
+                .when(
+                    crate::services::updates::UpdateService::available(cx).is_some(),
+                    |view| {
+                        let tooltip = i18n::translator(cx).translate("updates.open_release");
+                        view.cursor_pointer()
+                            .tooltip(move |_, cx| {
+                                cx.new(|_| gpui_component::tooltip::Tooltip::new(tooltip.clone()))
+                                    .into()
+                            })
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(|_, _, cx| {
+                                crate::services::updates::UpdateService::open_release(cx)
+                            })
+                            .child(
+                                div()
+                                    .absolute()
+                                    .right(ui_rem(-2.0))
+                                    .bottom(ui_rem(-2.0))
+                                    .size(ui_rem(13.0))
+                                    .rounded_full()
+                                    .bg(theme.success)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(crate::ui::icon(
+                                        "arrow-bar-to-up",
+                                        10.0,
+                                        theme.background,
+                                    )),
+                            )
+                    },
+                ),
         )
         .child(actions);
     if is_vertical {
@@ -362,9 +385,10 @@ fn wrap_vertical_search_text(text: &str, window: &Window) -> String {
 
         let mut start = 0;
         let mut segments = Vec::new();
-        for boundary in
-            line_wrapper.wrap_line(&[LineFragment::text(line)], VERTICAL_SEARCH_TEXT_WIDTH * crate::ui::scale::window_scale(window))
-        {
+        for boundary in line_wrapper.wrap_line(
+            &[LineFragment::text(line)],
+            VERTICAL_SEARCH_TEXT_WIDTH * crate::ui::scale::window_scale(window),
+        ) {
             if boundary.ix > start {
                 segments.push(line[start..boundary.ix].to_owned());
                 start = boundary.ix;

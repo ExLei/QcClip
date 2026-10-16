@@ -18,9 +18,8 @@ pub(crate) fn check_win_v_on_startup(cx: &mut gpui::App) {
     let translator = crate::i18n::translator(cx);
     let title = translator.translate("settings.shortcuts.win_v_replace.title");
     let detail = translator.translate("settings.shortcuts.win_v_replace.detail");
-    let cancel = PromptButton::cancel(
-        translator.translate("settings.shortcuts.win_v_replace.cancel"),
-    );
+    let cancel =
+        PromptButton::cancel(translator.translate("settings.shortcuts.win_v_replace.cancel"));
     let confirm =
         PromptButton::ok(translator.translate("settings.shortcuts.win_v_replace.confirm"));
     let answer = match window.update(cx, |_, window, cx| {

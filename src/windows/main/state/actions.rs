@@ -56,16 +56,14 @@ impl MainWindow {
                     crate::services::database::query::HistoryQuery::default()
                 };
                 query.include_pinned = include_pinned;
-                let order_ids = if active_tab == TabId::Clipboard
-                    && !order_ids.is_empty()
-                    && include_pinned
-                {
-                    order_ids
-                } else {
-                    history_repository
-                        .ordered_ids_scoped(&query, &history_config)
-                        .map_err(|error| error.to_string())?
-                };
+                let order_ids =
+                    if active_tab == TabId::Clipboard && !order_ids.is_empty() && include_pinned {
+                        order_ids
+                    } else {
+                        history_repository
+                            .ordered_ids_scoped(&query, &history_config)
+                            .map_err(|error| error.to_string())?
+                    };
                 let Some(history_id) = order_ids.get(index).copied() else {
                     return Ok::<(), String>(());
                 };
@@ -80,9 +78,9 @@ impl MainWindow {
                     .map_err(|error| error.to_string())
             });
             cx.spawn(async move |cx| match paste_task.await {
-                Ok(()) => cx.update(|cx| {
-                    crate::windows::main::MainWindowService::refresh_history(cx)
-                }),
+                Ok(()) => {
+                    cx.update(|cx| crate::windows::main::MainWindowService::refresh_history(cx))
+                }
                 Err(error) => tracing::error!("快捷粘贴第 {} 项失败：{error}", index + 1),
             })
             .detach();
@@ -110,14 +108,18 @@ impl MainWindow {
                 tracing::error!("列表粘贴前恢复窗口焦点失败：{error}");
             }
 
-            let paste_task = cx.background_spawn(async move {
-                paste_service.paste_item(item_id, move_to_first)
-            });
+            let paste_task = cx
+                .background_spawn(async move { paste_service.paste_item(item_id, move_to_first) });
             cx.spawn(async move |cx| match paste_task.await {
                 Ok(()) => {
                     if let Some(this) = this.upgrade() {
                         this.update(cx, |this, cx| {
-                            this.refresh_after_paste(source_tab, history_id, move_to_first.is_some(), cx);
+                            this.refresh_after_paste(
+                                source_tab,
+                                history_id,
+                                move_to_first.is_some(),
+                                cx,
+                            );
                         });
                     }
                 }
@@ -152,18 +154,18 @@ impl MainWindow {
 
         let paste_service = self.paste_service.clone();
         let paste_task = cx.background_spawn(async move {
-            paste_service.paste_item_format(
-                item_id,
-                &format_namespace,
-                &format_key,
-                move_to_first,
-            )
+            paste_service.paste_item_format(item_id, &format_namespace, &format_key, move_to_first)
         });
         cx.spawn(async move |this, cx| match paste_task.await {
             Ok(()) => {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
-                        this.refresh_after_paste(source_tab, history_id, move_to_first.is_some(), cx);
+                        this.refresh_after_paste(
+                            source_tab,
+                            history_id,
+                            move_to_first.is_some(),
+                            cx,
+                        );
                     });
                 }
             }
@@ -188,9 +190,8 @@ impl MainWindow {
         let active_tab = self.active_tab;
         let move_to_first = paste_order_target(TabId::Clipboard, cx);
         let paste_service = self.paste_service.clone();
-        let paste_task = cx.background_spawn(async move {
-            paste_service.paste_latest_plain_text(move_to_first)
-        });
+        let paste_task = cx
+            .background_spawn(async move { paste_service.paste_latest_plain_text(move_to_first) });
         cx.spawn(async move |this, cx| match paste_task.await {
             Ok(item_id) => {
                 if let Some(this) = this.upgrade() {
@@ -201,14 +202,22 @@ impl MainWindow {
                             .find(|item| item.item_id == item_id)
                             .map(|item| item.history_id)
                         {
-                            this.refresh_after_paste(active_tab, list_item_id, move_to_first.is_some(), cx);
+                            this.refresh_after_paste(
+                                active_tab,
+                                list_item_id,
+                                move_to_first.is_some(),
+                                cx,
+                            );
                         }
                     });
                 }
             }
             Err(error) => {
                 tracing::error!("纯文本粘贴失败：{error}");
-                if matches!(error, crate::services::paste::PasteError::NoRestorableFormat) {
+                if matches!(
+                    error,
+                    crate::services::paste::PasteError::NoRestorableFormat
+                ) {
                     cx.update(|cx| {
                         crate::windows::main::MainWindowService::show_plain_text_paste_unavailable(
                             cx,
@@ -229,8 +238,7 @@ impl MainWindow {
         if let Err(error) = crate::services::focus::restore_previous_focus() {
             tracing::error!("纯文本粘贴前恢复窗口焦点失败：{error}");
         }
-        let move_to_first = refresh
-            .and_then(|(source_tab, _)| paste_order_target(source_tab, cx));
+        let move_to_first = refresh.and_then(|(source_tab, _)| paste_order_target(source_tab, cx));
         let paste_service = self.paste_service.clone();
         let paste_task = cx.background_spawn(async move {
             paste_service.paste_item_plain_text(item_id, move_to_first)
@@ -241,13 +249,21 @@ impl MainWindow {
                     && let Some(this) = this.upgrade()
                 {
                     this.update(cx, |this, cx| {
-                        this.refresh_after_paste(source_tab, history_id, move_to_first.is_some(), cx);
+                        this.refresh_after_paste(
+                            source_tab,
+                            history_id,
+                            move_to_first.is_some(),
+                            cx,
+                        );
                     });
                 }
             }
             Err(error) => {
                 tracing::error!("纯文本粘贴失败：{error}");
-                if matches!(error, crate::services::paste::PasteError::NoRestorableFormat) {
+                if matches!(
+                    error,
+                    crate::services::paste::PasteError::NoRestorableFormat
+                ) {
                     cx.update(|cx| {
                         crate::windows::main::MainWindowService::show_plain_text_paste_unavailable(
                             cx,
@@ -273,17 +289,15 @@ impl MainWindow {
 
         let paste_service = self.paste_service.clone();
         let copy_task = cx.background_spawn(async move { paste_service.copy_item(item_id) });
-        cx.spawn(async move |_this, cx| {
-            match copy_task.await {
-                Ok(()) => {
-                    cx.update(|cx| {
-                        crate::windows::notification::NotificationService::show_clipboard_item(
-                            item_id, cx,
-                        );
-                    });
-                }
-                Err(error) => tracing::error!("剪贴板复制失败：{error}"),
+        cx.spawn(async move |_this, cx| match copy_task.await {
+            Ok(()) => {
+                cx.update(|cx| {
+                    crate::windows::notification::NotificationService::show_clipboard_item(
+                        item_id, cx,
+                    );
+                });
             }
+            Err(error) => tracing::error!("剪贴板复制失败：{error}"),
         })
         .detach();
         cx.notify();
@@ -312,13 +326,7 @@ impl MainWindow {
         cx.spawn(async move |_this, cx| {
             let result = copy_task.await;
             cx.update(|cx| {
-                show_multi_selection_feedback(
-                    result,
-                    title,
-                    success_message,
-                    failure_message,
-                    cx,
-                );
+                show_multi_selection_feedback(result, title, success_message, failure_message, cx);
             });
         })
         .detach();
@@ -435,10 +443,8 @@ impl MainWindow {
                     &[("count", selected_ids.len().to_string())],
                 );
                 let detail = translator.translate("main.confirm.remove_favorite.detail");
-                let cancel =
-                    gpui::PromptButton::cancel(translator.translate("main.form.cancel"));
-                let confirm =
-                    gpui::PromptButton::ok(translator.translate("main.form.confirm"));
+                let cancel = gpui::PromptButton::cancel(translator.translate("main.form.cancel"));
+                let confirm = gpui::PromptButton::ok(translator.translate("main.form.confirm"));
                 let answer = window.prompt(
                     gpui::PromptLevel::Warning,
                     &title,
@@ -451,11 +457,7 @@ impl MainWindow {
                         return;
                     }
                     this.update(cx, |this, cx| {
-                        this.remove_multi_selected_items(
-                            selected_ids,
-                            TabId::Favorites,
-                            cx,
-                        );
+                        this.remove_multi_selected_items(selected_ids, TabId::Favorites, cx);
                     })
                     .ok();
                 })
@@ -464,7 +466,6 @@ impl MainWindow {
             TabId::Emoji => {}
         }
     }
-
 
     pub(super) fn remove_multi_selected_items(
         &mut self,
@@ -534,10 +535,15 @@ impl MainWindow {
                     crate::windows::preview::PreviewWindowService::hide(cx);
                     crate::windows::main::MainWindowService::cancel_hover_preview(cx);
                     crate::windows::note_editor::open(
-                        item_id, text, repository,
-                        move |cx| main_window.update(cx, |this, cx| {
-                            this.refresh_list_item_for_tab(source_tab, history_id, cx);
-                        }), cx,
+                        item_id,
+                        text,
+                        repository,
+                        move |cx| {
+                            main_window.update(cx, |this, cx| {
+                                this.refresh_list_item_for_tab(source_tab, history_id, cx);
+                            })
+                        },
+                        cx,
                     )
                 });
                 if let Err(error) = result {
@@ -545,7 +551,8 @@ impl MainWindow {
                 }
             }
             Err(error) => tracing::error!("读取条目备注失败：{error}"),
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -590,11 +597,7 @@ impl MainWindow {
                 let on_confirm = Box::new(
                     move |edited_text: String, tag_ids: Vec<i64>, cx: &mut gpui::App| {
                         let save_task = cx.background_executor().spawn(async move {
-                            save_service.save_for_item_with_tags(
-                                item_id,
-                                &edited_text,
-                                &tag_ids,
-                            )
+                            save_service.save_for_item_with_tags(item_id, &edited_text, &tag_ids)
                         });
                         cx.spawn(async move |cx| match save_task.await {
                             Ok(()) => {
@@ -611,9 +614,9 @@ impl MainWindow {
                     let restore_service = custom_text_service.clone();
                     let restore_window = main_window.clone();
                     Some(Box::new(move |cx: &mut gpui::App| {
-                        let restore_task = cx.background_executor().spawn(async move {
-                            restore_service.remove_custom_text(item_id)
-                        });
+                        let restore_task = cx
+                            .background_executor()
+                            .spawn(async move { restore_service.remove_custom_text(item_id) });
                         cx.spawn(async move |cx| match restore_task.await {
                             Ok(()) => {
                                 restore_window.update(cx, |this, cx| {
@@ -665,19 +668,13 @@ impl MainWindow {
         .detach();
     }
 
-    pub(super) fn open_new_text_item_with_tags(
-        &mut self,
-        tags: Vec<Tag>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn open_new_text_item_with_tags(&mut self, tags: Vec<Tag>, cx: &mut Context<Self>) {
         let custom_text_service = self.custom_text_service.clone();
         let main_window = cx.entity();
         let on_confirm = Box::new(move |text: String, tag_ids: Vec<i64>, cx: &mut gpui::App| {
-            let save_task = cx
-                .background_executor()
-                .spawn(async move {
-                    custom_text_service.create_manual_text_with_tags(&text, &tag_ids)
-                });
+            let save_task = cx.background_executor().spawn(async move {
+                custom_text_service.create_manual_text_with_tags(&text, &tag_ids)
+            });
             cx.spawn(async move |cx| match save_task.await {
                 Ok(history_id) => {
                     main_window.update(cx, |this, cx| {
@@ -692,32 +689,26 @@ impl MainWindow {
             })
             .detach();
         });
-        if let Err(error) = crate::windows::custom_text_editor::open_new(
-            String::new(),
-            tags,
-            on_confirm,
-            cx,
-        ) {
+        if let Err(error) =
+            crate::windows::custom_text_editor::open_new(String::new(), tags, on_confirm, cx)
+        {
             tracing::error!("打开新增文本窗口失败：{error}");
         }
     }
 
-    pub(crate) fn observe_window_bounds(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn observe_window_bounds(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let subscription = cx.observe_window_bounds(window, |this, window, cx| {
             // Windows 只在原生手动缩放结束后保存，窗口动画不参与尺寸持久化。
             if cfg!(target_os = "windows") {
                 return;
             }
-            let (should_record, generation) = cx.read_global::<MainWindowService, _>(|service, _| {
-                (
-                    service.window_state.can_record_window_geometry(),
-                    service.window_state.visibility_transition_generation(),
-                )
-            });
+            let (should_record, generation) =
+                cx.read_global::<MainWindowService, _>(|service, _| {
+                    (
+                        service.window_state.can_record_window_geometry(),
+                        service.window_state.visibility_transition_generation(),
+                    )
+                });
             if !should_record {
                 return;
             }
@@ -737,7 +728,8 @@ impl MainWindow {
                         this._window_size_persist_task = None;
                         let should_record = cx.read_global::<MainWindowService, _>(|service, _| {
                             service.window_state.can_record_window_geometry()
-                                && service.window_state.visibility_transition_generation() == generation
+                                && service.window_state.visibility_transition_generation()
+                                    == generation
                         });
                         if should_record {
                             state_runtime::set_main_window_size(
@@ -778,8 +770,7 @@ impl MainWindow {
         let main_window = cx.entity();
         let on_confirm = Box::new(move |text: String, tag_ids: Vec<i64>, cx: &mut gpui::App| {
             let save_task = cx.background_executor().spawn(async move {
-                custom_text_service
-                    .create_manual_text_and_favorite_with_tags(&text, &tag_ids)
+                custom_text_service.create_manual_text_and_favorite_with_tags(&text, &tag_ids)
             });
             cx.spawn(async move |cx| match save_task.await {
                 Ok(history_id) => {
@@ -818,9 +809,8 @@ impl MainWindow {
         self.select_item(history_id);
 
         let paste_service = self.paste_service.clone();
-        let open_task = cx.background_spawn(async move {
-            paste_service.open_item_with_default(item_id)
-        });
+        let open_task =
+            cx.background_spawn(async move { paste_service.open_item_with_default(item_id) });
         cx.spawn(async move |_this, _cx| {
             if let Err(error) = open_task.await {
                 tracing::error!("使用默认程序打开失败：{error}");
@@ -841,7 +831,11 @@ impl MainWindow {
             return;
         };
         // 多行文本合并为单行，避免 URL 里出现裸换行。
-        let query = item.preview_text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let query = item
+            .preview_text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         if query.is_empty() {
             return;
         }
@@ -870,10 +864,8 @@ impl MainWindow {
     pub(crate) fn load_drag_payloads(
         &self,
         item_id: ClipboardItemId,
-    ) -> Result<
-        Vec<crate::platform::clipboard::ClipboardPayload>,
-        crate::services::paste::PasteError,
-    > {
+    ) -> Result<Vec<crate::platform::clipboard::ClipboardPayload>, crate::services::paste::PasteError>
+    {
         self.paste_service.load_payloads_for_item(item_id)
     }
 
@@ -999,9 +991,10 @@ impl MainWindow {
     ) {
         let source_tab = self.active_tab;
         let favorite_repository = self.favorite_repository.clone();
-        let remove_task = cx.background_spawn(async move {
-            favorite_repository.remove_from_favorites(favorite_id)
-        });
+        let remove_task =
+            cx.background_spawn(
+                async move { favorite_repository.remove_from_favorites(favorite_id) },
+            );
         cx.spawn(async move |this, cx| match remove_task.await {
             Ok(true) => {
                 if let Some(this) = this.upgrade() {
@@ -1047,7 +1040,9 @@ impl MainWindow {
                     });
                 }
             }
-            Ok(false) => tracing::error!("未找到要移除的内容标签关系：内容 {item_id}，标签 {tag_id}"),
+            Ok(false) => {
+                tracing::error!("未找到要移除的内容标签关系：内容 {item_id}，标签 {tag_id}")
+            }
             Err(error) => tracing::error!("移除内容标签失败：{error}"),
         })
         .detach();
@@ -1078,5 +1073,4 @@ impl MainWindow {
         })
         .detach();
     }
-
 }

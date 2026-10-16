@@ -8,13 +8,14 @@ use uuid::Uuid;
 
 use crate::domain::{
     capture::{
-        CapturedClipboard, FormatKind, RestoreState, classify_format_role,
-        normalize_text_bytes,
+        CapturedClipboard, FormatKind, RestoreState, classify_format_role, normalize_text_bytes,
     },
     clipboard::HistoryItemId,
 };
 
-use super::{CaptureError, generate_preview, hash_clipboard, hash_format_set, select_default_preview};
+use super::{
+    CaptureError, generate_preview, hash_clipboard, hash_format_set, select_default_preview,
+};
 use crate::services::{
     application_icon::{ApplicationIconStore, upsert_application_icon},
     database::{Database, LIST_ORDER_GAP},
@@ -119,10 +120,7 @@ impl CaptureService {
                 source_app_icon_id,
             )?;
             transaction.commit()?;
-            return Ok(CaptureStoreResult {
-                history_id,
-                is_new,
-            });
+            return Ok(CaptureStoreResult { history_id, is_new });
         }
 
         transaction.execute(
@@ -259,10 +257,7 @@ impl CaptureService {
             source_app_icon_id,
         )?;
         transaction.commit()?;
-        Ok(CaptureStoreResult {
-            history_id,
-            is_new,
-        })
+        Ok(CaptureStoreResult { history_id, is_new })
     }
 }
 
@@ -398,13 +393,9 @@ fn find_legacy_duplicate_item(
 
         if can_hash
             && !hash_formats.is_empty()
-            && hash_format_set(
-                hash_formats
-                    .iter()
-                    .map(|(namespace, key, bytes)| {
-                        (namespace.as_str(), key.as_str(), bytes.as_slice())
-                    }),
-            ) == hashed.content_hash
+            && hash_format_set(hash_formats.iter().map(|(namespace, key, bytes)| {
+                (namespace.as_str(), key.as_str(), bytes.as_slice())
+            })) == hashed.content_hash
         {
             return Ok(Some((item_id, state)));
         }
@@ -542,7 +533,10 @@ fn upsert_history(
     let next_sort_order: i64 = transaction.query_row(
         "SELECT COALESCE(MAX(sort_order), -1) + ?1
          FROM clipboard_history WHERE is_pinned = ?2",
-        rusqlite::params![LIST_ORDER_GAP, existing.map(|(_, is_pinned)| is_pinned).unwrap_or(false)],
+        rusqlite::params![
+            LIST_ORDER_GAP,
+            existing.map(|(_, is_pinned)| is_pinned).unwrap_or(false)
+        ],
         |row| row.get(0),
     )?;
     if let Some((history_id, _)) = existing {

@@ -66,12 +66,16 @@ pub(crate) fn file_list_preview_height(
     let visible_count = if height.fixed_preview_lines().is_some() {
         presentation.visible_entries
     } else {
-        file_count.unwrap_or(1).min(presentation.visible_entries).max(1)
+        file_count
+            .unwrap_or(1)
+            .min(presentation.visible_entries)
+            .max(1)
     };
     let natural_height = presentation.entry_height() * visible_count as f32
         + presentation.entry_gap(rem_size, height, visible_count)
             * visible_count.saturating_sub(1) as f32;
-    let minimum = rem_size * FILE_LIST_PREVIEW_LINE_HEIGHT_SCALE
+    let minimum = rem_size
+        * FILE_LIST_PREVIEW_LINE_HEIGHT_SCALE
         * height.fixed_preview_lines().unwrap_or(0) as f32;
     natural_height.max(minimum)
 }
@@ -203,9 +207,15 @@ impl FileListView {
     }
 
     pub(crate) fn preview_summary(&self) -> String {
-        self.paths.iter().map(|path| {
-            path.file_name().unwrap_or(path.as_os_str()).to_string_lossy()
-        }).collect::<Vec<_>>().join("\n")
+        self.paths
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .unwrap_or(path.as_os_str())
+                    .to_string_lossy()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// 在窗口销毁或外层列表淘汰该实体前取出图像，以便由窗口释放 GPU 资源。
@@ -424,7 +434,8 @@ impl Render for FileListView {
             appearance.list_item_height,
             window.rem_size(),
             usize::from(appearance.adaptive_max_lines),
-        ).with_font_metrics(AppFontMetrics::from_window(window, cx));
+        )
+        .with_font_metrics(AppFontMetrics::from_window(window, cx));
         let visible_count = self.paths.len().min(presentation.visible_entries);
         let entry_height = presentation.entry_height();
         let entry_gap = presentation.entry_gap(
@@ -492,20 +503,29 @@ mod tests {
         for height in ListItemHeight::ALL {
             for scale_factor in [1.0, 1.25, 1.5, 2.0] {
                 let font_metrics = crate::ui::fonts::AppFontMetrics::for_test(1.5, scale_factor);
-                let presentation = file_list_presentation(height, px(16.0), 8)
-                    .with_font_metrics(font_metrics);
+                let presentation =
+                    file_list_presentation(height, px(16.0), 8).with_font_metrics(font_metrics);
                 let preview_height = file_list_preview_height(
-                    height, px(16.0), 8, Some(presentation.visible_entries), Some(font_metrics),
+                    height,
+                    px(16.0),
+                    8,
+                    Some(presentation.visible_entries),
+                    Some(font_metrics),
                 );
                 assert!(presentation.line_height >= presentation.text_size * 1.5);
-                let text_height = presentation.line_height * if presentation.show_path { 2.0 } else { 1.0 }
+                let text_height = presentation.line_height
+                    * if presentation.show_path { 2.0 } else { 1.0 }
                     + presentation.text_gap();
                 assert!(presentation.entry_height() >= text_height);
                 let count = presentation.visible_entries;
                 let content_height = presentation.entry_height() * count as f32
-                    + presentation.entry_gap(px(16.0), height, count) * count.saturating_sub(1) as f32;
+                    + presentation.entry_gap(px(16.0), height, count)
+                        * count.saturating_sub(1) as f32;
                 assert!(preview_height >= content_height);
-                assert!(preview_height >= file_list_preview_height(height, px(16.0), 8, Some(count), None));
+                assert!(
+                    preview_height
+                        >= file_list_preview_height(height, px(16.0), 8, Some(count), None)
+                );
             }
         }
     }

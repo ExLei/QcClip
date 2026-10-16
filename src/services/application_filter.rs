@@ -2,10 +2,7 @@ use std::sync::{Arc, OnceLock};
 
 use gpui::{App, AppContext as _, BorrowAppContext as _, Global, RenderImage};
 
-use crate::{
-    config::ApplicationFilterApplication,
-    domain::capture::SourceApplication,
-};
+use crate::{config::ApplicationFilterApplication, domain::capture::SourceApplication};
 
 #[derive(Clone)]
 pub(crate) struct ApplicationInfo {
@@ -105,14 +102,17 @@ impl ApplicationFilterService {
     fn apply_foreground(application: Option<ApplicationFilterApplication>, cx: &mut App) {
         let config = crate::config_runtime::application_filter_config(cx);
         let matched = config.enabled
-            && application
-                .as_ref()
-                .is_some_and(|application| config.applications.iter().any(|filter| same_application(application, filter)));
+            && application.as_ref().is_some_and(|application| {
+                config
+                    .applications
+                    .iter()
+                    .any(|filter| same_application(application, filter))
+            });
         let Some(_) = cx.try_global::<Self>() else {
             return;
         };
-        let (clipboard_blocked, clipboard_was_active, hotkeys_blocked, edge_hide_blocked) =
-            cx.read_global::<Self, _>(|service, _| {
+        let (clipboard_blocked, clipboard_was_active, hotkeys_blocked, edge_hide_blocked) = cx
+            .read_global::<Self, _>(|service, _| {
                 (
                     service.clipboard_blocked,
                     service.clipboard_was_active,
@@ -181,7 +181,9 @@ pub(crate) fn enumerate_running_applications() -> Vec<ApplicationInfo> {
     }
 }
 
-pub(crate) fn resolve_manual_application(input: &str) -> Result<ApplicationFilterApplication, String> {
+pub(crate) fn resolve_manual_application(
+    input: &str,
+) -> Result<ApplicationFilterApplication, String> {
     let query = input.trim();
     if query.is_empty() {
         return Err("请输入应用进程名称或应用名称".to_owned());
@@ -221,10 +223,16 @@ pub(crate) fn same_application(
     filter: &ApplicationFilterApplication,
 ) -> bool {
     if !application.process_path.is_empty() && !filter.process_path.is_empty() {
-        return application.process_path.eq_ignore_ascii_case(&filter.process_path);
+        return application
+            .process_path
+            .eq_ignore_ascii_case(&filter.process_path);
     }
-    application.process_name.eq_ignore_ascii_case(&filter.process_name)
-        || application.display_name.eq_ignore_ascii_case(&filter.display_name)
+    application
+        .process_name
+        .eq_ignore_ascii_case(&filter.process_name)
+        || application
+            .display_name
+            .eq_ignore_ascii_case(&filter.display_name)
 }
 
 /// 判断剪贴板来源是否需要按“禁用内容监听”规则跳过入库。
@@ -319,8 +327,8 @@ fn application_for_window(window: isize) -> Option<ApplicationFilterApplication>
 #[cfg(target_os = "windows")]
 fn enumerate_windows_applications() -> Vec<ApplicationInfo> {
     use windows::Win32::Foundation::LPARAM;
-    use windows::core::BOOL;
     use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+    use windows::core::BOOL;
 
     let mut applications: Vec<ApplicationInfo> = Vec::new();
     let pointer = &mut applications as *mut Vec<ApplicationInfo>;
@@ -328,7 +336,7 @@ fn enumerate_windows_applications() -> Vec<ApplicationInfo> {
         window: windows::Win32::Foundation::HWND,
         parameter: windows::Win32::Foundation::LPARAM,
     ) -> BOOL {
-        use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER, IsWindowVisible};
+        use windows::Win32::UI::WindowsAndMessaging::{GW_OWNER, GetWindow, IsWindowVisible};
         if !unsafe { IsWindowVisible(window).as_bool() }
             || unsafe { GetWindow(window, GW_OWNER) }.is_ok_and(|owner| !owner.is_invalid())
         {
@@ -357,12 +365,15 @@ fn enumerate_windows_applications() -> Vec<ApplicationInfo> {
     if let Err(error) = result {
         tracing::error!("枚举运行中应用失败：{error}");
     }
-    applications.sort_by_key(|application| application.application.display_name.to_ascii_lowercase());
+    applications
+        .sort_by_key(|application| application.application.display_name.to_ascii_lowercase());
     applications
 }
 
 #[cfg(target_os = "windows")]
-fn application_for_hwnd(window: windows::Win32::Foundation::HWND) -> Option<ApplicationFilterApplication> {
+fn application_for_hwnd(
+    window: windows::Win32::Foundation::HWND,
+) -> Option<ApplicationFilterApplication> {
     use std::path::Path;
     let process_path = process_path_from_window(window).unwrap_or_default();
     let process_name = Path::new(&process_path)
@@ -387,7 +398,10 @@ fn process_path_from_window(window: windows::Win32::Foundation::HWND) -> Option<
     use windows::{
         Win32::{
             Foundation::{CloseHandle, HANDLE},
-            System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW},
+            System::Threading::{
+                OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+                QueryFullProcessImageNameW,
+            },
             UI::WindowsAndMessaging::GetWindowThreadProcessId,
         },
         core::PWSTR,
@@ -397,12 +411,18 @@ fn process_path_from_window(window: windows::Win32::Foundation::HWND) -> Option<
     if unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) } == 0 {
         return None;
     }
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }.ok()?;
+    let process =
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }.ok()?;
     let mut buffer = vec![0_u16; 32_768];
     let mut length = buffer.len() as u32;
     // SAFETY: buffer 为可写 UTF-16 缓冲区，长度由 API 限制。
     let result = unsafe {
-        QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut length)
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
     };
     // SAFETY: process 句柄来自 OpenProcess，关闭后不再使用。
     let _ = unsafe { CloseHandle(HANDLE(process.0)) };
@@ -413,7 +433,10 @@ fn process_path_from_window(window: windows::Win32::Foundation::HWND) -> Option<
 #[cfg(target_os = "windows")]
 fn load_application_icon(path: &str) -> Option<Arc<RenderImage>> {
     let icon = file_icon_provider::get_file_icon(path, 32).ok()?;
-    let pixels = usize::try_from(icon.width).ok()?.checked_mul(usize::try_from(icon.height).ok()?)?.checked_mul(4)?;
+    let pixels = usize::try_from(icon.width)
+        .ok()?
+        .checked_mul(usize::try_from(icon.height).ok()?)?
+        .checked_mul(4)?;
     if icon.pixels.len() != pixels {
         return None;
     }

@@ -192,9 +192,7 @@ impl MainWindowService {
             tracing::error!("主窗口尚未就绪，无法切换剪贴板监听");
             return;
         };
-        let result = main_view.update(cx, |view, cx| {
-            view.toggle_clipboard_listener(cx)
-        });
+        let result = main_view.update(cx, |view, cx| view.toggle_clipboard_listener(cx));
         let (title_key, detail_key, level) = match result {
             state::ClipboardListenerToggleResult::Enabled => (
                 "notification.clipboard_monitor.enabled.title",
@@ -240,9 +238,8 @@ impl MainWindowService {
             return;
         };
         if visible {
-            let started = main_view.update(cx, |view, cx| {
-                view.paste_selected_item_as_plain_text(cx)
-            });
+            let started =
+                main_view.update(cx, |view, cx| view.paste_selected_item_as_plain_text(cx));
             if !started {
                 Self::show_plain_text_paste_unavailable(cx);
             }
@@ -271,8 +268,7 @@ impl MainWindowService {
     }
 
     pub(crate) fn window_handle(cx: &App) -> Option<AnyWindowHandle> {
-        cx.try_global::<Self>()
-            .and_then(|service| service.window)
+        cx.try_global::<Self>().and_then(|service| service.window)
     }
 
     pub(crate) fn set_window(
@@ -290,11 +286,8 @@ impl MainWindowService {
         }
         cx.defer(move |cx| {
             let result = window.update(cx, |_, window, cx| {
-                let position_result = window_visibility::position_initial_window(
-                    window,
-                    initial_logical_size,
-                    cx,
-                );
+                let position_result =
+                    window_visibility::position_initial_window(window, initial_logical_size, cx);
                 let hide_result =
                     window_visibility::hide_initial_window(window, initially_visible, cx);
                 let result = position_result.and(hide_result);
@@ -349,10 +342,7 @@ impl MainWindowService {
                     let completion =
                         crate::platform::external_drag::ExternalDragService::execute(request);
                     cx.update(|cx| {
-                        crate::platform::external_drag::ExternalDragService::finish(
-                            completion,
-                            cx,
-                        );
+                        crate::platform::external_drag::ExternalDragService::finish(completion, cx);
                     });
                 }
             }
@@ -401,10 +391,7 @@ impl MainWindowService {
 
     pub(crate) fn session_shortcut_scope(cx: &mut App) -> (bool, bool) {
         let (window, visible) = cx.read_global::<Self, _>(|service, _| {
-            (
-                service.window,
-                service.window_state.is_logically_visible(),
-            )
+            (service.window, service.window_state.is_logically_visible())
         });
         let Some(window) = window.filter(|_| visible) else {
             return (visible, false);
@@ -413,8 +400,9 @@ impl MainWindowService {
         let inside = pointer.is_some_and(|position| {
             window
                 .update(cx, |_, window, _| {
-                    platform_window::physical_client_bounds(window)
-                        .is_ok_and(|bounds| window_visibility::point_in_client_bounds(position, bounds))
+                    platform_window::physical_client_bounds(window).is_ok_and(|bounds| {
+                        window_visibility::point_in_client_bounds(position, bounds)
+                    })
                 })
                 .unwrap_or(false)
         });
@@ -483,9 +471,8 @@ pub(crate) fn dispatch_session_shortcut(id: SessionShortcutId, cx: &mut App) {
     else {
         return;
     };
-    let favorite_removal = main_view.read_with(cx, |main, _| {
-        main.favorite_removal_target_for_shortcut(id)
-    });
+    let favorite_removal =
+        main_view.read_with(cx, |main, _| main.favorite_removal_target_for_shortcut(id));
     if let Some((favorite_id, history_id)) = favorite_removal {
         crate::windows::main::components::clipboard_list::confirm_remove_from_favorites(
             main_view,

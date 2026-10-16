@@ -4,13 +4,13 @@ use std::{collections::HashMap, fs, ops::Range, path::PathBuf, sync::Arc, time::
 
 use file_icon_provider::Icon;
 use gpui::prelude::*;
-use gpui_component::ActiveTheme as _;
 use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, App, AppContext, Bounds, Context, Global,
     IntoElement, LineFragment, ListAlignment, ListSizingBehavior, ListState, ObjectFit, Pixels,
     Point, Render, RenderImage, ScrollHandle, ScrollWheelEvent, Size, StatefulInteractiveElement,
     Task, Window, WindowHandle, anchored, canvas, deferred, div, img, list, point, px, size,
 };
+use gpui_component::ActiveTheme as _;
 
 use crate::{
     config::ClipboardDisplayPriority,
@@ -453,12 +453,13 @@ impl PreviewWindowService {
         let Some(image_preview_service) = self.image_preview_service.clone() else {
             return;
         };
-        if item.note_text.is_empty() && select_user_visible_previews_with_priority(
-            &item.preview_options,
-            &display_priority_roles(display_priority),
-        )
-        .iter()
-        .all(|preview| mode_for_preview(preview).is_none())
+        if item.note_text.is_empty()
+            && select_user_visible_previews_with_priority(
+                &item.preview_options,
+                &display_priority_roles(display_priority),
+            )
+            .iter()
+            .all(|preview| mode_for_preview(preview).is_none())
         {
             return;
         }
@@ -688,7 +689,9 @@ impl PreviewWindow {
             .map(|dimensions| (dimensions.width, dimensions.height));
         self.image_byte_length = None;
         self.image_source_path = None;
-        self.image_base_size = state_runtime::state(cx).preview_window.restored_image_base_size();
+        self.image_base_size = state_runtime::state(cx)
+            .preview_window
+            .restored_image_base_size();
         self.image_base_size_limit = None;
         self.html_images.clear();
         self.file_entries.clear();
@@ -739,13 +742,14 @@ impl PreviewWindow {
         }
 
         let ranges = wrapped_text_line_ranges(
-            &self.text_content, px(wrap_width), gpui::font(cx.theme().font_family.clone()), window,
+            &self.text_content,
+            px(wrap_width),
+            gpui::font(cx.theme().font_family.clone()),
+            window,
         );
         self.text_line_ranges = Arc::new(ranges);
-        self.text_list_state.reset_with_uniform_height(
-            self.text_line_ranges.len(),
-            self.text_line_height,
-        );
+        self.text_list_state
+            .reset_with_uniform_height(self.text_line_ranges.len(), self.text_line_height);
         self.text_wrap_width = Some(wrap_width);
         self.content_size = None;
         self.surface_bounds = None;
@@ -963,7 +967,9 @@ impl PreviewWindow {
         self.image_dimensions = None;
         self.image_byte_length = None;
         self.image_source_path = None;
-        self.image_base_size = state_runtime::state(cx).preview_window.restored_image_base_size();
+        self.image_base_size = state_runtime::state(cx)
+            .preview_window
+            .restored_image_base_size();
         self.image_base_size_limit = None;
         self.loading = false;
         self.error = None;
@@ -988,7 +994,9 @@ impl PreviewWindow {
         }
         let Some(mode) = self.mode else { return };
         if mode == PreviewMode::Image {
-            let Some(limit) = self.image_base_size_limit else { return };
+            let Some(limit) = self.image_base_size_limit else {
+                return;
+            };
             let next = Self::next_image_base_size(self.image_base_size, limit, delta_y);
             if next != self.image_base_size {
                 self.image_base_size = next;
@@ -1270,7 +1278,10 @@ impl PreviewWindow {
                     .child(
                         div()
                             .flex_none()
-                            .max_h(px((max_height - TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).max(1.0)))
+                            .max_h(px((max_height
+                                - TEXT_VERTICAL_PADDING
+                                    * crate::ui::scale::window_scale(window))
+                            .max(1.0)))
                             .id("preview-html-scroll-content")
                             .overflow_y_scroll()
                             .track_scroll(&self.html_scroll)
@@ -1325,7 +1336,9 @@ impl PreviewWindow {
         })
         .with_sizing_behavior(ListSizingBehavior::Infer)
         .max_w(px((max_width - TEXT_HORIZONTAL_PADDING * ui_scale).max(1.0)))
-        .max_h(px((max_height - TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).max(1.0)))
+        .max_h(px((max_height
+            - TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window))
+        .max(1.0)))
     }
 
     fn next_image_base_size(current: f32, limit: f32, delta_y: f32) -> f32 {
@@ -1617,14 +1630,8 @@ impl PreviewWindow {
                                 .px(px(chip_padding))
                                 .rounded(px(4.0 * ui_scale))
                                 .border_1()
-                                .border_color(gpui::ColorExt::opacity(
-                                    &theme.border,
-                                    0.75,
-                                ))
-                                .bg(gpui::ColorExt::opacity(
-                                    &theme.background,
-                                    0.92,
-                                ))
+                                .border_color(gpui::ColorExt::opacity(&theme.border, 0.75))
+                                .bg(gpui::ColorExt::opacity(&theme.background, 0.92))
                                 .text_color(if *hint {
                                     theme.muted_foreground
                                 } else {
@@ -1647,8 +1654,6 @@ impl PreviewWindow {
             .into_any_element();
         (strip, size(width, height))
     }
-
-
 }
 
 impl Drop for PreviewWindow {
@@ -1678,12 +1683,10 @@ impl Render for PreviewWindow {
             self.reveal_generation = self.reveal_generation.wrapping_add(1);
         }
         let font_size = ui_rem(14.0).to_pixels(rem_size);
-        self.text_line_height = font_metrics.line_height(
-            font_size, ui_rem(TEXT_LINE_HEIGHT).to_pixels(rem_size),
-        );
-        let note_line_height = font_metrics.line_height(
-            font_size, ui_rem(20.0).to_pixels(rem_size),
-        );
+        self.text_line_height =
+            font_metrics.line_height(font_size, ui_rem(TEXT_LINE_HEIGHT).to_pixels(rem_size));
+        let note_line_height =
+            font_metrics.line_height(font_size, ui_rem(20.0).to_pixels(rem_size));
         let Some(anchor) = self.anchor else {
             return div().size_full().into_any_element();
         };
@@ -1733,8 +1736,16 @@ impl Render for PreviewWindow {
         let placement = choose_preview_placement(pointer, work_area, main_rect, placement_size);
         let max_width = resolve_preview_max_width(work_area, main_rect, pointer, placement.side);
         let max_height = resolve_preview_max_height(work_area.height);
-        let surface_border_width = if self.mode == Some(PreviewMode::Image) { 0.0 } else { 1.0 };
-        let note_text = self.item.as_ref().map(|item| item.note_text.clone()).unwrap_or_default();
+        let surface_border_width = if self.mode == Some(PreviewMode::Image) {
+            0.0
+        } else {
+            1.0
+        };
+        let note_text = self
+            .item
+            .as_ref()
+            .map(|item| item.note_text.clone())
+            .unwrap_or_default();
         let (note_width, note_height) = if note_text.is_empty() {
             (0.0, 0.0)
         } else {
@@ -1742,35 +1753,71 @@ impl Render for PreviewWindow {
             text_style.font_family = cx.theme().font_family.clone();
             let runs = [text_style.to_run(note_text.len())];
             let layout = window.text_system().shape_text(
-                note_text.clone(), ui_rem(14.0).to_pixels(window.rem_size()), &runs,
-                Some(px((max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window) - surface_border_width * 2.0).max(1.0))), None,
+                note_text.clone(),
+                ui_rem(14.0).to_pixels(window.rem_size()),
+                &runs,
+                Some(px((max_width
+                    - TEXT_HORIZONTAL_PADDING
+                        * crate::ui::scale::window_scale(window)
+                    - surface_border_width * 2.0)
+                    .max(1.0))),
+                None,
             );
-            let (width, lines) = layout.map(|lines| (
-                lines.iter().map(|line| f32::from(line.width())).fold(0.0, f32::max),
-                lines.iter().map(|line| line.wrap_boundaries().len() + 1).sum::<usize>(),
-            )).unwrap_or((0.0, 1));
+            let (width, lines) = layout
+                .map(|lines| {
+                    (
+                        lines
+                            .iter()
+                            .map(|line| f32::from(line.width()))
+                            .fold(0.0, f32::max),
+                        lines
+                            .iter()
+                            .map(|line| line.wrap_boundaries().len() + 1)
+                            .sum::<usize>(),
+                    )
+                })
+                .unwrap_or((0.0, 1));
             (
-                (width.ceil() + TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window) + surface_border_width * 2.0)
-                    .max(TEXT_MIN_WIDTH).min(max_width),
+                (width.ceil()
+                    + TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window)
+                    + surface_border_width * 2.0)
+                    .max(TEXT_MIN_WIDTH)
+                    .min(max_width),
                 (lines.clamp(1, 6) as f32 * f32::from(note_line_height)
-                    + TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window)).min(max_height * 0.3),
+                    + TEXT_VERTICAL_PADDING * crate::ui::scale::window_scale(window))
+                .min(max_height * 0.3),
             )
         };
         let content_max_height = (max_height - note_height).max(1.0);
-        self.ensure_text_layout(max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window), window, cx);
+        self.ensure_text_layout(
+            max_width - TEXT_HORIZONTAL_PADDING * crate::ui::scale::window_scale(window),
+            window,
+            cx,
+        );
         let image_size = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
             .flatten()
-            .and_then(|preview| self.image_display_size(
-                preview, max_width, content_max_height, scale, self.image_base_size,
-            ));
+            .and_then(|preview| {
+                self.image_display_size(
+                    preview,
+                    max_width,
+                    content_max_height,
+                    scale,
+                    self.image_base_size,
+                )
+            });
         self.image_base_size_limit = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
             .flatten()
-            .and_then(|preview| self.image_display_size(
-                preview, max_width, content_max_height, scale,
-                PersistedPreviewWindowState::IMAGE_BASE_SIZE_MAX,
-            ))
+            .and_then(|preview| {
+                self.image_display_size(
+                    preview,
+                    max_width,
+                    content_max_height,
+                    scale,
+                    PersistedPreviewWindowState::IMAGE_BASE_SIZE_MAX,
+                )
+            })
             .map(|size| size.width.max(size.height));
         let image_display_percentage = (self.mode == Some(PreviewMode::Image))
             .then(|| self.current_preview())
@@ -1792,18 +1839,20 @@ impl Render for PreviewWindow {
                 .map(|display_scale| display_scale * 100.0)
             });
         let preview_size = if self.mode == Some(PreviewMode::Image) {
-            image_size.map(|size| (
-                size.width.max(note_width),
-                size.height + note_height,
-            ))
+            image_size.map(|size| (size.width.max(note_width), size.height + note_height))
         } else {
             self.content_size
         };
         let visible_preview_size = preview_size.map(|(width, height)| {
-            let height = if self.mode == Some(PreviewMode::Image) { height } else { height.min(max_height) };
+            let height = if self.mode == Some(PreviewMode::Image) {
+                height
+            } else {
+                height.min(max_height)
+            };
             (width.min(max_width), height)
         });
-        let placement = choose_preview_placement(pointer, work_area, main_rect, visible_preview_size);
+        let placement =
+            choose_preview_placement(pointer, work_area, main_rect, visible_preview_size);
         let connector_target_rect = self.surface_bounds.or_else(|| {
             visible_preview_size.map(|(width, height)| {
                 preview_rect_for_placement(placement, width, height, work_area)
@@ -1821,14 +1870,15 @@ impl Render for PreviewWindow {
         let content_measure = canvas(
             move |bounds, window, cx| {
                 let measured_size = (f32::from(bounds.size.width), f32::from(bounds.size.height));
-                let content_scrollable = f32::from(note_scroll.max_offset().y) > 0.5 || match measured_mode {
-                    Some(PreviewMode::Text) => {
-                        f32::from(text_list_state.max_offset_for_scrollbar().y) > 0.5
-                    }
-                    Some(PreviewMode::Html) => f32::from(html_scroll.max_offset().y) > 0.5,
-                    Some(PreviewMode::File) => f32::from(file_scroll.max_offset().y) > 0.5,
-                    Some(PreviewMode::Image) | None => false,
-                };
+                let content_scrollable = f32::from(note_scroll.max_offset().y) > 0.5
+                    || match measured_mode {
+                        Some(PreviewMode::Text) => {
+                            f32::from(text_list_state.max_offset_for_scrollbar().y) > 0.5
+                        }
+                        Some(PreviewMode::Html) => f32::from(html_scroll.max_offset().y) > 0.5,
+                        Some(PreviewMode::File) => f32::from(file_scroll.max_offset().y) > 0.5,
+                        Some(PreviewMode::Image) | None => false,
+                    };
                 let preview = preview_entity_for_content.read(cx);
                 if preview.mode != measured_mode
                     || preview.reveal_generation != measured_reveal_generation
@@ -1878,23 +1928,47 @@ impl Render for PreviewWindow {
             .flex_none()
             .flex()
             .flex_col()
-            .when(note_height > 0.0, |this| this.min_w(px(note_width)).max_w(px(max_width)))
+            .when(note_height > 0.0, |this| {
+                this.min_w(px(note_width)).max_w(px(max_width))
+            })
             .when_some(reveal_size, |this, (width, height)| {
                 this.w(px(width)).h(px(height))
             })
-            .when(note_height > 0.0, |this| this.child(
-                div().id("preview-note").w_full().min_w_0().h(px(note_height)).flex_none()
-                    .max_w(px(max_width)).overflow_hidden().border_b_1()
-                    .when_some(reveal_size, |this, (width, _)| {
-                        this.max_w(px((width - surface_border_width * 2.0).max(1.0)))
-                    })
-                    .rounded_t(px(PREVIEW_CORNER_RADIUS - surface_border_width))
-                    .border_color(theme.border).bg(theme.secondary)
-                    .child(div().id("preview-note-scroll").size_full().overflow_y_scroll()
-                        .track_scroll(&self.note_scroll)
-                        .child(div().px_3().py_2().text_size(ui_rem(14.0)).line_height(note_line_height)
-                            .text_color(theme.foreground).child(note_text))),
-            ))
+            .when(note_height > 0.0, |this| {
+                this.child(
+                    div()
+                        .id("preview-note")
+                        .w_full()
+                        .min_w_0()
+                        .h(px(note_height))
+                        .flex_none()
+                        .max_w(px(max_width))
+                        .overflow_hidden()
+                        .border_b_1()
+                        .when_some(reveal_size, |this, (width, _)| {
+                            this.max_w(px((width - surface_border_width * 2.0).max(1.0)))
+                        })
+                        .rounded_t(px(PREVIEW_CORNER_RADIUS - surface_border_width))
+                        .border_color(theme.border)
+                        .bg(theme.secondary)
+                        .child(
+                            div()
+                                .id("preview-note-scroll")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.note_scroll)
+                                .child(
+                                    div()
+                                        .px_3()
+                                        .py_2()
+                                        .text_size(ui_rem(14.0))
+                                        .line_height(note_line_height)
+                                        .text_color(theme.foreground)
+                                        .child(note_text),
+                                ),
+                        ),
+                )
+            })
             .child(self.render_content(max_width, content_max_height, image_size, window, cx))
             .child(content_measure);
         let surface_bounds_measure = canvas(
@@ -1947,8 +2021,7 @@ impl Render for PreviewWindow {
             surface
                 .with_animation(
                     ("preview-surface-size", self.reveal_generation),
-                    Animation::new(Duration::from_millis(190))
-                        .with_easing(gpui::ease_out_quint()),
+                    Animation::new(Duration::from_millis(190)).with_easing(gpui::ease_out_quint()),
                     move |this, progress| {
                         let Some((target_width, target_height)) = reveal_size else {
                             return this;
@@ -1981,8 +2054,7 @@ impl Render for PreviewWindow {
             surface
                 .with_animation(
                     ("preview-surface-opacity", self.generation),
-                    Animation::new(Duration::from_millis(190))
-                        .with_easing(gpui::ease_out_quint()),
+                    Animation::new(Duration::from_millis(190)).with_easing(gpui::ease_out_quint()),
                     |this, progress| this.opacity(progress),
                 )
                 .into_any_element()
@@ -2050,11 +2122,16 @@ impl Render for PreviewWindow {
         });
         div()
             .font_family(cx.theme().font_family.clone())
-            .line_height(gpui::relative(f32::from(self.text_line_height) / f32::from(font_size)))
+            .line_height(gpui::relative(
+                f32::from(self.text_line_height) / f32::from(font_size),
+            ))
             .relative()
             .size_full()
-            .when(self.visible, |this| this.child(preview).child(connector)
-                .when_some(information, |this, information| this.child(information)))
+            .when(self.visible, |this| {
+                this.child(preview)
+                    .child(connector)
+                    .when_some(information, |this, information| this.child(information))
+            })
             .into_any_element()
     }
 }
@@ -2725,10 +2802,9 @@ impl ScrollWheelDelta for ScrollWheelEvent {
 mod tests {
     use super::{
         LogicalRect, PreviewPlacementSide, PreviewWindow, choose_preview_placement,
-        interpolate_reveal_size, intersect_logical_rect, preview_reveal_start_size,
         image_source_byte_length, information_areas, information_max_width, information_rect,
-        information_row_ranges,
-        resolve_best_connector, resolve_preview_max_height,
+        information_row_ranges, interpolate_reveal_size, intersect_logical_rect,
+        preview_reveal_start_size, resolve_best_connector, resolve_preview_max_height,
         resolve_preview_max_width, text_line_ranges,
     };
     use gpui::{Anchor, point};
@@ -3027,9 +3103,18 @@ mod tests {
             base_size = PreviewWindow::next_image_base_size(base_size, 700.0, 1.0);
         }
         assert_eq!(base_size, 700.0);
-        assert_eq!(PreviewWindow::next_image_base_size(base_size, 700.0, 1.0), 700.0);
-        assert_eq!(PreviewWindow::next_image_base_size(base_size, 700.0, -1.0), 652.0);
-        assert_eq!(PreviewWindow::next_image_base_size(2400.0, 700.0, -1.0), 652.0);
+        assert_eq!(
+            PreviewWindow::next_image_base_size(base_size, 700.0, 1.0),
+            700.0
+        );
+        assert_eq!(
+            PreviewWindow::next_image_base_size(base_size, 700.0, -1.0),
+            652.0
+        );
+        assert_eq!(
+            PreviewWindow::next_image_base_size(2400.0, 700.0, -1.0),
+            652.0
+        );
     }
 
     fn place_information(
@@ -3191,7 +3276,10 @@ mod tests {
         let strip = information_rect(
             preview,
             areas[0],
-            gpui::size(information_max_width(preview, areas[0], false).floor(), 120.0),
+            gpui::size(
+                information_max_width(preview, areas[0], false).floor(),
+                120.0,
+            ),
             false,
         )
         .expect("小数视口边缘应能放置信息");
@@ -3301,7 +3389,8 @@ mod tests {
         let (align_end, areas) = information_areas(preview, main, work, 8.0);
         assert!(place_information(preview, main, work, gpui::size(960.0, 80.0)).is_none());
         assert!(areas.iter().all(|area| area.width <= 292.0));
-        let strip = areas.into_iter()
+        let strip = areas
+            .into_iter()
             .find_map(|area| information_rect(preview, area, gpui::size(282.0, 200.0), align_end))
             .expect("换行后的信息应在主窗口外显示");
         assert_eq!(strip.left, preview.left);

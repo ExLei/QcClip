@@ -34,9 +34,7 @@ mod windows_input {
     };
 
     use raw_input::{Display, Event, Listen, MouseButton, Simulate, SubscriptionHandle};
-    use windows::Win32::{
-        UI::WindowsAndMessaging::GetForegroundWindow,
-    };
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     use super::{GlobalMouseEvent, PointerButtons, PointerSnapshot};
 
@@ -98,11 +96,9 @@ mod windows_input {
 
         let result = thread::Builder::new()
             .name("qcclip-raw-input".to_owned())
-            .spawn(|| {
-                match raw_input::Core::start() {
-                    Ok(()) => tracing::debug!("全局鼠标事件处理线程已退出"),
-                    Err(error) => tracing::error!("全局鼠标事件处理线程启动失败：{error:?}"),
-                }
+            .spawn(|| match raw_input::Core::start() {
+                Ok(()) => tracing::debug!("全局鼠标事件处理线程已退出"),
+                Err(error) => tracing::error!("全局鼠标事件处理线程启动失败：{error:?}"),
             })
             .map(|_| ())
             .map_err(|error| format!("无法启动全局鼠标事件线程：{error}"));
@@ -297,8 +293,7 @@ mod windows_input {
     }
 
     pub(crate) fn trigger_key_is_physically_pressed() -> bool {
-        current_trigger_key()
-            .is_some_and(|trigger_key| is_physical_key_pressed(trigger_key.key))
+        current_trigger_key().is_some_and(|trigger_key| is_physical_key_pressed(trigger_key.key))
     }
 
     pub(crate) fn trigger_shortcut_is_physically_pressed(

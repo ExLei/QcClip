@@ -1,17 +1,22 @@
 mod client;
 
-use std::{fs, io::Write, path::PathBuf, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    io::Write,
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use atomic_write_file::AtomicWriteFile;
 use gpui::{App, AppContext, BorrowAppContext, Global};
 use serde::{Deserialize, Serialize};
 
-use crate::{config::NotificationKind, config_runtime, i18n};
 use crate::windows::notification::{NotificationLevel, NotificationRequest, NotificationService};
-pub(crate) use client::{Release, valid_proxy_url};
-use client::{fetch_latest, newer_than_current};
+use crate::{config::NotificationKind, config_runtime, i18n};
 #[cfg(debug_assertions)]
 use client::{RELEASES_API, api_url};
+pub(crate) use client::{Release, valid_proxy_url};
+use client::{fetch_latest, newer_than_current};
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -37,40 +42,58 @@ impl UpdateService {
         #[cfg(debug_assertions)]
         let path = if api_url() != RELEASES_API {
             path.with_file_name("config.test-updates.json")
-        } else { path };
-        let record = fs::read(&path).ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        } else {
+            path
+        };
+        let record = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
         let status_key = check_status(&record);
         cx.set_global(Self {
-            checking: false, status_key, error: None,
-            record, path, retry_after: 0,
+            checking: false,
+            status_key,
+            error: None,
+            record,
+            path,
+            retry_after: 0,
         });
         cx.refresh_windows();
         cx.spawn(async move |cx| {
             loop {
                 cx.update(|cx| {
                     let service = cx.global::<Self>();
-                    if service.checking { return; }
+                    if service.checking {
+                        return;
+                    }
                     // “永不更新”只停止自动检查
                     let frequency = config_runtime::update_config(cx).frequency;
-                    let Some(interval) = frequency.seconds() else { return; };
+                    let Some(interval) = frequency.seconds() else {
+                        return;
+                    };
                     let now = unix_time();
                     if now >= service.retry_after
-                        && (service.record.checked_at > now || service.record.checked_at == 0
+                        && (service.record.checked_at > now
+                            || service.record.checked_at == 0
                             || now.saturating_sub(service.record.checked_at) >= interval)
                     {
                         Self::check(false, cx);
                     }
                 });
-                cx.background_executor().timer(Duration::from_secs(60)).await;
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
             }
-        }).detach();
+        })
+        .detach();
     }
 
     pub(crate) fn available(cx: &App) -> Option<Release> {
-        cx.try_global::<Self>()?.record.latest.clone().filter(|release| {
-            newer_than_current(release)
-        })
+        cx.try_global::<Self>()?
+            .record
+            .latest
+            .clone()
+            .filter(|release| newer_than_current(release))
     }
 
     pub(crate) fn open_release(cx: &mut App) {
@@ -94,7 +117,8 @@ impl UpdateService {
         cx.spawn(async move |cx| {
             let result = task.await;
             cx.update(|cx| Self::finish(result, manual, cx));
-        }).detach();
+        })
+        .detach();
     }
 
     fn finish(result: Result<Option<Release>, String>, manual: bool, cx: &mut App) {
@@ -109,8 +133,17 @@ impl UpdateService {
                     service.record.latest = latest;
                     service.retry_after = 0;
                     service.status_key = check_status(&service.record);
-                    if let Some(release) = service.record.latest.as_ref().filter(|r| newer_than_current(r)) {
-                        if notifications && (manual || service.record.notified_tag.as_deref() != Some(&release.tag_name)) {
+                    if let Some(release) = service
+                        .record
+                        .latest
+                        .as_ref()
+                        .filter(|r| newer_than_current(r))
+                    {
+                        if notifications
+                            && (manual
+                                || service.record.notified_tag.as_deref()
+                                    != Some(&release.tag_name))
+                        {
                             notify_release = Some(release.clone());
                             service.record.notified_tag = Some(release.tag_name.clone());
                         }
@@ -130,23 +163,40 @@ impl UpdateService {
         cx.refresh_windows();
         let translator = i18n::translator(cx);
         if let Some(release) = notify_release {
-            let title = translator.translate_with_args("updates.found", &[("version", release.version_label())]);
-            let detail = translator.translate_with_args("updates.notification.detail", &[
-                ("current", format!("v{}", env!("CARGO_PKG_VERSION"))),
-                ("latest", release.version_label()),
-            ]);
+            let title = translator
+                .translate_with_args("updates.found", &[("version", release.version_label())]);
+            let detail = translator.translate_with_args(
+                "updates.notification.detail",
+                &[
+                    ("current", format!("v{}", env!("CARGO_PKG_VERSION"))),
+                    ("latest", release.version_label()),
+                ],
+            );
             let mut request = NotificationRequest::text(title, detail);
-            request.kind = if manual { NotificationKind::OperationResult } else { NotificationKind::VersionUpdate };
+            request.kind = if manual {
+                NotificationKind::OperationResult
+            } else {
+                NotificationKind::VersionUpdate
+            };
             request.duration = Duration::from_secs(12);
             request.action_url = Some(release.url());
             request.action_label = Some(translator.translate("updates.open_release"));
             NotificationService::show(request, cx);
         } else if manual && cx.global::<Self>().status_key != "updates.status.available" {
             let service = cx.global::<Self>();
-            let message = service.error.clone().unwrap_or_else(|| translator.translate(service.status_key));
+            let message = service
+                .error
+                .clone()
+                .unwrap_or_else(|| translator.translate(service.status_key));
             NotificationService::show_message(
-                translator.translate("updates.check"), message,
-                if service.error.is_some() { NotificationLevel::Error } else { NotificationLevel::Info }, cx,
+                translator.translate("updates.check"),
+                message,
+                if service.error.is_some() {
+                    NotificationLevel::Error
+                } else {
+                    NotificationLevel::Info
+                },
+                cx,
             );
         }
     }
@@ -160,7 +210,10 @@ impl UpdateService {
 }
 
 fn unix_time() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn check_status(record: &CheckRecord) -> &'static str {

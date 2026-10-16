@@ -125,15 +125,7 @@ pub(super) fn fit_submenu_bounds(
         MenuDirection::Right => right_x,
     };
     (
-        fit_rect_to_screen(
-            MenuRect::new(
-                x,
-                item_bounds.y,
-                size.0,
-                size.1,
-            ),
-            screen,
-        ),
+        fit_rect_to_screen(MenuRect::new(x, item_bounds.y, size.0, size.1), screen),
         direction,
     )
 }
@@ -305,10 +297,10 @@ mod tests {
         for ui_scale in [0.8, 1.0, 1.5, 2.0] {
             let dpi = 1.5;
             let scroll_offset = -12.0;
-            let bounds = submenu_item_bounds(
-                parent, &menu, 2, dpi * ui_scale, scroll_offset / ui_scale,
-            );
-            let expected = parent.y + (MENU_ITEM_HEIGHT + MENU_SEPARATOR_HEIGHT) * dpi * ui_scale
+            let bounds =
+                submenu_item_bounds(parent, &menu, 2, dpi * ui_scale, scroll_offset / ui_scale);
+            let expected = parent.y
+                + (MENU_ITEM_HEIGHT + MENU_SEPARATOR_HEIGHT) * dpi * ui_scale
                 + scroll_offset * dpi;
             assert!((bounds.y - expected).abs() < 0.001);
             assert!((bounds.height - MENU_ITEM_HEIGHT * dpi * ui_scale).abs() < 0.001);

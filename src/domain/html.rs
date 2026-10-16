@@ -72,7 +72,8 @@ pub fn truncate_for_preview(input: &str, max_visible_chars: usize) -> String {
                         SUFFIX,
                     ) {
                         if let Some(close_start) = find_closing_tag(source, end + 1, &tag.name) {
-                            let close_end = find_tag_end(source, close_start).unwrap_or(close_start);
+                            let close_end =
+                                find_tag_end(source, close_start).unwrap_or(close_start);
                             let close_tag = &source[close_start..=close_end];
                             if !append_tag(
                                 &mut output,
@@ -137,7 +138,10 @@ pub fn truncate_for_preview(input: &str, max_visible_chars: usize) -> String {
                     .iter()
                     .map(|tag: &String| tag.len() + 3)
                     .sum::<usize>();
-            if output.len().saturating_add(character.len()).saturating_add(reserved)
+            if output
+                .len()
+                .saturating_add(character.len())
+                .saturating_add(reserved)
                 > MAX_OUTPUT_BYTES
             {
                 truncated = true;
@@ -157,7 +161,10 @@ pub fn truncate_for_preview(input: &str, max_visible_chars: usize) -> String {
 
     for tag in open_tags.into_iter().rev() {
         let closing = format!("</{tag}>");
-        if output.len().saturating_add(closing.len()).saturating_add(SUFFIX.len())
+        if output
+            .len()
+            .saturating_add(closing.len())
+            .saturating_add(SUFFIX.len())
             > MAX_OUTPUT_BYTES
         {
             break;
@@ -238,9 +245,9 @@ fn find_closing_tag(source: &str, start: usize, name: &str) -> Option<usize> {
             .get(candidate..after_name)
             .is_some_and(|value| value.eq_ignore_ascii_case(&needle))
             && source[after_name..]
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_ascii_whitespace() || character == '>')
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_whitespace() || character == '>')
         {
             return Some(candidate);
         }
@@ -272,8 +279,15 @@ fn append_tag(
         );
     let reserved = suffix.len()
         + reserved_open_tags
-        + (!is_closing && !is_self_closing).then_some(name.len() + 3).unwrap_or(0);
-    if output.len().saturating_add(raw_tag.len()).saturating_add(reserved) > max_output_bytes {
+        + (!is_closing && !is_self_closing)
+            .then_some(name.len() + 3)
+            .unwrap_or(0);
+    if output
+        .len()
+        .saturating_add(raw_tag.len())
+        .saturating_add(reserved)
+        > max_output_bytes
+    {
         return false;
     }
     if let Some(position) = closing_position {

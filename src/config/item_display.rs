@@ -43,9 +43,18 @@ pub enum ItemDisplayField {
 
 impl ItemDisplayField {
     pub const ALL: [Self; 12] = [
-        Self::Time, Self::Length, Self::Source, Self::Shortcut,
-        Self::Edit, Self::Note, Self::PastePlain, Self::OpenDefault,
-        Self::OpenBrowser, Self::Favorite, Self::Pin, Self::Delete,
+        Self::Time,
+        Self::Length,
+        Self::Source,
+        Self::Shortcut,
+        Self::Edit,
+        Self::Note,
+        Self::PastePlain,
+        Self::OpenDefault,
+        Self::OpenBrowser,
+        Self::Favorite,
+        Self::Pin,
+        Self::Delete,
     ];
 
     pub const fn label_key(self) -> &'static str {
@@ -109,7 +118,9 @@ impl ItemDisplayConfig {
             self.info_visibility == other.info_visibility
                 && self.toolbar_visibility == other.toolbar_visibility
                 && self.actions_visibility == other.actions_visibility
-                && ItemDisplayField::ALL.into_iter().all(|field| self.enabled(field) == other.enabled(field))
+                && ItemDisplayField::ALL
+                    .into_iter()
+                    .all(|field| self.enabled(field) == other.enabled(field))
         })
     }
 }
@@ -140,17 +151,20 @@ impl ItemDisplayPreset {
         match self {
             Self::Standard => ItemDisplayConfig::default(),
             Self::Pure => ItemDisplayConfig {
-                info_visibility: Hidden, toolbar_visibility: Hidden,
+                info_visibility: Hidden,
+                toolbar_visibility: Hidden,
                 actions_visibility: Hidden,
                 fields: ItemDisplayField::ALL.to_vec(),
             },
             Self::Compact => ItemDisplayConfig {
-                info_visibility: Hidden, toolbar_visibility: Always,
+                info_visibility: Hidden,
+                toolbar_visibility: Always,
                 actions_visibility: Active,
                 fields: vec![Source, Shortcut, Favorite, Pin, Delete],
             },
             Self::Full => ItemDisplayConfig {
-                actions_visibility: Always, ..ItemDisplayConfig::default()
+                actions_visibility: Always,
+                ..ItemDisplayConfig::default()
             },
         }
     }
@@ -190,12 +204,19 @@ mod tests {
         for (identity, expected_identity) in modes {
             for (actions, expected_actions) in modes {
                 let config = ItemDisplayConfig {
-                    toolbar_visibility: identity, actions_visibility: actions,
+                    toolbar_visibility: identity,
+                    actions_visibility: actions,
                     ..ItemDisplayConfig::default()
                 };
                 for (index, active) in [false, true].into_iter().enumerate() {
-                    assert_eq!(config.toolbar_visibility.is_visible(active), expected_identity[index]);
-                    assert_eq!(config.actions_visibility.is_visible(active), expected_actions[index]);
+                    assert_eq!(
+                        config.toolbar_visibility.is_visible(active),
+                        expected_identity[index]
+                    );
+                    assert_eq!(
+                        config.actions_visibility.is_visible(active),
+                        expected_actions[index]
+                    );
                 }
             }
         }
@@ -219,20 +240,49 @@ mod tests {
     #[test]
     fn loading_is_field_tolerant_and_presets_round_trip() {
         let old = crate::config::load::from_str("{}").unwrap();
-        assert_eq!(old.config.appearance.item_display, ItemDisplayConfig::default());
+        assert_eq!(
+            old.config.appearance.item_display,
+            ItemDisplayConfig::default()
+        );
         let loaded = crate::config::load::from_str(r#"{"appearance":{"itemDisplay":{
             "infoVisibility":"unknown","toolbarVisibility":"hidden","actionsVisibility":"always","fields":[]
         }}}"#).unwrap();
-        assert_eq!(loaded.config.appearance.item_display.info_visibility, ItemRegionVisibility::Always);
-        assert_eq!(loaded.config.appearance.item_display.toolbar_visibility, ItemRegionVisibility::Hidden);
-        assert_eq!(loaded.config.appearance.item_display.actions_visibility, ItemRegionVisibility::Always);
+        assert_eq!(
+            loaded.config.appearance.item_display.info_visibility,
+            ItemRegionVisibility::Always
+        );
+        assert_eq!(
+            loaded.config.appearance.item_display.toolbar_visibility,
+            ItemRegionVisibility::Hidden
+        );
+        assert_eq!(
+            loaded.config.appearance.item_display.actions_visibility,
+            ItemRegionVisibility::Always
+        );
         assert!(loaded.config.appearance.item_display.fields.is_empty());
         assert_eq!(loaded.warnings.len(), 1);
-        let invalid_actions = crate::config::load::from_str(r#"{"appearance":{"itemDisplay":{
+        let invalid_actions = crate::config::load::from_str(
+            r#"{"appearance":{"itemDisplay":{
             "toolbarVisibility":"hidden","actionsVisibility":"unknown"
-        }}}"#).unwrap();
-        assert_eq!(invalid_actions.config.appearance.item_display.toolbar_visibility, ItemRegionVisibility::Hidden);
-        assert_eq!(invalid_actions.config.appearance.item_display.actions_visibility, ItemRegionVisibility::Active);
+        }}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            invalid_actions
+                .config
+                .appearance
+                .item_display
+                .toolbar_visibility,
+            ItemRegionVisibility::Hidden
+        );
+        assert_eq!(
+            invalid_actions
+                .config
+                .appearance
+                .item_display
+                .actions_visibility,
+            ItemRegionVisibility::Active
+        );
         assert_eq!(invalid_actions.warnings.len(), 1);
         for preset in ItemDisplayPreset::ALL {
             let mut config = crate::config::AppConfig::default();

@@ -151,8 +151,7 @@ impl State {
 
     /// 只有“贴边 + 逻辑可见 + 没有正在进行的显示/隐藏动画”时，窗口当前坐标才代表贴边可见位置。
     pub(crate) fn can_record_edge_bounds(&self) -> bool {
-        self.edge_attachment().is_some()
-            && self.can_record_window_geometry()
+        self.edge_attachment().is_some() && self.can_record_window_geometry()
     }
 
     pub(crate) fn can_record_window_geometry(&self) -> bool {

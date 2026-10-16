@@ -153,7 +153,11 @@ impl ApplicationIconStore {
         })
     }
 
-    pub(crate) fn ensure_asset_file(&self, relative_path: &str, bytes: &[u8]) -> Result<(), std::io::Error> {
+    pub(crate) fn ensure_asset_file(
+        &self,
+        relative_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), std::io::Error> {
         let path = self.asset_path(relative_path).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "应用图标路径无效")
         })?;

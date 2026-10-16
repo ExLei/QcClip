@@ -76,9 +76,7 @@ pub(crate) fn schedule_startup_cleanup(cx: &mut App) {
     #[cfg(target_os = "windows")]
     {
         let task = cx.spawn(async move |cx| {
-            cx.background_executor()
-                .timer(Duration::from_secs(1))
-                .await;
+            cx.background_executor().timer(Duration::from_secs(1)).await;
             cx.update(|cx| {
                 cx.update_global::<MainWindowService, _>(|service, _| {
                     service.memory_trim_state.startup_task = None;
@@ -101,8 +99,7 @@ pub(crate) fn cancel(cx: &mut App) {
     #[cfg(target_os = "windows")]
     cx.update_global::<MainWindowService, _>(|service, _| {
         service.memory_trim_state.task = None;
-        service.memory_trim_state.generation =
-            service.memory_trim_state.generation.wrapping_add(1);
+        service.memory_trim_state.generation = service.memory_trim_state.generation.wrapping_add(1);
     });
 
     #[cfg(not(target_os = "windows"))]
@@ -145,10 +142,7 @@ fn private_working_set_size() -> Option<usize> {
 
 #[cfg(target_os = "windows")]
 fn empty_working_set() -> windows_core::Result<()> {
-    use windows::Win32::System::{
-        ProcessStatus::EmptyWorkingSet,
-        Threading::GetCurrentProcess,
-    };
+    use windows::Win32::System::{ProcessStatus::EmptyWorkingSet, Threading::GetCurrentProcess};
 
     // SAFETY: 伪句柄表示当前进程，EmptyWorkingSet 只会移除可回收的工作集页面。
     unsafe { EmptyWorkingSet(GetCurrentProcess()) }

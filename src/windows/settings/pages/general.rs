@@ -1,4 +1,4 @@
-use super::super::{notify_settings_error, SettingsPage};
+use super::super::{SettingsPage, notify_settings_error};
 use crate::ui::scale::ui_rem;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Entity, PromptButton, PromptLevel, Window};
@@ -20,9 +20,9 @@ use crate::{
 };
 use gpui::{Bounds, FontWeight, Pixels, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, v_flex};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::switch::Switch;
+use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, v_flex};
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_general(
@@ -37,10 +37,20 @@ impl SettingsWindowView {
         let notifications_enabled = config_runtime::global_notification_enabled(cx);
         let notification_preferences = config_runtime::notification_preferences(cx);
         let notification_summary = if notifications_enabled {
-            translator.translate_with_args("settings.notifications.summary", &[
-                ("enabled", notification_preferences.iter().filter(|(_, enabled)| *enabled).count().to_string()),
-                ("total", notification_preferences.len().to_string()),
-            ])
+            translator.translate_with_args(
+                "settings.notifications.summary",
+                &[
+                    (
+                        "enabled",
+                        notification_preferences
+                            .iter()
+                            .filter(|(_, enabled)| *enabled)
+                            .count()
+                            .to_string(),
+                    ),
+                    ("total", notification_preferences.len().to_string()),
+                ],
+            )
         } else {
             translator.translate("settings.notifications.paused")
         };
@@ -59,7 +69,8 @@ impl SettingsWindowView {
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
-                    view.language_error = notify_settings_error(SettingsPage::General, error_message, cx);
+                    view.language_error =
+                        notify_settings_error(SettingsPage::General, error_message, cx);
                     cx.notify();
                 });
             });
@@ -81,7 +92,8 @@ impl SettingsWindowView {
                 })
                 .collect(),
         );
-        let notification_save_error = translator.translate("settings.general.notification_save_error");
+        let notification_save_error =
+            translator.translate("settings.general.notification_save_error");
         let notification_view = view.clone();
         let notification_switch = Switch::new("settings-general-global-notifications")
             .large()
@@ -201,7 +213,11 @@ impl SettingsWindowView {
                                     save_error.clone()
                                 });
                                 view.update(cx, |view, cx| {
-                                    view.language_error = notify_settings_error(SettingsPage::General, error_message, cx);
+                                    view.language_error = notify_settings_error(
+                                        SettingsPage::General,
+                                        error_message,
+                                        cx,
+                                    );
                                     cx.notify();
                                 });
                             },
@@ -209,14 +225,12 @@ impl SettingsWindowView {
                         );
                     })
                     .child(div().flex_1().truncate().child(language_label))
-                    .child(
-                        hover_icon(
-                            "settings-language-select",
-                            "chevron-down",
-                            12.0,
-                            theme.muted_foreground,
-                        ),
-                    ),
+                    .child(hover_icon(
+                        "settings-language-select",
+                        "chevron-down",
+                        12.0,
+                        theme.muted_foreground,
+                    )),
             );
 
         let mut section = v_flex()
@@ -240,12 +254,18 @@ impl SettingsWindowView {
                 None,
                 selector,
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.general.global_notifications"),
-                Some(translator.translate("settings.general.global_notifications_description").into()),
-                notification_switch,
-            ))
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.general.global_notifications"),
+                    Some(
+                        translator
+                            .translate("settings.general.global_notifications_description")
+                            .into(),
+                    ),
+                    notification_switch,
+                ),
+            )
             .child(self.highlight_element(
                 theme,
                 translator.translate("settings.notifications.title"),
@@ -260,18 +280,30 @@ impl SettingsWindowView {
                     },
                 ),
             ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.general.launch_at_login"),
-                Some(translator.translate("settings.general.launch_at_login_description").into()),
-                launch_switch,
-            ))
-            .child(self.setting_row(
-                theme,
-                translator.translate("settings.general.run_as_administrator"),
-                Some(translator.translate("settings.general.run_as_administrator_description").into()),
-                administrator_switch,
-            ));
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.general.launch_at_login"),
+                    Some(
+                        translator
+                            .translate("settings.general.launch_at_login_description")
+                            .into(),
+                    ),
+                    launch_switch,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.general.run_as_administrator"),
+                    Some(
+                        translator
+                            .translate("settings.general.run_as_administrator_description")
+                            .into(),
+                    ),
+                    administrator_switch,
+                ),
+            );
         if let Some(error) = &self.language_error {
             section = section.child(
                 div()
@@ -306,7 +338,11 @@ fn open_notification_preferences(
         let mut content = v_flex().size_full().min_h_0().overflow_y_scrollbar();
         if !enabled {
             content = content.child(
-                div().px_4().py_2().text_sm().text_color(theme.muted_foreground)
+                div()
+                    .px_4()
+                    .py_2()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
                     .child(translator.translate("settings.notifications.paused")),
             );
         }
@@ -319,8 +355,13 @@ fn open_notification_preferences(
             };
             if let Some(group) = group {
                 content = content.child(
-                    div().px_4().pt_4().pb_2().text_xs()
-                        .font_weight(FontWeight::MEDIUM).text_color(theme.muted_foreground)
+                    div()
+                        .px_4()
+                        .pt_4()
+                        .pb_2()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.muted_foreground)
                         .child(translator.translate(group)),
                 );
             }
@@ -334,12 +375,15 @@ fn open_notification_preferences(
                     let view = view.clone();
                     move |checked, _, cx| {
                         let error = config_runtime::set_notification_preference(kind, *checked, cx)
-                            .err().map(|error| {
+                            .err()
+                            .map(|error| {
                                 tracing::error!("保存通知偏好失败：{error}");
-                                i18n::translator(cx).translate("settings.general.notification_save_error")
+                                i18n::translator(cx)
+                                    .translate("settings.general.notification_save_error")
                             });
                         view.update(cx, |view, cx| {
-                            view.language_error = notify_settings_error(SettingsPage::General, error, cx);
+                            view.language_error =
+                                notify_settings_error(SettingsPage::General, error, cx);
                             cx.notify();
                         });
                     }
@@ -348,7 +392,12 @@ fn open_notification_preferences(
         }
         if let Some(error) = view.read(cx).language_error.clone() {
             content = content.child(
-                div().px_4().py_2().text_sm().text_color(theme.danger).child(error),
+                div()
+                    .px_4()
+                    .py_2()
+                    .text_sm()
+                    .text_color(theme.danger)
+                    .child(error),
             );
         }
         sheet
@@ -357,8 +406,10 @@ fn open_notification_preferences(
             .resizable(false)
             .shadow_none()
             .bg(background)
-            .when(appearance.window_material != WindowMaterial::Disabled,
-                |this| this.backdrop_blur(px(18.0)))
+            .when(
+                appearance.window_material != WindowMaterial::Disabled,
+                |this| this.backdrop_blur(px(18.0)),
+            )
             .child(content)
     });
 }
@@ -445,9 +496,7 @@ fn handle_run_as_administrator_switch(
                                     if let Err(restore_error) =
                                         config_runtime::set_run_as_administrator(false, cx)
                                     {
-                                        tracing::error!(
-                                            "恢复管理员启动设置失败：{restore_error}"
-                                        );
+                                        tracing::error!("恢复管理员启动设置失败：{restore_error}");
                                     }
                                     (Some(save_error.clone()), false)
                                 }
@@ -460,7 +509,8 @@ fn handle_run_as_administrator_switch(
                         return;
                     }
                     let _ = view.update(cx, |view, cx| {
-                        view.language_error = notify_settings_error(SettingsPage::General, error, cx);
+                        view.language_error =
+                            notify_settings_error(SettingsPage::General, error, cx);
                         cx.notify();
                     });
                 });
@@ -470,7 +520,8 @@ fn handle_run_as_administrator_switch(
         Err(error) => {
             tracing::error!("读取管理员权限状态失败：{error}");
             view.update(cx, |view, cx| {
-                view.language_error = notify_settings_error(SettingsPage::General, Some(save_error), cx);
+                view.language_error =
+                    notify_settings_error(SettingsPage::General, Some(save_error), cx);
                 cx.notify();
             });
         }

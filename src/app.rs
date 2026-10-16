@@ -20,10 +20,10 @@ use crate::{
         recovery::reconcile_startup,
         storage::RawBlobStore,
     },
+    state_runtime::PersistedMainWindowState,
     windows::dialog::DialogWindowService,
     windows::main::MainWindow,
     windows::menu::MenuService,
-    state_runtime::PersistedMainWindowState,
 };
 
 #[cfg(test)]
@@ -200,18 +200,15 @@ pub fn run() {
                 history_repository.clone(),
                 favorite_repository.clone(),
                 paste_service.clone(),
-                crate::services::image_preview::ImagePreviewService::new(
-                    _raw_blob_store.clone(),
-                ),
+                crate::services::image_preview::ImagePreviewService::new(_raw_blob_store.clone()),
                 cx,
             );
             crate::hotkey::HotkeyRuntime::install(cx);
             #[cfg(target_os = "windows")]
             crate::services::tray::TrayService::install(cx);
 
-            let (window_width, window_height) = initial_window_size(
-                &crate::state_runtime::state(cx).main_window,
-            );
+            let (window_width, window_height) =
+                initial_window_size(&crate::state_runtime::state(cx).main_window);
             let default_bounds =
                 Bounds::centered(None, size(px(window_width), px(window_height)), cx);
             let startup_edge = if crate::config_runtime::clipboard_config(cx).edge_hide {
@@ -252,9 +249,10 @@ pub fn run() {
                         let favorite_repository = favorite_repository.clone();
                         let tag_repository = tag_repository.clone();
                         let paste_service = paste_service.clone();
-                        let image_library = crate::services::image_library::ImageLibraryService::new(
-                            app_paths.image_library_directory(),
-                        );
+                        let image_library =
+                            crate::services::image_library::ImageLibraryService::new(
+                                app_paths.image_library_directory(),
+                            );
                         move |window, cx| {
                             configure_window(window);
                             // 客户区在调整框架后变大，窗口创建时读到的 viewport 尺寸已经过期。
@@ -290,7 +288,8 @@ pub fn run() {
                                 main_window.observe_window_bounds(window, cx);
                             });
                             crate::windows::main::MainWindowService::set_main_view(
-                                view.clone(), cx,
+                                view.clone(),
+                                cx,
                             );
                             cx.new(|cx| crate::window_material::new_root(view, window, cx))
                         }
@@ -308,13 +307,19 @@ pub fn run() {
             );
             cx.spawn(async move |cx| {
                 loop {
-                    cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
-                    match crate::platform::single_instance::take_activation_request(&activation_path) {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(100))
+                        .await;
+                    match crate::platform::single_instance::take_activation_request(
+                        &activation_path,
+                    ) {
                         Ok(true) => {
                             cx.update(|cx| {
                                 crate::windows::main::show_main_window(cx);
-                                if let Some(window) = crate::windows::main::MainWindowService::window_handle(cx)
-                                    && let Err(error) = window.update(cx, |_, window, _| window.activate_window())
+                                if let Some(window) =
+                                    crate::windows::main::MainWindowService::window_handle(cx)
+                                    && let Err(error) =
+                                        window.update(cx, |_, window, _| window.activate_window())
                                 {
                                     tracing::error!("激活已有实例主窗口失败：{error}");
                                 }
@@ -328,14 +333,16 @@ pub fn run() {
                         }
                     }
                 }
-            }).detach();
+            })
+            .detach();
             crate::services::application_filter::ApplicationFilterService::install(cx);
             #[cfg(target_os = "windows")]
             crate::services::system::check_win_v_on_startup(cx);
             crate::windows::notification::NotificationService::show_startup(cx);
             crate::windows::settings::offer_legacy_migration(cx);
             crate::services::updates::UpdateService::install(
-                config_path.with_extension("updates.json"), cx,
+                config_path.with_extension("updates.json"),
+                cx,
             );
             tracing::info!("QcClip 启动流程完成");
         });

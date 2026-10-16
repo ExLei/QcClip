@@ -1,9 +1,9 @@
 pub(crate) mod color_picker;
 pub(crate) mod custom_text_editor;
-pub(crate) mod note_editor;
 pub(crate) mod dialog;
 pub mod main;
 pub mod menu;
+pub(crate) mod note_editor;
 pub(crate) mod notification;
 pub(crate) mod preview;
 pub(crate) mod quick_paste;

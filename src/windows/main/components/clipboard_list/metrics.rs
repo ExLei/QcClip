@@ -19,7 +19,6 @@ pub(super) struct ListItemMetrics {
     pub(super) show_meta: bool,
     pub(super) only_show_notes: bool,
     font_metrics: Option<crate::ui::fonts::AppFontMetrics>,
-
 }
 
 impl ListItemMetrics {
@@ -65,9 +64,13 @@ impl ListItemMetrics {
         metrics.with_preview_line_count(preview_line_count)
     }
 
-    pub(super) fn with_font_metrics(mut self, font_metrics: crate::ui::fonts::AppFontMetrics) -> Self {
+    pub(super) fn with_font_metrics(
+        mut self,
+        font_metrics: crate::ui::fonts::AppFontMetrics,
+    ) -> Self {
         self.font_metrics = Some(font_metrics);
-        self.preview_line_height = font_metrics.line_height(self.preview_font_size, self.preview_line_height);
+        self.preview_line_height =
+            font_metrics.line_height(self.preview_font_size, self.preview_line_height);
         self.meta_row_height = font_metrics.line_height(self.meta_font_size, self.meta_row_height);
         let metrics = self.with_preview_line_count(self.preview_line_count);
         if self.height == ListItemHeight::Adaptive {
@@ -75,9 +78,16 @@ impl ListItemMetrics {
         }
         // 固定行高需同时容纳文本和文件预览，保证虚拟列表占位与绘制高度一致。
         let file_height = file_list_preview_height(
-            self.height, self.rem_size, self.adaptive_max_lines, None, self.font_metrics,
+            self.height,
+            self.rem_size,
+            self.adaptive_max_lines,
+            None,
+            self.font_metrics,
         );
-        metrics.with_preview_height(metrics.preview_height.max(file_height), metrics.preview_line_count)
+        metrics.with_preview_height(
+            metrics.preview_height.max(file_height),
+            metrics.preview_line_count,
+        )
     }
 
     pub(super) fn with_preview_line_count(self, preview_line_count: usize) -> Self {
@@ -99,7 +109,11 @@ impl ListItemMetrics {
         self.with_preview_height(preview_height, preview_line_count)
     }
 
-    pub(super) fn with_preview_height(mut self, preview_height: Pixels, preview_line_count: usize) -> Self {
+    pub(super) fn with_preview_height(
+        mut self,
+        preview_height: Pixels,
+        preview_line_count: usize,
+    ) -> Self {
         self.preview_line_count = preview_line_count;
         self.preview_height = preview_height;
         self.content_height = self.vertical_padding * 2.0
@@ -276,13 +290,20 @@ pub(super) fn shaped_line_count(
     line_count.clamp(1, max_lines.max(1))
 }
 
-pub(super) fn available_preview_width(window_width: Pixels, style: ListItemStyle, rem_size: Pixels) -> Pixels {
+pub(super) fn available_preview_width(
+    window_width: Pixels,
+    style: ListItemStyle,
+    rem_size: Pixels,
+) -> Pixels {
     let card_inset = if style == ListItemStyle::Card {
         CARD_HORIZONTAL_INSET * 2.0
     } else {
         0.0
     };
-    px((f32::from(window_width) - ROW_HORIZONTAL_PADDING * 2.0 * f32::from(rem_size) / 16.0 - card_inset).max(1.0))
+    px((f32::from(window_width)
+        - ROW_HORIZONTAL_PADDING * 2.0 * f32::from(rem_size) / 16.0
+        - card_inset)
+        .max(1.0))
 }
 
 pub(super) fn item_preview(
@@ -350,8 +371,11 @@ impl ListItemMetrics {
                 return self;
             }
             return self.with_preview_line_count(measure_text_lines(
-                &item.note_text, available_width, self.preview_font_size,
-                self.adaptive_max_lines, window,
+                &item.note_text,
+                available_width,
+                self.preview_font_size,
+                self.adaptive_max_lines,
+                window,
             ));
         }
         let preview = item_preview(item, display_priority);
@@ -375,11 +399,18 @@ mod item_display_tests {
     fn information_visibility_changes_height_independently_of_preview_lines() {
         for height in ListItemHeight::ALL {
             let metrics = ListItemMetrics::from_rem_size(
-                px(16.0), ListItemStyle::Card, CardItemGap::Eight, height, 8,
+                px(16.0),
+                ListItemStyle::Card,
+                CardItemGap::Eight,
+                height,
+                8,
             );
             let shown = metrics.with_info_row(true);
             let hidden = metrics.with_info_row(false);
-            assert_eq!(shown.row_height - hidden.row_height, metrics.meta_row_height);
+            assert_eq!(
+                shown.row_height - hidden.row_height,
+                metrics.meta_row_height
+            );
             assert_eq!(shown.preview_height, hidden.preview_height);
             assert_eq!(shown.preview_line_count, hidden.preview_line_count);
         }
@@ -395,9 +426,14 @@ mod note_tests {
         for style in [ListItemStyle::Card, ListItemStyle::Seamless] {
             for height in ListItemHeight::ALL {
                 for scale_factor in [1.0, 1.25, 1.5, 2.0] {
-                    let font_metrics = crate::ui::fonts::AppFontMetrics::for_test(1.5, scale_factor);
+                    let font_metrics =
+                        crate::ui::fonts::AppFontMetrics::for_test(1.5, scale_factor);
                     let base = ListItemMetrics::from_rem_size(
-                        px(16.0), style, CardItemGap::Eight, height, 8,
+                        px(16.0),
+                        style,
+                        CardItemGap::Eight,
+                        height,
+                        8,
                     );
                     let metrics = base.with_font_metrics(font_metrics);
                     assert_eq!(metrics.preview_font_size, base.preview_font_size);
@@ -405,16 +441,36 @@ mod note_tests {
                     assert_eq!(metrics.preview_line_count, base.preview_line_count);
                     assert!(metrics.preview_line_height >= metrics.preview_font_size * 1.5);
                     assert!(metrics.meta_row_height >= metrics.meta_font_size * 1.5);
-                    assert!(metrics.preview_height >= metrics.preview_line_height * metrics.preview_line_count as f32);
-                    assert_eq!(metrics.content_height,
-                        metrics.vertical_padding * 2.0 + metrics.preview_height + px(MAX_ROW_BORDER_WIDTH)
-                            + if metrics.show_meta { metrics.meta_row_height } else { px(0.0) });
-                    assert_eq!(metrics.row_height,
-                        metrics.content_height + metrics.card_vertical_inset * 2.0);
+                    assert!(
+                        metrics.preview_height
+                            >= metrics.preview_line_height * metrics.preview_line_count as f32
+                    );
+                    assert_eq!(
+                        metrics.content_height,
+                        metrics.vertical_padding * 2.0
+                            + metrics.preview_height
+                            + px(MAX_ROW_BORDER_WIDTH)
+                            + if metrics.show_meta {
+                                metrics.meta_row_height
+                            } else {
+                                px(0.0)
+                            }
+                    );
+                    assert_eq!(
+                        metrics.row_height,
+                        metrics.content_height + metrics.card_vertical_inset * 2.0
+                    );
                     if height != ListItemHeight::Adaptive {
-                        assert!(metrics.preview_height >= file_list_preview_height(
-                            height, metrics.rem_size, metrics.adaptive_max_lines, Some(2), Some(font_metrics),
-                        ));
+                        assert!(
+                            metrics.preview_height
+                                >= file_list_preview_height(
+                                    height,
+                                    metrics.rem_size,
+                                    metrics.adaptive_max_lines,
+                                    Some(2),
+                                    Some(font_metrics),
+                                )
+                        );
                     }
                 }
             }
@@ -423,20 +479,39 @@ mod note_tests {
 
     #[test]
     fn scaled_text_measurement_uses_the_rendered_horizontal_padding() {
-        assert_eq!(available_preview_width(px(200.0), ListItemStyle::Card, px(16.0)), px(164.0));
-        assert_eq!(available_preview_width(px(200.0), ListItemStyle::Card, px(32.0)), px(144.0));
-        assert_eq!(available_preview_width(px(200.0), ListItemStyle::Seamless, px(32.0)), px(160.0));
-        assert_eq!(available_preview_width(px(20.0), ListItemStyle::Card, px(32.0)), px(1.0));
+        assert_eq!(
+            available_preview_width(px(200.0), ListItemStyle::Card, px(16.0)),
+            px(164.0)
+        );
+        assert_eq!(
+            available_preview_width(px(200.0), ListItemStyle::Card, px(32.0)),
+            px(144.0)
+        );
+        assert_eq!(
+            available_preview_width(px(200.0), ListItemStyle::Seamless, px(32.0)),
+            px(160.0)
+        );
+        assert_eq!(
+            available_preview_width(px(20.0), ListItemStyle::Card, px(32.0)),
+            px(1.0)
+        );
     }
 
     #[test]
     fn notes_replace_content_only_for_extra_small_or_explicit_setting() {
         for height in ListItemHeight::ALL {
             let metrics = ListItemMetrics::from_rem_size(
-                px(16.0), ListItemStyle::Card, CardItemGap::Eight, height, 8,
+                px(16.0),
+                ListItemStyle::Card,
+                CardItemGap::Eight,
+                height,
+                8,
             );
             assert!(!metrics.shows_only_note(""));
-            assert_eq!(metrics.shows_only_note("备注"), height == ListItemHeight::ExtraSmall);
+            assert_eq!(
+                metrics.shows_only_note("备注"),
+                height == ListItemHeight::ExtraSmall
+            );
             let notes_only = metrics.with_note_display(true);
             assert!(notes_only.shows_only_note("备注"));
             assert!(!notes_only.shows_only_note(""));
@@ -471,7 +546,10 @@ pub(super) fn file_list_meta_label(translator: &Translator, file_count: usize) -
     )
 }
 
-pub(super) fn image_meta_label(translator: &Translator, dimensions: Option<ImageDimensions>) -> String {
+pub(super) fn image_meta_label(
+    translator: &Translator,
+    dimensions: Option<ImageDimensions>,
+) -> String {
     let Some(dimensions) = dimensions else {
         return translator.translate("main.preview.image");
     };

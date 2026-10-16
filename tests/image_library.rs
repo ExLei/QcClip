@@ -37,7 +37,11 @@ fn delete_group_removes_images_and_icon_and_preserves_other_groups() {
     assert!(root.path().join(&other.name).join("other.png").exists());
     assert!(icon.exists(), "图库外的源文件应保留");
     assert!(!fs::read_dir(root.path()).unwrap().any(|entry| {
-        entry.unwrap().file_name().to_string_lossy().starts_with(".deleted-group-")
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".deleted-group-")
     }));
 }
 

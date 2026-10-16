@@ -112,14 +112,12 @@ where
                     );
                 })
                 .child(div().flex_1().min_w_0().truncate().child(current_label))
-                .child(
-                    hover_icon(
-                        format!("settings-dropdown-{id}"),
-                        "chevron-down",
-                        12.0,
-                        cx.theme().muted_foreground,
-                    ),
-                ),
+                .child(hover_icon(
+                    format!("settings-dropdown-{id}"),
+                    "chevron-down",
+                    12.0,
+                    cx.theme().muted_foreground,
+                )),
         )
         .into_any_element()
 }
@@ -165,34 +163,31 @@ where
     let right_handler_for_click = right_handler.clone();
     let left_menu_for_click = left_menu.clone();
     let right_menu_for_click = right_menu.clone();
-    let open_menu = Rc::new(move |bounds: Option<Bounds<Pixels>>,
-                               menu: DropdownModel,
-                               handler: Rc<dyn Fn(DropdownItemId, &mut App)>,
-                               window: &mut gpui::Window,
-                               cx: &mut App| {
-        let Some(bounds) = bounds else {
-            return;
-        };
-        window.bounds_changed(cx);
-        let scale_factor = window.scale_factor().max(1.0);
-        let Some(origin) = platform_window::logical_to_physical_desktop(window, bounds.origin)
-        else {
-            return;
-        };
-        let anchor = DropdownAnchor::new(
-            origin.x,
-            origin.y,
-            f32::from(bounds.size.width) * scale_factor,
-            f32::from(bounds.size.height) * scale_factor,
-            scale_factor,
-        );
-        MenuService::open_dropdown_menu(
-            menu,
-            anchor,
-            move |id, cx| handler(id, cx),
-            cx,
-        );
-    });
+    let open_menu = Rc::new(
+        move |bounds: Option<Bounds<Pixels>>,
+              menu: DropdownModel,
+              handler: Rc<dyn Fn(DropdownItemId, &mut App)>,
+              window: &mut gpui::Window,
+              cx: &mut App| {
+            let Some(bounds) = bounds else {
+                return;
+            };
+            window.bounds_changed(cx);
+            let scale_factor = window.scale_factor().max(1.0);
+            let Some(origin) = platform_window::logical_to_physical_desktop(window, bounds.origin)
+            else {
+                return;
+            };
+            let anchor = DropdownAnchor::new(
+                origin.x,
+                origin.y,
+                f32::from(bounds.size.width) * scale_factor,
+                f32::from(bounds.size.height) * scale_factor,
+                scale_factor,
+            );
+            MenuService::open_dropdown_menu(menu, anchor, move |id, cx| handler(id, cx), cx);
+        },
+    );
     let open_menu_for_left = open_menu.clone();
     let open_menu_for_right = open_menu.clone();
 
@@ -208,9 +203,10 @@ where
         .bg(theme.background)
         .overflow_hidden()
         .when(disabled, |this| this.opacity(0.5))
-        .when(!disabled, |this| this
-            .hover(|style| style.border_color(theme.primary).bg(theme.accent))
-            .active(|style| style.border_color(theme.primary_active)))
+        .when(!disabled, |this| {
+            this.hover(|style| style.border_color(theme.primary).bg(theme.accent))
+                .active(|style| style.border_color(theme.primary_active))
+        })
         .child(
             div()
                 .w(ui_rem(99.0))
@@ -231,15 +227,17 @@ where
                         .gap_1()
                         .px_3()
                         .text_sm()
-                        .when(!disabled, |this| this.cursor_pointer().on_click(move |_, window, cx| {
-                            open_menu_for_left(
-                                left_bounds_for_click.get(),
-                                left_menu_for_click.clone(),
-                                left_handler_for_click.clone(),
-                                window,
-                                cx,
-                            );
-                        }))
+                        .when(!disabled, |this| {
+                            this.cursor_pointer().on_click(move |_, window, cx| {
+                                open_menu_for_left(
+                                    left_bounds_for_click.get(),
+                                    left_menu_for_click.clone(),
+                                    left_handler_for_click.clone(),
+                                    window,
+                                    cx,
+                                );
+                            })
+                        })
                         .child(div().flex_1().min_w_0().truncate().child(left_label))
                         .child(hover_icon(
                             format!("{id}-left"),
@@ -270,8 +268,8 @@ where
                         .gap_1()
                         .px_3()
                         .text_sm()
-                        .when(!right_fixed && !disabled, |this| this.cursor_pointer()
-                            .on_click(move |_, window, cx| {
+                        .when(!right_fixed && !disabled, |this| {
+                            this.cursor_pointer().on_click(move |_, window, cx| {
                                 open_menu_for_right(
                                     right_bounds_for_click.get(),
                                     right_menu_for_click.clone(),
@@ -279,15 +277,18 @@ where
                                     window,
                                     cx,
                                 );
-                            }))
+                            })
+                        })
                         .when(right_fixed, |this| this.cursor_default())
                         .child(div().flex_1().min_w_0().truncate().child(right_label))
-                        .when(!right_fixed, |this| this.child(hover_icon(
-                            format!("{id}-right"),
-                            "chevron-down",
-                            12.0,
-                            theme.muted_foreground,
-                        ))),
+                        .when(!right_fixed, |this| {
+                            this.child(hover_icon(
+                                format!("{id}-right"),
+                                "chevron-down",
+                                12.0,
+                                theme.muted_foreground,
+                            ))
+                        }),
                 ),
         )
         .into_any_element()
@@ -563,7 +564,14 @@ fn setting_row_with_min_height(
                     )
                 }),
         )
-        .child(div().id(control_id).flex_shrink_0().max_w_full().overflow_x_scroll().child(control))
+        .child(
+            div()
+                .id(control_id)
+                .flex_shrink_0()
+                .max_w_full()
+                .overflow_x_scroll()
+                .child(control),
+        )
         .into_any_element()
 }
 

@@ -148,7 +148,7 @@ fn animate_bounds(
                 cx.background_executor().timer(MENU_ENTRANCE_FRAME).await;
                 let progress = (started_at.elapsed().as_secs_f32()
                     / MENU_ENTRANCE_DURATION.as_secs_f32())
-                    .clamp(0.0, 1.0);
+                .clamp(0.0, 1.0);
                 let progress = attached_window_easing(progress);
                 let bounds = interpolate_bounds(initial_bounds, target_bounds, progress);
                 let updated = cx
@@ -169,9 +169,7 @@ fn animate_bounds(
                     })
                     .unwrap_or(false);
                 if !updated {
-                    let _ = cx.update(|window, cx| {
-                        show_complete(popup, window, cx, target_bounds)
-                    });
+                    let _ = cx.update(|window, cx| show_complete(popup, window, cx, target_bounds));
                     current_bounds.set(Some(native_bounds(target_bounds)));
                     phase.set(PopupPhase::Complete);
                     break;
@@ -186,14 +184,7 @@ fn animate_bounds(
 }
 
 fn show_complete(popup: BorderlessPopup, window: &mut Window, cx: &mut App, bounds: MenuRect) {
-    let _ = popup.set_animation_bounds(
-        window,
-        cx,
-        bounds.x,
-        bounds.y,
-        bounds.width,
-        bounds.height,
-    );
+    let _ = popup.set_animation_bounds(window, cx, bounds.x, bounds.y, bounds.width, bounds.height);
     popup.set_visible(window, true);
     window.refresh();
 }
@@ -325,18 +316,10 @@ pub(super) fn point_anchored_content_bounds(
     progress: f32,
 ) -> MenuRect {
     let progress = progress.clamp(0.0, 1.0);
-    let (left, right) = point_anchored_axis(
-        target_bounds.x,
-        target_bounds.right(),
-        anchor_x,
-        progress,
-    );
-    let (top, bottom) = point_anchored_axis(
-        target_bounds.y,
-        target_bounds.bottom(),
-        anchor_y,
-        progress,
-    );
+    let (left, right) =
+        point_anchored_axis(target_bounds.x, target_bounds.right(), anchor_x, progress);
+    let (top, bottom) =
+        point_anchored_axis(target_bounds.y, target_bounds.bottom(), anchor_y, progress);
     MenuRect::new(left, top, right - left, bottom - top)
 }
 

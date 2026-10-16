@@ -8,7 +8,8 @@ impl StagedMigration {
     pub(super) fn create(path: &Path) -> Result<Self, MigrationError> {
         let connection = Connection::open(path)?;
         // 暂存只在本次迁移中使用，限制 SQLite 缓存，原始字节不随记录数累积在内存中。
-        connection.execute_batch("PRAGMA cache_size = -4096; PRAGMA temp_store = FILE;
+        connection.execute_batch(
+            "PRAGMA cache_size = -4096; PRAGMA temp_store = FILE;
             CREATE TABLE records (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, legacy TEXT NOT NULL,
                 primary_namespace TEXT, primary_key TEXT, source_key TEXT NOT NULL,
                 content_hash BLOB NOT NULL, icon_id INTEGER);
@@ -19,7 +20,8 @@ impl StagedMigration {
                 PRIMARY KEY(record_id, format_order));
             CREATE TABLE icons (id INTEGER PRIMARY KEY, bytes BLOB NOT NULL, sha256 BLOB NOT NULL,
                 relative_path TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL);
-            BEGIN;")?;
+            BEGIN;",
+        )?;
         Ok(Self { connection })
     }
 
@@ -35,19 +37,33 @@ impl StagedMigration {
     }
 
     pub(super) fn save_icon(&self, icon: &LegacyIcon) -> Result<i64, MigrationError> {
-        self.connection.execute("INSERT INTO icons (bytes, sha256, relative_path, width, height)
+        self.connection.execute(
+            "INSERT INTO icons (bytes, sha256, relative_path, width, height)
             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![icon.bytes, icon.sha256.as_slice(), icon.relative_path, icon.width, icon.height])?;
+            params![
+                icon.bytes,
+                icon.sha256.as_slice(),
+                icon.relative_path,
+                icon.width,
+                icon.height
+            ],
+        )?;
         Ok(self.connection.last_insert_rowid())
     }
 
     pub(super) fn save_record(
-        &self, legacy: &LegacyRecord, captured: &CapturedClipboard, hashed: &HashedClipboard,
-        source_key: &str, icon_id: Option<i64>,
+        &self,
+        legacy: &LegacyRecord,
+        captured: &CapturedClipboard,
+        hashed: &HashedClipboard,
+        source_key: &str,
+        icon_id: Option<i64>,
     ) -> Result<bool, MigrationError> {
         let duplicate = self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM records WHERE content_hash = ?1)",
-            [hashed.content_hash.as_slice()], |row| row.get(0))?;
+            [hashed.content_hash.as_slice()],
+            |row| row.get(0),
+        )?;
         let primary = captured.primary_format_identity.as_ref();
         self.connection.execute("INSERT INTO records (kind, legacy, primary_namespace, primary_key, source_key, content_hash, icon_id)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -58,10 +74,22 @@ impl StagedMigration {
             (record_id, format_order, namespace, key, name, kind, native_id, encoding, generated, bytes)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")?;
         for format in &captured.formats {
-            let bytes = format.bytes.as_deref().ok_or_else(|| MigrationError::Invalid("暂存格式缺少原始字节".to_owned()))?;
-            statement.execute(params![id, format.format_order, format.format_namespace, format.format_key,
-                format.format_name, format.format_kind.as_str(), format.native_format_id, format.encoding,
-                format.capture_state == FormatCaptureState::Generated, bytes])?;
+            let bytes = format
+                .bytes
+                .as_deref()
+                .ok_or_else(|| MigrationError::Invalid("暂存格式缺少原始字节".to_owned()))?;
+            statement.execute(params![
+                id,
+                format.format_order,
+                format.format_namespace,
+                format.format_key,
+                format.format_name,
+                format.format_kind.as_str(),
+                format.native_format_id,
+                format.encoding,
+                format.capture_state == FormatCaptureState::Generated,
+                bytes
+            ])?;
         }
         Ok(duplicate)
     }
@@ -79,40 +107,88 @@ impl StagedMigration {
         while let Some(row) = rows.next()? {
             let kind = FormatKind::from_str(&row.get::<_, String>(3)?)
                 .ok_or_else(|| MigrationError::Invalid("暂存格式类型无效".to_owned()))?;
-            let mut format = RawFormat::captured(row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?, kind, row.get(7)?, row.get(8)?, true);
+            let mut format = RawFormat::captured(
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                kind,
+                row.get(7)?,
+                row.get(8)?,
+                true,
+            );
             format.native_format_id = row.get(4)?;
             format.encoding = row.get(5)?;
-            if row.get::<_, bool>(6)? { format.capture_state = FormatCaptureState::Generated; }
+            if row.get::<_, bool>(6)? {
+                format.capture_state = FormatCaptureState::Generated;
+            }
             formats.push(format);
         }
         let captured = CapturedClipboard {
-            formats, primary_format_identity: primary_namespace.zip(primary_key),
+            formats,
+            primary_format_identity: primary_namespace.zip(primary_key),
             preview_candidate: Some(legacy.content.clone()),
-            source_application: SourceApplication { name: legacy.source_app.clone(), path: None },
+            source_application: SourceApplication {
+                name: legacy.source_app.clone(),
+                path: None,
+            },
         };
         let hashed = hash_clipboard(&captured)?;
         if hashed.content_hash.as_slice() != expected_hash {
-            return Err(MigrationError::Invalid("暂存内容与分析时的哈希不一致".to_owned()));
+            return Err(MigrationError::Invalid(
+                "暂存内容与分析时的哈希不一致".to_owned(),
+            ));
         }
         let preview = generate_preview(&captured)?;
-        let icon = icon_id.map(|id| -> Result<_, MigrationError> {
-            let (bytes, sha256, relative_path, width, height) = self.connection.query_row(
-                "SELECT bytes, sha256, relative_path, width, height FROM icons WHERE id = ?1", [id],
-                |row| Ok((row.get(0)?, row.get::<_, Vec<u8>>(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?;
-            let sha256 = sha256.try_into().map_err(|_| MigrationError::Invalid("暂存图标哈希无效".to_owned()))?;
-            Ok(LegacyIcon { bytes, sha256, relative_path, width, height })
-        }).transpose()?;
-        Ok(PreparedRecord { legacy, captured, preview, hashed, source_key, icon })
+        let icon = icon_id
+            .map(|id| -> Result<_, MigrationError> {
+                let (bytes, sha256, relative_path, width, height) = self.connection.query_row(
+                    "SELECT bytes, sha256, relative_path, width, height FROM icons WHERE id = ?1",
+                    [id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )?;
+                let sha256 = sha256
+                    .try_into()
+                    .map_err(|_| MigrationError::Invalid("暂存图标哈希无效".to_owned()))?;
+                Ok(LegacyIcon {
+                    bytes,
+                    sha256,
+                    relative_path,
+                    width,
+                    height,
+                })
+            })
+            .transpose()?;
+        Ok(PreparedRecord {
+            legacy,
+            captured,
+            preview,
+            hashed,
+            source_key,
+            icon,
+        })
     }
 
     pub(super) fn for_each_record(
-        &self, options: MigrationOptions, mut visit: impl FnMut(PreparedRecord) -> Result<(), MigrationError>,
+        &self,
+        options: MigrationOptions,
+        mut visit: impl FnMut(PreparedRecord) -> Result<(), MigrationError>,
     ) -> Result<(), MigrationError> {
-        let mut statement = self.connection.prepare("SELECT id FROM records
-            WHERE (kind = 'clipboard' AND ?1) OR (kind = 'favorite' AND ?2) ORDER BY id")?;
+        let mut statement = self.connection.prepare(
+            "SELECT id FROM records
+            WHERE (kind = 'clipboard' AND ?1) OR (kind = 'favorite' AND ?2) ORDER BY id",
+        )?;
         let mut rows = statement.query(params![options.history, options.favorites])?;
-        while let Some(row) = rows.next()? { visit(self.load_record(row.get(0)?)?)?; }
+        while let Some(row) = rows.next()? {
+            visit(self.load_record(row.get(0)?)?)?;
+        }
         Ok(())
     }
 }

@@ -11,10 +11,22 @@ fn notification_defaults_and_released_update_preference_are_preserved() {
         r#"{"schemaVersion":1,"general":{"globalNotificationEnabled":false},"updates":{"notificationEnabled":false}}"#,
     ).expect("无法加载已发布版本的通知配置");
     assert!(!loaded.config.general.global_notification_enabled);
-    assert!(loaded.config.notification_preference(NotificationKind::Startup));
-    assert!(!loaded.config.notification_preference(NotificationKind::VersionUpdate));
-    for kind in [NotificationKind::ClipboardPreview, NotificationKind::FeatureStatus,
-        NotificationKind::OperationResult, NotificationKind::Attention] {
+    assert!(
+        loaded
+            .config
+            .notification_preference(NotificationKind::Startup)
+    );
+    assert!(
+        !loaded
+            .config
+            .notification_preference(NotificationKind::VersionUpdate)
+    );
+    for kind in [
+        NotificationKind::ClipboardPreview,
+        NotificationKind::FeatureStatus,
+        NotificationKind::OperationResult,
+        NotificationKind::Attention,
+    ] {
         assert!(loaded.config.notification_preference(kind));
     }
     assert!(loaded.warnings.is_empty());
@@ -22,10 +34,13 @@ fn notification_defaults_and_released_update_preference_are_preserved() {
 
 #[test]
 fn explicitly_disabled_startup_notification_is_preserved() {
-    let loaded = config::load::from_str(
-        r#"{"general":{"notifications":{"startup":false}}}"#,
-    ).expect("无法加载已关闭启动通知的配置");
-    assert!(!loaded.config.notification_preference(NotificationKind::Startup));
+    let loaded = config::load::from_str(r#"{"general":{"notifications":{"startup":false}}}"#)
+        .expect("无法加载已关闭启动通知的配置");
+    assert!(
+        !loaded
+            .config
+            .notification_preference(NotificationKind::Startup)
+    );
     assert!(loaded.warnings.is_empty());
 }
 
@@ -40,13 +55,20 @@ fn each_notification_preference_round_trips_independently() {
         assert!(loaded.warnings.is_empty());
         for other in NotificationKind::ALL {
             if other != kind {
-                assert_eq!(config.notification_preference(other), AppConfig::default().notification_preference(other));
+                assert_eq!(
+                    config.notification_preference(other),
+                    AppConfig::default().notification_preference(other)
+                );
             }
         }
         if kind == NotificationKind::VersionUpdate {
             let value: serde_json::Value = serde_json::from_str(&json).unwrap();
             assert_eq!(value["updates"]["notificationEnabled"], false);
-            assert!(value["general"]["notifications"].get("versionUpdate").is_none());
+            assert!(
+                value["general"]["notifications"]
+                    .get("versionUpdate")
+                    .is_none()
+            );
         }
     }
 }
@@ -56,12 +78,36 @@ fn invalid_notification_field_does_not_reset_valid_siblings() {
     let loaded = config::load::from_str(
         r#"{"general":{"notifications":{"startup":true,"clipboardPreview":false,"featureStatus":"invalid","operationResult":false,"attention":false}},"updates":{"notificationEnabled":false}}"#,
     ).expect("无法加载字段级容错通知配置");
-    assert!(loaded.config.notification_preference(NotificationKind::Startup));
-    assert!(!loaded.config.notification_preference(NotificationKind::ClipboardPreview));
-    assert!(loaded.config.notification_preference(NotificationKind::FeatureStatus));
-    assert!(!loaded.config.notification_preference(NotificationKind::OperationResult));
-    assert!(!loaded.config.notification_preference(NotificationKind::Attention));
-    assert!(!loaded.config.notification_preference(NotificationKind::VersionUpdate));
+    assert!(
+        loaded
+            .config
+            .notification_preference(NotificationKind::Startup)
+    );
+    assert!(
+        !loaded
+            .config
+            .notification_preference(NotificationKind::ClipboardPreview)
+    );
+    assert!(
+        loaded
+            .config
+            .notification_preference(NotificationKind::FeatureStatus)
+    );
+    assert!(
+        !loaded
+            .config
+            .notification_preference(NotificationKind::OperationResult)
+    );
+    assert!(
+        !loaded
+            .config
+            .notification_preference(NotificationKind::Attention)
+    );
+    assert!(
+        !loaded
+            .config
+            .notification_preference(NotificationKind::VersionUpdate)
+    );
     assert_eq!(loaded.warnings.len(), 1);
     assert!(loaded.warnings[0].contains("general.notifications.featureStatus"));
 }

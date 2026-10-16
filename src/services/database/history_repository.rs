@@ -7,8 +7,8 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::domain::clipboard::{ClipboardItemId, ContentKind, FormatPreview, HistoryItemId};
 use crate::config::HistoryConfig;
+use crate::domain::clipboard::{ClipboardItemId, ContentKind, FormatPreview, HistoryItemId};
 use crate::services::storage::{RawBlob, RawBlobStore};
 
 use super::{
@@ -16,10 +16,9 @@ use super::{
     models::{LIST_ORDER_BASE, LIST_ORDER_GAP},
     query::{
         HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot, PasteFilter,
-        collect_order_snapshot, append_search_filter,
-        append_tag_filter, append_tag_filter_for_item,
-        load_preview_options, parse_application_icon_source, parse_content_kind, parse_tag_ids,
-        preview_text_expression,
+        append_search_filter, append_tag_filter, append_tag_filter_for_item,
+        collect_order_snapshot, load_preview_options, parse_application_icon_source,
+        parse_content_kind, parse_tag_ids, preview_text_expression,
     },
 };
 
@@ -193,10 +192,14 @@ impl HistoryRepository {
         append_history_scope_filter(&mut conditions, &mut parameters, policy);
         append_tag_filter_for_item(&mut conditions, &mut parameters, query, "h.item_id");
 
-        let item_join = needs_item_join.then_some(
-            "JOIN clipboard_items AS i ON i.id = h.item_id\n             ",
-        ).unwrap_or_default();
-        let columns = if include_heat { "h.id, h.paste_count" } else { "h.id" };
+        let item_join = needs_item_join
+            .then_some("JOIN clipboard_items AS i ON i.id = h.item_id\n             ")
+            .unwrap_or_default();
+        let columns = if include_heat {
+            "h.id, h.paste_count"
+        } else {
+            "h.id"
+        };
         let sql = format!(
             "SELECT {columns}
              FROM clipboard_history AS h
@@ -208,7 +211,10 @@ impl HistoryRepository {
             conditions.join(" AND ")
         );
         let mut statement = connection.prepare(&sql)?;
-        collect_order_snapshot(statement.query(params_from_iter(parameters.iter()))?, include_heat)
+        collect_order_snapshot(
+            statement.query(params_from_iter(parameters.iter()))?,
+            include_heat,
+        )
     }
 
     #[cfg(test)]
@@ -290,7 +296,9 @@ impl HistoryRepository {
         let mut query = query.clone();
         query.offset = 0;
         query.limit = 1;
-        Ok(self.query_internal(&query, Some(history_id), None, None)?.pop())
+        Ok(self
+            .query_internal(&query, Some(history_id), None, None)?
+            .pop())
     }
 
     pub fn find_by_id_scoped(
@@ -352,13 +360,11 @@ impl HistoryRepository {
              WHERE {}",
             conditions.join(" AND ")
         );
-        let count: i64 = connection.query_row(
-            &sql,
-            params_from_iter(parameters.iter()),
-            |row| row.get(0),
-        )?;
-        usize::try_from(count)
-            .map_err(|_| HistoryQueryError::InvalidNonNegativeValue("pinned_history_count".to_owned()))
+        let count: i64 =
+            connection.query_row(&sql, params_from_iter(parameters.iter()), |row| row.get(0))?;
+        usize::try_from(count).map_err(|_| {
+            HistoryQueryError::InvalidNonNegativeValue("pinned_history_count".to_owned())
+        })
     }
 
     pub fn find_item_previews(
@@ -396,8 +402,8 @@ impl HistoryRepository {
         history_ids: &[HistoryItemId],
     ) -> Result<HashMap<HistoryItemId, ClipboardItemId>, HistoryQueryError> {
         let connection = self.database.connect()?;
-        let mut statement = connection
-            .prepare("SELECT item_id FROM clipboard_history WHERE id = ?1")?;
+        let mut statement =
+            connection.prepare("SELECT item_id FROM clipboard_history WHERE id = ?1")?;
         let mut item_ids = HashMap::with_capacity(history_ids.len());
         for history_id in history_ids {
             if let Some(item_id) = statement
@@ -442,8 +448,8 @@ impl HistoryRepository {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut affected_item_ids = HashSet::new();
         {
-            let mut statement = transaction
-                .prepare("SELECT item_id FROM clipboard_history WHERE id = ?1")?;
+            let mut statement =
+                transaction.prepare("SELECT item_id FROM clipboard_history WHERE id = ?1")?;
             for history_id in history_ids {
                 if let Some(item_id) = statement
                     .query_row([history_id], |row| row.get::<_, i64>(0))
@@ -455,10 +461,8 @@ impl HistoryRepository {
         }
         let mut deleted = 0;
         for history_id in history_ids {
-            deleted += transaction.execute(
-                "DELETE FROM clipboard_history WHERE id = ?1",
-                [history_id],
-            )?;
+            deleted +=
+                transaction.execute("DELETE FROM clipboard_history WHERE id = ?1", [history_id])?;
         }
         let affected_item_ids = affected_item_ids.into_iter().collect::<Vec<_>>();
         let cleanup_report = cleanup_orphaned_items_in_transaction(
@@ -704,8 +708,8 @@ impl HistoryRepository {
             0
         };
         let total = usize::try_from(total).map_err(|_| HistoryCleanupError::InvalidCount(total))?;
-        let pending = usize::try_from(pending)
-            .map_err(|_| HistoryCleanupError::InvalidCount(pending))?;
+        let pending =
+            usize::try_from(pending).map_err(|_| HistoryCleanupError::InvalidCount(pending))?;
         let in_scope_unpinned = usize::try_from(in_scope_unpinned)
             .map_err(|_| HistoryCleanupError::InvalidCount(in_scope_unpinned))?;
         let over_limit = usize::try_from(over_limit)
@@ -821,7 +825,11 @@ impl HistoryRepository {
         let limit = history_ids
             .map(|history_ids| history_ids.len())
             .unwrap_or_else(|| query.limit.min(500) as usize);
-        let offset = if history_ids.is_some() { 0 } else { query.offset as usize };
+        let offset = if history_ids.is_some() {
+            0
+        } else {
+            query.offset as usize
+        };
         parameters.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
         parameters.push(Value::Integer(i64::try_from(offset).unwrap_or(i64::MAX)));
         let preview_text = preview_text_expression("i.preview_text", query.preview_char_limit);
@@ -969,8 +977,8 @@ fn history_scope_condition(policy: &HistoryConfig) -> Option<(String, Vec<Value>
     let mut active_conditions = Vec::new();
     let mut parameters = Vec::new();
     if let Some(days) = policy.retention_days {
-        let cutoff = current_timestamp_millis()
-            .saturating_sub(i64::from(days).saturating_mul(86_400_000));
+        let cutoff =
+            current_timestamp_millis().saturating_sub(i64::from(days).saturating_mul(86_400_000));
         active_conditions.push("h.last_seen_at >= ?".to_owned());
         parameters.push(Value::Integer(cutoff));
     }
@@ -1323,12 +1331,8 @@ fn shift_history_order(
     if source_order == target_order {
         return Ok(());
     }
-    let mut destination_order = history_order_between(
-        transaction,
-        is_pinned,
-        source_order,
-        target_order,
-    )?;
+    let mut destination_order =
+        history_order_between(transaction, is_pinned, source_order, target_order)?;
     if destination_order.is_none() {
         rebalance_history_order(transaction, is_pinned)?;
         let (source_order, target_order): (i64, i64) = transaction.query_row(
@@ -1338,12 +1342,8 @@ fn shift_history_order(
             rusqlite::params![history_id, target_history_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        destination_order = history_order_between(
-            transaction,
-            is_pinned,
-            source_order,
-            target_order,
-        )?;
+        destination_order =
+            history_order_between(transaction, is_pinned, source_order, target_order)?;
     }
     let destination_order = destination_order.ok_or(HistoryReorderError::SortOrderOverflow)?;
     let timestamp = current_timestamp_millis();
@@ -1423,8 +1423,8 @@ fn rebalance_history_order(
         [is_pinned],
         |row| row.get(0),
     )?;
-    let row_count = i64::try_from(ordered_ids.len())
-        .map_err(|_| HistoryReorderError::SortOrderOverflow)?;
+    let row_count =
+        i64::try_from(ordered_ids.len()).map_err(|_| HistoryReorderError::SortOrderOverflow)?;
     let temporary_offset = max_order
         .checked_add(LIST_ORDER_BASE)
         .and_then(|value| value.checked_add(row_count))
@@ -1438,7 +1438,10 @@ fn rebalance_history_order(
         .checked_add(row_count)
         .and_then(|value| value.checked_mul(LIST_ORDER_GAP))
         .ok_or(HistoryReorderError::SortOrderOverflow)?;
-    if temporary_offset <= max_order || temporary_max < temporary_offset || final_max >= temporary_offset {
+    if temporary_offset <= max_order
+        || temporary_max < temporary_offset
+        || final_max >= temporary_offset
+    {
         return Err(HistoryReorderError::SortOrderOverflow);
     }
     transaction.execute(
@@ -1447,8 +1450,8 @@ fn rebalance_history_order(
     )?;
     let timestamp = current_timestamp_millis();
     for (index, history_id) in ordered_ids.iter().rev().enumerate() {
-        let reverse_index = i64::try_from(index)
-            .map_err(|_| HistoryReorderError::SortOrderOverflow)?;
+        let reverse_index =
+            i64::try_from(index).map_err(|_| HistoryReorderError::SortOrderOverflow)?;
         let sort_order = LIST_ORDER_BASE
             .checked_add(reverse_index)
             .and_then(|value| value.checked_mul(LIST_ORDER_GAP))
@@ -1538,49 +1541,82 @@ mod tests {
     fn clear_all_removes_pinned_and_pending_history_but_preserves_favorites() {
         let mut services = TestServices::new();
         services.capture = CaptureService::with_inline_threshold(
-            services.database.clone(), services.repository.blob_store.clone(), 0,
+            services.database.clone(),
+            services.repository.blob_store.clone(),
+            0,
         );
         let history_id = services.store(file_capture());
         let second_id = services.store(CapturedClipboard {
             formats: vec![RawFormat::captured(
-                "mime", "text/plain", "文本", FormatKind::Text,
-                b"clear-all-test".to_vec(), 0, true,
+                "mime",
+                "text/plain",
+                "文本",
+                FormatKind::Text,
+                b"clear-all-test".to_vec(),
+                0,
+                true,
             )],
             primary_format_identity: Some(("mime".to_owned(), "text/plain".to_owned())),
             preview_candidate: Some("clear-all-test".to_owned()),
             source_application: SourceApplication::default(),
         });
         let connection = services.database.connect().expect("连接测试数据库失败");
-        connection.execute(
-            "UPDATE clipboard_history SET is_pinned = 1 WHERE id = ?1", [history_id],
-        ).expect("置顶测试记录失败");
-        connection.execute(
-            "UPDATE clipboard_history SET first_seen_at = 0, last_seen_at = 0 WHERE id = ?1", [second_id],
-        ).expect("设置待清理历史失败");
-        let item_id: i64 = connection.query_row(
-            "SELECT item_id FROM clipboard_history WHERE id = ?1", [history_id], |row| row.get(0),
-        ).expect("读取收藏内容失败");
+        connection
+            .execute(
+                "UPDATE clipboard_history SET is_pinned = 1 WHERE id = ?1",
+                [history_id],
+            )
+            .expect("置顶测试记录失败");
+        connection
+            .execute(
+                "UPDATE clipboard_history SET first_seen_at = 0, last_seen_at = 0 WHERE id = ?1",
+                [second_id],
+            )
+            .expect("设置待清理历史失败");
+        let item_id: i64 = connection
+            .query_row(
+                "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                [history_id],
+                |row| row.get(0),
+            )
+            .expect("读取收藏内容失败");
         drop(connection);
         super::super::FavoriteRepository::new(services.database.clone())
-            .add_to_favorites(item_id).expect("添加测试收藏失败");
+            .add_to_favorites(item_id)
+            .expect("添加测试收藏失败");
 
         let report = services.repository.clear_all().expect("清空历史失败");
         assert_eq!(report.history_items_removed, 2);
         assert_eq!(report.orphan_items_removed, 1);
         assert_eq!(report.orphan_blob_files_removed, 1);
-        assert_eq!(services.repository.count(&HistoryQuery::default()).unwrap(), 0);
+        assert_eq!(
+            services.repository.count(&HistoryQuery::default()).unwrap(),
+            0
+        );
         let connection = services.database.connect().unwrap();
-        let counts: (i64, i64) = connection.query_row(
-            "SELECT (SELECT COUNT(*) FROM favorites), (SELECT COUNT(*) FROM clipboard_items)",
-            [], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
+        let counts: (i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM favorites), (SELECT COUNT(*) FROM clipboard_items)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(counts, (1, 1));
-        let favorite_blob_path: String = connection.query_row(
-            "SELECT relative_path FROM binary_blobs", [], |row| row.get(0),
-        ).unwrap();
+        let favorite_blob_path: String = connection
+            .query_row("SELECT relative_path FROM binary_blobs", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert!(services._directory.path().join(favorite_blob_path).exists());
         drop(connection);
-        assert_eq!(services.repository.clear_all().unwrap().history_items_removed, 0);
+        assert_eq!(
+            services
+                .repository
+                .clear_all()
+                .unwrap()
+                .history_items_removed,
+            0
+        );
     }
 
     #[test]
@@ -2106,14 +2142,18 @@ mod tests {
                 .expect("历史 ID 排序失败"),
             vec![first, third, second]
         );
-        connection.execute(
-            "UPDATE clipboard_history SET paste_count = 17 WHERE id = ?1", [third],
-        ).expect("无法更新测试粘贴次数");
+        connection
+            .execute(
+                "UPDATE clipboard_history SET paste_count = 17 WHERE id = ?1",
+                [third],
+            )
+            .expect("无法更新测试粘贴次数");
         let query = HistoryQuery {
             paste_filter: Some(PasteFilter::Pasted),
             ..HistoryQuery::default()
         };
-        let snapshot = services.repository
+        let snapshot = services
+            .repository
             .ordered_snapshot_scoped(&query, &HistoryConfig::default())
             .expect("无法读取历史热度快照");
         assert_eq!(snapshot.ids, vec![third]);

@@ -1,13 +1,13 @@
-pub mod application_icon;
 pub(crate) mod application_filter;
+pub mod application_icon;
 pub mod capture;
 pub mod custom_text;
 pub mod data_management;
 pub(crate) mod data_runtime;
 pub mod database;
 pub mod focus;
-pub mod image_preview;
 pub(crate) mod image_library;
+pub mod image_preview;
 pub(crate) mod legacy_migration;
 pub(crate) mod memory_trim;
 pub mod paste;
@@ -15,6 +15,6 @@ pub mod recovery;
 pub mod sound;
 pub mod storage;
 pub(crate) mod system;
-pub(crate) mod updates;
 #[cfg(target_os = "windows")]
 pub mod tray;
+pub(crate) mod updates;

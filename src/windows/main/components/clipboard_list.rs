@@ -34,16 +34,16 @@ use crate::platform::drag_preview::DragPreviewService;
 use crate::{
     config::{
         ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, CardItemGap, ClipboardDisplayPriority,
-        ClipboardMouseMiddleBehavior, ItemDisplayField, ItemRegionVisibility,
-        ListItemHeight, ListItemStyle, SearchEngine,
+        ClipboardMouseMiddleBehavior, ItemDisplayField, ItemRegionVisibility, ListItemHeight,
+        ListItemStyle, SearchEngine,
     },
     config_runtime,
     domain::{
         capture::{FormatKind, FormatRole},
         clipboard::{
             ClipboardItemId, ClipboardListItem, ContentKind, FormatPreview, HistoryItemId,
-            ImageDimensions, Tag,
-            is_empty_textual_preview, select_user_visible_previews_with_priority,
+            ImageDimensions, Tag, is_empty_textual_preview,
+            select_user_visible_previews_with_priority,
         },
     },
     i18n::{self, Translator},
@@ -51,9 +51,8 @@ use crate::{
     services::capture::extract_links,
     ui::{hover_icon, html as html_preview, icon},
     windows::main::state::{
-        FileListKey, ListDropTarget, ListItemLoadAnimation, ListLayoutCache,
-        ListLayoutCacheKey, ListReorderAnimation, ListStatus, MainWindow,
-        display_priority_roles,
+        FileListKey, ListDropTarget, ListItemLoadAnimation, ListLayoutCache, ListLayoutCacheKey,
+        ListReorderAnimation, ListStatus, MainWindow, display_priority_roles,
     },
     windows::main::{
         MainWindowService,
@@ -71,15 +70,15 @@ use crate::{
 use crate::platform::external_drag::ExternalDragService;
 
 mod context_menu;
-mod metrics;
 mod heat_scrollbar;
+mod metrics;
 
+pub(crate) use context_menu::confirm_remove_from_favorites;
 use context_menu::{
+    OPEN_ALL_LINKS_ACTION, OPEN_LINK_ACTION_PREFIX, OPEN_WITH_DEFAULT_ACTION,
     favorite_item_context_menu, history_item_context_menu, parse_toggle_tag_action,
     tag_color_value, truncate_link_label,
-    OPEN_ALL_LINKS_ACTION, OPEN_LINK_ACTION_PREFIX, OPEN_WITH_DEFAULT_ACTION,
 };
-pub(crate) use context_menu::confirm_remove_from_favorites;
 use metrics::*;
 
 const MIN_PREFETCH_ROWS: usize = 4;
@@ -133,7 +132,13 @@ impl Render for ListItemDragPreview {
             return div().into_any_element();
         }
 
-        render_drag_preview(&self.drag, &self.html_images, &self.drag.item.shortcut, window, cx)
+        render_drag_preview(
+            &self.drag,
+            &self.html_images,
+            &self.drag.item.shortcut,
+            window,
+            cx,
+        )
     }
 }
 
@@ -148,7 +153,8 @@ pub(crate) fn quick_paste_row_metrics(
         appearance.card_item_gap,
         ListItemHeight::ExtraSmall,
         appearance.adaptive_max_lines,
-    ).with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx));
+    )
+    .with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx));
     (
         metrics.row_height,
         metrics.content_height,
@@ -187,9 +193,10 @@ pub fn render(
         appearance.card_item_gap,
         appearance.list_item_height,
         appearance.adaptive_max_lines,
-    ).with_info_row(appearance.item_display.shows_info_row())
-        .with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx))
-        .with_note_display(appearance.only_show_notes);
+    )
+    .with_info_row(appearance.item_display.shows_info_row())
+    .with_font_metrics(crate::ui::fonts::AppFontMetrics::from_window(window, cx))
+    .with_note_display(appearance.only_show_notes);
     let clipboard = crate::config_runtime::clipboard_config(cx);
     let display_priority = clipboard.display_priority;
     let preview_priority = clipboard.preview_priority.resolve(display_priority);
@@ -565,14 +572,14 @@ fn render_rows(
                                     file_list,
                                     active_tab,
                                     &this.tags,
-                                    reorder_animation.as_ref().and_then(
-                                        |(generation, offsets)| {
+                                    reorder_animation
+                                        .as_ref()
+                                        .and_then(|(generation, offsets)| {
                                             offsets
                                                 .get(&item_history_id)
                                                 .copied()
                                                 .map(|offset| (*generation, offset))
-                                        },
-                                    ),
+                                        }),
                                     load_animation,
                                     list_width,
                                     hover_allowed,
@@ -595,12 +602,10 @@ fn render_rows(
 
             if metrics.height == ListItemHeight::Adaptive
                 && range.clone().any(|index| {
-                    this.list_order_ids
-                        .get(index)
-                        .is_some_and(|history_id| {
-                            this.loaded_items.contains_key(history_id)
-                                && !this.adaptive_item_heights.contains_key(history_id)
-                        })
+                    this.list_order_ids.get(index).is_some_and(|history_id| {
+                        this.loaded_items.contains_key(history_id)
+                            && !this.adaptive_item_heights.contains_key(history_id)
+                    })
                 })
             {
                 // 新加载的自适应行先使用估算高度；进入可见范围后再刷新一次真实高度。
@@ -719,7 +724,14 @@ fn render_rows(
             this.handle_list_scroll_wheel(event, window, cx);
         }))
         .child(list)
-        .child(heat_scrollbar::render(heatmap.buckets(), heat_scrollbar, scroll_handle, list_width, window, cx));
+        .child(heat_scrollbar::render(
+            heatmap.buckets(),
+            heat_scrollbar,
+            scroll_handle,
+            list_width,
+            window,
+            cx,
+        ));
 
     v_flex()
         .flex_grow_1()
@@ -859,17 +871,15 @@ fn render_tag_indicators(
         .items_end()
         .gap(ui_rem(2.0))
         .children(item.tag_ids.iter().filter_map(|tag_id| {
-            tags.iter()
-                .find(|tag| tag.id == *tag_id)
-                .map(|tag| {
-                    render_tag_indicator(
-                        item.history_id,
-                        tag,
-                        theme,
-                        animations_enabled,
-                        hover_allowed,
-                    )
-                })
+            tags.iter().find(|tag| tag.id == *tag_id).map(|tag| {
+                render_tag_indicator(
+                    item.history_id,
+                    tag,
+                    theme,
+                    animations_enabled,
+                    hover_allowed,
+                )
+            })
         }))
         .into_any_element()
 }
@@ -1055,8 +1065,16 @@ fn render_hover_actions(
     let note_button = hover_action_button(
         ("hover-action-note", row_id as u64),
         "note",
-        translator.translate(if item.note_text.is_empty() { "main.note.add" } else { "main.note.edit" }),
-        if item.note_text.is_empty() { theme.muted_foreground } else { theme.primary },
+        translator.translate(if item.note_text.is_empty() {
+            "main.note.add"
+        } else {
+            "main.note.edit"
+        }),
+        if item.note_text.is_empty() {
+            theme.muted_foreground
+        } else {
+            theme.primary
+        },
         theme,
         move |_, _, cx| {
             cx.stop_propagation();
@@ -1147,13 +1165,17 @@ fn render_hover_actions(
         (ItemDisplayField::Favorite, Some(favorite_button)),
         (ItemDisplayField::Pin, Some(pin_button)),
         (ItemDisplayField::Delete, delete_button),
-    ].into_iter().filter(|(field, _)| display.enabled(*field))
-        .filter_map(|(_, button)| button).collect::<Vec<_>>();
+    ]
+    .into_iter()
+    .filter(|(field, _)| display.enabled(*field))
+    .filter_map(|(_, button)| button)
+    .collect::<Vec<_>>();
     let button_count = buttons.len();
     if button_count == 0 {
         return None;
     }
-    let expanded_width = gpui_component::Theme::global(cx).font_size * (button_count as f32 * 20.0 / 16.0);
+    let expanded_width =
+        gpui_component::Theme::global(cx).font_size * (button_count as f32 * 20.0 / 16.0);
     let visible = display.actions_visibility.is_visible(selected);
     let animations_enabled =
         crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListActions);
@@ -1171,11 +1193,14 @@ fn render_hover_actions(
             .when(hover_allowed && animations_enabled, |this| {
                 this.transitions(|transitions| transitions.w(motion.clone()).opacity(motion))
             })
-            .when(hover_allowed && display.actions_visibility == ItemRegionVisibility::Active, |this| {
-                this.group_hover(format!("clipboard-row-hover-{row_id}"), |style| {
-                    style.w(expanded_width).opacity(1.0)
-                })
-            })
+            .when(
+                hover_allowed && display.actions_visibility == ItemRegionVisibility::Active,
+                |this| {
+                    this.group_hover(format!("clipboard-row-hover-{row_id}"), |style| {
+                        style.w(expanded_width).opacity(1.0)
+                    })
+                },
+            )
             .children(buttons)
             .into_any_element(),
         button_count,
@@ -1450,19 +1475,23 @@ fn render_item_surface<T>(
         theme.secondary
     };
     let (hover_actions, action_count) = hover_actions
-        .map(|(actions, count)| (Some(actions), count)).unwrap_or((None, 0));
+        .map(|(actions, count)| (Some(actions), count))
+        .unwrap_or((None, 0));
     let show_source = display.toolbar_visibility != ItemRegionVisibility::Hidden
         && display.enabled(ItemDisplayField::Source);
     let show_shortcut = display.toolbar_visibility != ItemRegionVisibility::Hidden
-        && display.enabled(ItemDisplayField::Shortcut) && !shortcut_number.is_empty();
+        && display.enabled(ItemDisplayField::Shortcut)
+        && !shortcut_number.is_empty();
     let identity_count = usize::from(show_source) + usize::from(show_shortcut);
     let unit_width = metrics.rem_size * (20.0 / 16.0);
     let shortcut_width = if show_shortcut {
         let mut text_style = window.text_style();
         text_style.font_family = cx.theme().font_family.clone();
         let line = window.text_system().shape_line(
-            shortcut_number.clone().into(), metrics.rem_size * 0.75,
-            &[text_style.to_run(shortcut_number.len())], None,
+            shortcut_number.clone().into(),
+            metrics.rem_size * 0.75,
+            &[text_style.to_run(shortcut_number.len())],
+            None,
         );
         (line.width + metrics.rem_size * (8.0 / 16.0)).max(unit_width)
     } else {
@@ -1473,23 +1502,38 @@ fn render_item_surface<T>(
     let has_toolbar = action_count + identity_count > 0;
     let mut identity = div()
         .h_full()
-        .when(!display.toolbar_visibility.is_visible(selected), |this| this.w_0())
+        .when(!display.toolbar_visibility.is_visible(selected), |this| {
+            this.w_0()
+        })
         .flex_none()
         .flex()
         .items_center()
         .overflow_hidden()
-        .when(show_source, |this| this.child(source_application_icon(
-            item.history_id,
-            item.source_app_name.as_deref(),
-            source_app_icon,
-            theme,
-            &translator,
-        )))
-        .when(show_shortcut, |this| this.child(
-            div().h_full().min_w(ui_rem(20.0)).px(ui_rem(4.0)).flex_none()
-                .flex().items_center().justify_center()
-                .whitespace_nowrap().text_xs().text_color(theme.primary).child(shortcut_number),
-        ));
+        .when(show_source, |this| {
+            this.child(source_application_icon(
+                item.history_id,
+                item.source_app_name.as_deref(),
+                source_app_icon,
+                theme,
+                &translator,
+            ))
+        })
+        .when(show_shortcut, |this| {
+            this.child(
+                div()
+                    .h_full()
+                    .min_w(ui_rem(20.0))
+                    .px(ui_rem(4.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .whitespace_nowrap()
+                    .text_xs()
+                    .text_color(theme.primary)
+                    .child(shortcut_number),
+            )
+        });
     if hover_allowed && display.toolbar_visibility == ItemRegionVisibility::Active {
         identity = identity.group_hover(row_hover_group.clone(), |style| style.w_auto());
     }
@@ -1514,8 +1558,9 @@ fn render_item_surface<T>(
         || (action_count > 0 && display.actions_visibility.is_visible(selected));
     if !toolbar_visible {
         info_bar = info_bar.invisible();
-        if hover_allowed && ((identity_count > 0 && display.toolbar_visibility == ItemRegionVisibility::Active)
-            || (action_count > 0 && display.actions_visibility == ItemRegionVisibility::Active))
+        if hover_allowed
+            && ((identity_count > 0 && display.toolbar_visibility == ItemRegionVisibility::Active)
+                || (action_count > 0 && display.actions_visibility == ItemRegionVisibility::Active))
         {
             info_bar = info_bar.group_hover(row_hover_group.clone(), |style| style.visible());
         }
@@ -1538,18 +1583,23 @@ fn render_item_surface<T>(
         .overflow_hidden()
         .text_color(cx.theme().foreground);
     if note_only {
-        preview = preview.flex().items_start()
-            .child(div().flex_1().min_w_0().overflow_hidden()
+        preview = preview.flex().items_start().child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
                 .text_size(metrics.preview_font_size)
                 .line_height(metrics.preview_line_height)
                 .line_clamp(metrics.preview_line_count)
-                .child(item.note_text.clone()));
+                .child(item.note_text.clone()),
+        );
         if inline_info_bar {
             preview = preview.children(info_bar.take());
         }
     } else if let Some(file_list) = file_list {
         if show_note_header && metrics.height != ListItemHeight::Adaptive {
-            preview = preview.text_size(metrics.preview_font_size)
+            preview = preview
+                .text_size(metrics.preview_font_size)
                 .line_height(metrics.preview_line_height)
                 .line_clamp(content_metrics.preview_line_count)
                 .text_color(theme.muted_foreground)
@@ -1600,7 +1650,11 @@ fn render_item_surface<T>(
             .text_size(metrics.preview_font_size)
             .line_height(metrics.preview_line_height)
             .line_clamp(content_metrics.preview_line_count)
-            .text_color(if show_note_header { theme.muted_foreground } else { theme.foreground })
+            .text_color(if show_note_header {
+                theme.muted_foreground
+            } else {
+                theme.foreground
+            })
             .child(
                 display_preview
                     .map(|preview| preview.text.clone())
@@ -1612,7 +1666,9 @@ fn render_item_surface<T>(
         .h(metrics.meta_row_height)
         .w_full()
         .min_w_0()
-        .when(has_toolbar, |this| this.pr((toolbar_width - metrics.rem_size * (10.0 / 16.0)).max(px(0.0))))
+        .when(has_toolbar, |this| {
+            this.pr((toolbar_width - metrics.rem_size * (10.0 / 16.0)).max(px(0.0)))
+        })
         .flex_none()
         .flex()
         .items_center()
@@ -1623,7 +1679,11 @@ fn render_item_surface<T>(
         .overflow_hidden()
         .whitespace_nowrap()
         .when(display.enabled(ItemDisplayField::Time), |this| {
-            this.child(div().flex_shrink_0().child(i18n::relative_time(&translator, item.last_seen_at)))
+            this.child(
+                div()
+                    .flex_shrink_0()
+                    .child(i18n::relative_time(&translator, item.last_seen_at)),
+            )
         })
         .when(display.enabled(ItemDisplayField::Length), |this| {
             this.child(div().min_w_0().truncate().child(length))
@@ -1653,12 +1713,23 @@ fn render_item_surface<T>(
         row = row.child(meta_row);
     }
     if show_note_header {
-        let mut header = div().w_full().h(metrics.preview_line_height).flex_none()
-            .flex().items_start().text_size(metrics.preview_font_size)
+        let mut header = div()
+            .w_full()
+            .h(metrics.preview_line_height)
+            .flex_none()
+            .flex()
+            .items_start()
+            .text_size(metrics.preview_font_size)
             .line_height(metrics.preview_line_height)
             .font_weight(gpui::FontWeight::MEDIUM)
-            .child(div().flex_1().min_w_0().truncate()
-                .child(item.note_text.split_whitespace().collect::<Vec<_>>().join(" ")));
+            .child(
+                div().flex_1().min_w_0().truncate().child(
+                    item.note_text
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+            );
         if inline_info_bar {
             header = header.children(info_bar.take());
         }
@@ -1696,9 +1767,10 @@ fn render_item_surface<T>(
     if !drag_preview && hover_allowed {
         if crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListItemHover)
         {
-            row = row.group_hover(format!("clipboard-item-hover-{}", item.history_id), |this| {
-                this.bg(theme.list_hover)
-            });
+            row = row.group_hover(
+                format!("clipboard-item-hover-{}", item.history_id),
+                |this| this.bg(theme.list_hover),
+            );
         } else {
             row = row.hover(|this| this.bg(theme.list_hover));
         }
@@ -1734,11 +1806,7 @@ fn render_item_border(
 ) -> Option<AnyElement> {
     let color = color?;
 
-    let mut border = div()
-        .absolute()
-        .inset_0()
-        .border_l_3()
-        .border_color(color);
+    let mut border = div().absolute().inset_0().border_l_3().border_color(color);
     if list_item_style == ListItemStyle::Seamless {
         border = border.left(px(1.0));
     }
@@ -1920,12 +1988,17 @@ fn with_row_hover(
     let hover_item = preview_item.clone();
     let main_window = cx.entity().downgrade();
     row.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
-        if !*hovered
-            || (window.is_window_hovered() && MenuService::hover_animation_allowed(cx))
-        {
+        if !*hovered || (window.is_window_hovered() && MenuService::hover_animation_allowed(cx)) {
             handle_row_hover(
-                this, *hovered, row_id, &hover_anchor, &hover_item,
-                preview_source, preview_priority, window, cx,
+                this,
+                *hovered,
+                row_id,
+                &hover_anchor,
+                &hover_item,
+                preview_source,
+                preview_priority,
+                window,
+                cx,
             );
         }
     }))
@@ -1952,8 +2025,15 @@ fn with_row_hover(
             // 按当前命中结果恢复预览，不依赖 GPUI 是否再次发出悬停状态变化。
             if hovered {
                 handle_row_hover(
-                    this, true, row_id, &preview_anchor, &preview_item,
-                    preview_source, preview_priority, window, cx,
+                    this,
+                    true,
+                    row_id,
+                    &preview_anchor,
+                    &preview_item,
+                    preview_source,
+                    preview_priority,
+                    window,
+                    cx,
                 );
             } else {
                 this.hide_hover_preview(preview_source, cx);
@@ -1987,10 +2067,8 @@ fn render_row(
 ) -> AnyElement {
     let list_item_load_enabled =
         crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListItemLoad);
-    let list_item_reorder_enabled = crate::config_runtime::animation_enabled(
-        cx,
-        crate::config::AnimationKind::ListItemReorder,
-    );
+    let list_item_reorder_enabled =
+        crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListItemReorder);
     let tag_indicator_hover_enabled = crate::config_runtime::animation_enabled(
         cx,
         crate::config::AnimationKind::TagIndicatorHover,
@@ -2053,7 +2131,8 @@ fn render_row(
                 return;
             }
 
-            let hitboxes = children_bounds.into_iter()
+            let hitboxes = children_bounds
+                .into_iter()
                 .map(|bounds| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal))
                 .collect::<Vec<_>>();
             let selection_window = selection_window.clone();
@@ -2248,11 +2327,8 @@ fn render_row(
                         .as_ref()
                         .map(current_reorder_animation_offsets)
                         .unwrap_or_default();
-                    if this.set_reorder_target(
-                        target,
-                        metrics.row_height,
-                        &current_visual_offsets,
-                    ) {
+                    if this.set_reorder_target(target, metrics.row_height, &current_visual_offsets)
+                    {
                         cx.notify();
                     }
                 },
@@ -2272,11 +2348,8 @@ fn render_row(
                         .as_ref()
                         .map(current_reorder_animation_offsets)
                         .unwrap_or_default();
-                    if this.set_reorder_target(
-                        target,
-                        metrics.row_height,
-                        &current_visual_offsets,
-                    ) {
+                    if this.set_reorder_target(target, metrics.row_height, &current_visual_offsets)
+                    {
                         cx.notify();
                     }
                 }
@@ -2612,10 +2685,7 @@ fn render_row(
             hover_allowed,
         ));
     if hover_allowed
-        && crate::config_runtime::animation_enabled(
-            cx,
-            crate::config::AnimationKind::ListItemHover,
-        )
+        && crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListItemHover)
     {
         let hover_motion = Duration::from_millis(160).with_easing(gpui::ease_in_out);
         row = row
@@ -2632,8 +2702,13 @@ fn render_row(
         .group(row_group)
         .when(list_item_style == ListItemStyle::Seamless, |row| {
             with_row_hover(
-                row, row_id, preview_anchor.clone(), preview_item.clone(),
-                preview_source, preview_priority, cx,
+                row,
+                row_id,
+                preview_anchor.clone(),
+                preview_item.clone(),
+                preview_source,
+                preview_priority,
+                cx,
             )
         })
         .child(row);
@@ -2672,8 +2747,13 @@ fn render_row(
             .group(hover_group)
             .map(|card| {
                 with_row_hover(
-                    card, row_id, preview_anchor, preview_item,
-                    preview_source, preview_priority, cx,
+                    card,
+                    row_id,
+                    preview_anchor,
+                    preview_item,
+                    preview_source,
+                    preview_priority,
+                    cx,
                 )
             })
             .child(row);

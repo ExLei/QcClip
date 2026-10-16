@@ -65,12 +65,16 @@ pub fn render(main: &mut MainWindow, window: &Window, cx: &mut Context<MainWindo
         if let Some(category) = scroll_target {
             if let Some(index) = main.emoji_category_row_indices.get(&category).copied() {
                 let mut offset = main.emoji_scroll_handle.offset();
-                offset.y = px(-symbol_list::row_top(&rows, index) * crate::ui::scale::window_scale(window));
+                offset.y =
+                    px(-symbol_list::row_top(&rows, index)
+                        * crate::ui::scale::window_scale(window));
                 main.emoji_scroll_handle.set_offset(offset);
             }
         } else if main.symbol_search_query.trim().is_empty()
-            && let Some(category) =
-                symbol_list::category_at_scroll(&rows, main.emoji_scroll_handle.offset().y / crate::ui::scale::window_scale(window))
+            && let Some(category) = symbol_list::category_at_scroll(
+                &rows,
+                main.emoji_scroll_handle.offset().y / crate::ui::scale::window_scale(window),
+            )
         {
             main.emoji_category = category;
         }

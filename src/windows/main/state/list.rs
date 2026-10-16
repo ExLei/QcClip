@@ -13,8 +13,8 @@ impl MainWindow {
     }
 
     pub(super) fn reindex_list_order_positions(&mut self, range: Range<usize>) {
-        for index in range.start.min(self.list_order_ids.len())
-            ..range.end.min(self.list_order_ids.len())
+        for index in
+            range.start.min(self.list_order_ids.len())..range.end.min(self.list_order_ids.len())
         {
             self.list_order_positions
                 .insert(self.list_order_ids[index], index);
@@ -38,7 +38,8 @@ impl MainWindow {
         } else {
             self.list_order_ids[target_position..=source_position].rotate_right(1);
         }
-        self.list_heatmap.move_item(source_position, target_position);
+        self.list_heatmap
+            .move_item(source_position, target_position);
         if let Some(cache) = self.list_layout_cache.as_ref() {
             cache.sizes.move_item(source_position, target_position);
         }
@@ -97,7 +98,10 @@ impl MainWindow {
         self.mark_list_items_loaded(loaded_ids);
     }
 
-    pub(super) fn mark_list_items_loaded(&mut self, history_ids: impl IntoIterator<Item = HistoryItemId>) {
+    pub(super) fn mark_list_items_loaded(
+        &mut self,
+        history_ids: impl IntoIterator<Item = HistoryItemId>,
+    ) {
         let history_ids = history_ids.into_iter().collect::<Vec<_>>();
         if history_ids.is_empty() {
             return;
@@ -107,10 +111,8 @@ impl MainWindow {
             self.list_item_load_animation_generation.wrapping_add(1);
         let generation = self.list_item_load_animation_generation;
         for (order, history_id) in history_ids.into_iter().enumerate() {
-            self.list_item_load_animations.insert(
-                history_id,
-                ListItemLoadAnimation { generation, order },
-            );
+            self.list_item_load_animations
+                .insert(history_id, ListItemLoadAnimation { generation, order });
         }
     }
 
@@ -184,7 +186,11 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub(super) fn load_pending_selection(&mut self, loaded_range: Range<usize>, cx: &mut Context<Self>) {
+    pub(super) fn load_pending_selection(
+        &mut self,
+        loaded_range: Range<usize>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(index) = self.pending_selection_index else {
             return;
         };
@@ -902,7 +908,8 @@ impl MainWindow {
                     }
                     match result {
                         Ok((record, pinned_count)) => {
-                            let is_new_list_item = !this.list_order_positions.contains_key(&history_id);
+                            let is_new_list_item =
+                                !this.list_order_positions.contains_key(&history_id);
                             if this.apply_history_record_change(history_id, record, pinned_count) {
                                 if is_new_list_item
                                     && crate::config_runtime::clipboard_config(cx)
@@ -982,19 +989,20 @@ impl MainWindow {
         record: HistoryListRecord,
         pinned_count: usize,
     ) -> bool {
-        let Some(source_position) = self
-            .list_order_positions
-            .get(&list_item_id)
-            .copied()
-        else {
+        let Some(source_position) = self.list_order_positions.get(&list_item_id).copied() else {
             return false;
         };
         let item = record_to_list_item(record.clone());
         let mut order_ids = std::mem::take(&mut self.list_order_ids);
         order_ids.remove(source_position);
-        let target_position = if item.is_pinned { 0 } else { pinned_count.min(order_ids.len()) };
+        let target_position = if item.is_pinned {
+            0
+        } else {
+            pinned_count.min(order_ids.len())
+        };
         order_ids.insert(target_position, list_item_id);
-        self.list_heatmap.move_item(source_position, target_position);
+        self.list_heatmap
+            .move_item(source_position, target_position);
         self.list_order_ids = order_ids;
         self.reindex_list_order_positions(
             source_position.min(target_position)..source_position.max(target_position) + 1,
@@ -1014,10 +1022,7 @@ impl MainWindow {
         true
     }
 
-    pub(super) fn apply_removed_list_items(
-        &mut self,
-        history_ids: &[HistoryItemId],
-    ) -> bool {
+    pub(super) fn apply_removed_list_items(&mut self, history_ids: &[HistoryItemId]) -> bool {
         if !matches!(self.list_status, ListStatus::Ready | ListStatus::Empty) {
             return false;
         }
@@ -1046,22 +1051,26 @@ impl MainWindow {
             self.list_order_positions.remove(&removed_id);
             self.reindex_list_order_positions(*position..self.list_order_ids.len());
         } else {
-            self.list_order_ids.retain(|history_id| !removed_ids.contains(history_id));
+            self.list_order_ids
+                .retain(|history_id| !removed_ids.contains(history_id));
             self.rebuild_list_order_positions();
         }
-        self.items.retain(|item| !removed_ids.contains(&item.history_id));
-        self.loaded_items.retain(|history_id, _| !removed_ids.contains(history_id));
+        self.items
+            .retain(|item| !removed_ids.contains(&item.history_id));
+        self.loaded_items
+            .retain(|history_id, _| !removed_ids.contains(history_id));
         self.adaptive_item_heights
             .retain(|history_id, _| !removed_ids.contains(history_id));
         self.list_item_load_animations
             .retain(|history_id, _| !removed_ids.contains(history_id));
-        self.total_item_count = self
-            .total_item_count
-            .saturating_sub(visible_removed_count);
+        self.total_item_count = self.total_item_count.saturating_sub(visible_removed_count);
         self.invalidate_list_layout_cache();
         refresh_shortcuts_after_removal(&mut self.items, &removed_positions);
         self.sync_loaded_shortcuts();
-        if self.selected_item_id.is_some_and(|id| removed_ids.contains(&id)) {
+        if self
+            .selected_item_id
+            .is_some_and(|id| removed_ids.contains(&id))
+        {
             self.selected_item_id = self.items.first().map(|item| item.history_id);
         }
         self.multi_selected_item_ids
@@ -1111,14 +1120,17 @@ impl MainWindow {
             order_changed |= source_position != destination_position;
             self.list_order_ids.insert(destination_position, history_id);
             self.list_heatmap.update(source_position, item.paste_count);
-            self.list_heatmap.move_item(source_position, destination_position);
+            self.list_heatmap
+                .move_item(source_position, destination_position);
             self.reindex_list_order_positions(
-                source_position.min(destination_position)..source_position.max(destination_position) + 1,
+                source_position.min(destination_position)
+                    ..source_position.max(destination_position) + 1,
             );
         } else {
             destination_position = target_position.min(self.list_order_ids.len());
             self.list_order_ids.insert(destination_position, history_id);
-            self.list_heatmap.insert(destination_position, item.paste_count);
+            self.list_heatmap
+                .insert(destination_position, item.paste_count);
             self.reindex_list_order_positions(destination_position..self.list_order_ids.len());
             self.total_item_count = self.total_item_count.saturating_add(1);
             if self.selected_item_id.is_none() && self.total_item_count == 1 {
@@ -1134,7 +1146,8 @@ impl MainWindow {
             item.shortcut = shortcut;
         }
         item.is_selected = self.selected_item_id == Some(history_id);
-        self.items.retain(|existing| existing.history_id != history_id);
+        self.items
+            .retain(|existing| existing.history_id != history_id);
         insert_sorted_item(&mut self.items, item.clone());
         self.loaded_items.insert(history_id, item);
         self.adaptive_item_heights.remove(&history_id);
@@ -1158,7 +1171,11 @@ impl MainWindow {
         true
     }
 
-    pub(super) fn refresh_list_item(&mut self, list_item_id: HistoryItemId, cx: &mut Context<Self>) {
+    pub(super) fn refresh_list_item(
+        &mut self,
+        list_item_id: HistoryItemId,
+        cx: &mut Context<Self>,
+    ) {
         if !matches!(self.list_status, ListStatus::Ready | ListStatus::Empty) {
             self.refresh_history(cx);
             return;
@@ -1319,13 +1336,17 @@ impl MainWindow {
                 let (records, _) = split_page(records, page_size);
                 let mut newly_loaded = Vec::new();
                 for (record_offset, record) in records.into_iter().enumerate() {
-                    if let Some(index) = self.list_order_positions.get(&record.history_id).copied() {
+                    if let Some(index) = self.list_order_positions.get(&record.history_id).copied()
+                    {
                         self.list_heatmap.update(index, record.paste_count);
                     }
                     let mut item = record_to_list_item(record);
                     item.shortcut = format!(
                         "Ctrl+{}",
-                        page_range.start.saturating_add(record_offset).saturating_add(1)
+                        page_range
+                            .start
+                            .saturating_add(record_offset)
+                            .saturating_add(1)
                     );
                     let history_id = item.history_id;
                     let was_loaded = self.loaded_items.contains_key(&history_id);

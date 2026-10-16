@@ -261,8 +261,13 @@ mod windows_clipboard {
                         tracing::warn!(format_id = native_format.id, format_key = %key,
                             source = ?source_application, %error, "重试后仍无法读取剪贴板格式");
                         RawFormat::failed(
-                            "windows", key, native_format.name, kind, order as u32,
-                            "clipboard_read_failed", format!("重试后仍无法读取该格式：{error}"),
+                            "windows",
+                            key,
+                            native_format.name,
+                            kind,
+                            order as u32,
+                            "clipboard_read_failed",
+                            format!("重试后仍无法读取该格式：{error}"),
                         )
                     }
                 };
@@ -278,22 +283,26 @@ mod windows_clipboard {
             let preview_candidate = if formats.iter().any(|format| {
                 format.format_kind == FormatKind::FileList && format.capture_state.has_data()
             }) {
-                self.context.get_files().map_err(|error| {
-                    tracing::warn!(%error, "读取剪贴板文件列表摘要失败");
-                    error
-                }).ok().map(|files| {
-                    let count = files.len();
-                    let first = files.first().map(|file| {
-                        Path::new(file)
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .unwrap_or(file)
-                    });
-                    first.map_or_else(
-                        || format!("{count} 个文件"),
-                        |name| format!("{count} 个文件 · {name}"),
-                    )
-                })
+                self.context
+                    .get_files()
+                    .map_err(|error| {
+                        tracing::warn!(%error, "读取剪贴板文件列表摘要失败");
+                        error
+                    })
+                    .ok()
+                    .map(|files| {
+                        let count = files.len();
+                        let first = files.first().map(|file| {
+                            Path::new(file)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or(file)
+                        });
+                        first.map_or_else(
+                            || format!("{count} 个文件"),
+                            |name| format!("{count} 个文件 · {name}"),
+                        )
+                    })
             } else {
                 None
             };
@@ -474,7 +483,10 @@ mod windows_clipboard {
                 if crate::domain::capture::is_custom_text_format(
                     &payload.format_namespace,
                     &payload.format_key,
-                ) => Ok(13),
+                ) =>
+            {
+                Ok(13)
+            }
             key if key.starts_with("registered:") => {
                 let name = payload
                     .format_name

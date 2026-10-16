@@ -215,7 +215,8 @@ impl RawBlobStore {
     }
 
     pub fn write_pending(&self, bytes: &[u8]) -> Result<PendingBlob, RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         let sha256 = hash_bytes(bytes);
         let compressed =
             zstd::bulk::compress(bytes, ZSTD_COMPRESSION_LEVEL).map_err(RawBlobError::Compress)?;
@@ -259,7 +260,8 @@ impl RawBlobStore {
     }
 
     pub fn commit_pending(&self, pending: &PendingBlob) -> Result<RawBlob, RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         let pending_path = self.resolve_relative_path(&pending.relative_path)?;
         self.verify_file(
             &pending_path,
@@ -311,7 +313,8 @@ impl RawBlobStore {
     }
 
     pub fn read(&self, blob: &RawBlob) -> Result<Vec<u8>, RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         let path = self.resolve_relative_path(&blob.relative_path)?;
         self.read_verified_file(&path, blob.byte_length, &blob.sha256, blob.compression())
     }
@@ -319,7 +322,8 @@ impl RawBlobStore {
     /// 读取预览资源时跳过重复的 SHA-256 校验，仍验证文件长度和解压结果。
     /// 原始数据已在启动恢复阶段校验，交互式预览不应为同一图片再次完整扫描数据。
     pub fn read_for_preview(&self, blob: &RawBlob) -> Result<Vec<u8>, RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         let path = self.resolve_relative_path(&blob.relative_path)?;
         let stored_bytes = fs::read(&path).map_err(|source| RawBlobError::Read {
             path: path.clone(),
@@ -355,13 +359,15 @@ impl RawBlobStore {
     }
 
     pub fn verify(&self, blob: &RawBlob) -> Result<(), RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         let path = self.resolve_relative_path(&blob.relative_path)?;
         self.verify_file(&path, blob.byte_length, &blob.sha256, blob.compression())
     }
 
     pub fn reconcile(&self, referenced_blobs: &[RawBlob]) -> Result<ReconcileReport, RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         let mut report = ReconcileReport {
             pending_files_removed: self.cleanup_pending_files()?,
             ..ReconcileReport::default()
@@ -427,7 +433,8 @@ impl RawBlobStore {
         blob: &RawBlob,
         reference_count: usize,
     ) -> Result<bool, RawBlobError> {
-        let _operation = data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
+        let _operation =
+            data_runtime::begin_operation().map_err(|_| RawBlobError::DataSwitching)?;
         if reference_count > 0 {
             return Ok(false);
         }

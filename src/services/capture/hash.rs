@@ -52,17 +52,13 @@ pub fn hash_clipboard(captured: &CapturedClipboard) -> Result<HashedClipboard, C
         return Err(CaptureError::NoCapturedFormats);
     }
 
-    let content_hash = hash_format_set(
-        successful_formats
-            .iter()
-            .map(|(_, format, bytes)| {
-                (
-                    format.format_namespace.as_str(),
-                    format.format_key.as_str(),
-                    *bytes,
-                )
-            }),
-    );
+    let content_hash = hash_format_set(successful_formats.iter().map(|(_, format, bytes)| {
+        (
+            format.format_namespace.as_str(),
+            format.format_key.as_str(),
+            *bytes,
+        )
+    }));
 
     Ok(HashedClipboard {
         hash_version: CONTENT_HASH_VERSION,

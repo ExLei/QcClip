@@ -16,10 +16,16 @@ fn exclusive_operation_allows_owner_nesting_and_releases_after_failure() {
         });
     });
     entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert!(data_runtime::begin_operation().is_err(), "其他线程的数据操作必须暂停");
+    assert!(
+        data_runtime::begin_operation().is_err(),
+        "其他线程的数据操作必须暂停"
+    );
     release_tx.send(()).unwrap();
     worker.join().unwrap();
-    assert!(data_runtime::begin_operation().is_ok(), "完成后应恢复数据操作");
+    assert!(
+        data_runtime::begin_operation().is_ok(),
+        "完成后应恢复数据操作"
+    );
 
     let result = std::panic::catch_unwind(|| {
         data_runtime::with_exclusive_operation(|| {
@@ -28,6 +34,9 @@ fn exclusive_operation_allows_owner_nesting_and_releases_after_failure() {
         });
     });
     assert!(result.is_err());
-    assert!(data_runtime::begin_operation().is_ok(), "中断后应释放独占锁及嵌套状态");
+    assert!(
+        data_runtime::begin_operation().is_ok(),
+        "中断后应释放独占锁及嵌套状态"
+    );
     data_runtime::with_exclusive_operation(|| assert!(data_runtime::begin_operation().is_ok()));
 }

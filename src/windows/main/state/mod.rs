@@ -1,13 +1,13 @@
 mod actions;
 mod gallery;
-mod history;
 mod heatmap;
+mod history;
 mod list;
 mod selection;
 mod tags_search;
 
-pub(super) use history::ClipboardListenerToggleResult;
 pub(crate) use heatmap::{HeatBucket, HeatScrollbarState, ListHeatmap};
+pub(super) use history::ClipboardListenerToggleResult;
 
 use std::{
     cell::RefCell,
@@ -29,12 +29,8 @@ use gpui_component::{
     input::{self, InputEvent, InputState},
 };
 
-use super::{
-    MainWindowService,
-    components::emoji_picker::EmojiRowsCache,
-    file_list::FileListView,
-};
 use super::tabs::{FilterId, SymbolCategoryId, TabId};
+use super::{MainWindowService, components::emoji_picker::EmojiRowsCache, file_list::FileListView};
 use crate::{
     config::{CardItemGap, ClipboardDisplayPriority, ListItemStyle},
     domain::capture::{FormatKind, FormatRole},
@@ -49,7 +45,9 @@ use crate::{
     services::custom_text::CustomTextService,
     services::database::{
         FavoriteRepository, HistoryRepository, TagRepository,
-        query::{HistoryFilter, HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot},
+        query::{
+            HistoryFilter, HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot,
+        },
     },
     services::image_preview::ImagePreviewService,
     services::paste::PasteService,
@@ -748,10 +746,7 @@ fn refresh_shortcuts_after_move_to(
     }
 }
 
-fn refresh_shortcuts_after_removal(
-    items: &mut [ClipboardListItem],
-    removed_positions: &[usize],
-) {
+fn refresh_shortcuts_after_removal(items: &mut [ClipboardListItem], removed_positions: &[usize]) {
     for item in items {
         let Some(position) = item
             .shortcut
@@ -794,10 +789,7 @@ fn refresh_shortcuts_after_insert(
 
 fn assign_page_shortcuts(items: &mut [ClipboardListItem], offset: usize) {
     for (index, item) in items.iter_mut().enumerate() {
-        item.shortcut = format!(
-            "Ctrl+{}",
-            offset.saturating_add(index).saturating_add(1)
-        );
+        item.shortcut = format!("Ctrl+{}", offset.saturating_add(index).saturating_add(1));
     }
 }
 

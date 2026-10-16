@@ -5,32 +5,29 @@ use std::{cell::Cell, ops::Range, path::PathBuf, rc::Rc, sync::Arc};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Bounds, Context, DispatchPhase, DragMoveEvent, ExternalPaths, FileDropEvent,
-    IntoElement, MouseButton, ObjectFit, Pixels, Point, Render, RenderImage, Size, Window,
-    canvas, div, img, point, px, size, transparent_black,
+    IntoElement, MouseButton, ObjectFit, Pixels, Point, Render, RenderImage, Size, Window, canvas,
+    div, img, point, px, size, transparent_black,
 };
-use gpui_component::{
-    ActiveTheme as _, scroll::ScrollableElement, tooltip::Tooltip,
-};
+use gpui_component::{ActiveTheme as _, scroll::ScrollableElement, tooltip::Tooltip};
 
 use crate::{
     i18n,
+    platform::window::logical_to_physical_desktop,
     services::image_library::{ImageLibraryGroup, ImageLibraryImage, ImageLibraryService},
     state_runtime::{GallerySortField, GallerySortOrder, PersistedGallerySort},
     ui::{hover_icon, icon},
-    platform::window::logical_to_physical_desktop,
+    windows::main::state::MainWindow,
     windows::menu::{
         DropdownAnchor, DropdownItem, DropdownItemId, DropdownModel, MenuActionId, MenuIcon,
         MenuItem, MenuModel, MenuService,
     },
-    windows::main::state::MainWindow,
 };
 
 #[cfg(target_os = "windows")]
 use crate::platform::drag_preview::DragPreviewService;
 
 use super::{
-    new_gallery_group_form::NewGalleryGroupForm,
-    rename_gallery_image_form::RenameGalleryImageForm,
+    new_gallery_group_form::NewGalleryGroupForm, rename_gallery_image_form::RenameGalleryImageForm,
     symbol_layout, symbol_list, symbol_search, symbol_sidebar,
 };
 
@@ -119,11 +116,10 @@ pub(crate) fn render(
     let cell_size = gallery_cell_size(main, window, columns);
     let sidebar = render_sidebar(main, cx, &translator);
     let add_images_button = render_add_images_button(&translator, cx);
-    let selected_group = main.selected_gallery_group_id.as_ref().and_then(|id| {
-        main.gallery_groups
-            .iter()
-            .find(|group| group.id == *id)
-    });
+    let selected_group = main
+        .selected_gallery_group_id
+        .as_ref()
+        .and_then(|id| main.gallery_groups.iter().find(|group| group.id == *id));
     let mut search_actions = div()
         .flex()
         .items_center()
@@ -138,12 +134,7 @@ pub(crate) fn render(
         ));
     }
     let search_actions = search_actions.child(add_images_button).into_any_element();
-    let search_box = symbol_search::render(
-        main,
-        window,
-        cx,
-        Some(search_actions),
-    );
+    let search_box = symbol_search::render(main, window, cx, Some(search_actions));
     let content = render_group_content(main, window, columns, cell_size, cx, &translator);
 
     symbol_layout::render(sidebar, search_box, content, cx)
@@ -220,13 +211,10 @@ pub(crate) fn render_gallery_import_overlay(
 }
 
 fn gallery_grid_columns(main: &MainWindow, window: &Window) -> u16 {
-    let viewport_width = f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
+    let viewport_width =
+        f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
     let main_sidebar_width = if crate::windows::main::uses_sidebar_layout(viewport_width) {
-        if main.sidebar_collapsed {
-            56.0
-        } else {
-            132.0
-        }
+        if main.sidebar_collapsed { 56.0 } else { 132.0 }
     } else {
         0.0
     };
@@ -235,20 +223,16 @@ fn gallery_grid_columns(main: &MainWindow, window: &Window) -> u16 {
         - symbol_sidebar::TAB_BAR_HEIGHT
         - GALLERY_GRID_HORIZONTAL_PADDING * 2.0)
         .max(0.0);
-    let columns_for_max_size = ((content_width + GALLERY_GRID_GAP)
-        / (GALLERY_CELL_MAX_WIDTH + GALLERY_GRID_GAP))
-        .ceil();
+    let columns_for_max_size =
+        ((content_width + GALLERY_GRID_GAP) / (GALLERY_CELL_MAX_WIDTH + GALLERY_GRID_GAP)).ceil();
     (columns_for_max_size as u16).clamp(1, GALLERY_MAX_COLUMNS)
 }
 
 fn gallery_cell_size(main: &MainWindow, window: &Window, columns: u16) -> f32 {
-    let viewport_width = f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
+    let viewport_width =
+        f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
     let main_sidebar_width = if crate::windows::main::uses_sidebar_layout(viewport_width) {
-        if main.sidebar_collapsed {
-            56.0
-        } else {
-            132.0
-        }
+        if main.sidebar_collapsed { 56.0 } else { 132.0 }
     } else {
         0.0
     };
@@ -281,12 +265,7 @@ fn render_add_images_button(
         .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
         .hover(|this| this.bg(theme.secondary_hover))
         .on_click(cx.listener(move |_, _, window, cx| {
-            choose_gallery_images(
-                main_window.clone(),
-                window,
-                cx,
-                &translator_for_click,
-            );
+            choose_gallery_images(main_window.clone(), window, cx, &translator_for_click);
         }))
         .child(hover_icon(
             "gallery-add-images",
@@ -424,7 +403,9 @@ fn render_group_button(
         .rounded_lg()
         .cursor_pointer()
         .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-        .when(!active, |this| this.hover(|this| this.bg(theme.secondary_hover)))
+        .when(!active, |this| {
+            this.hover(|this| this.bg(theme.secondary_hover))
+        })
         .on_click(cx.listener(move |this, _, window, cx| {
             if this.selected_gallery_group_id.as_deref() == Some(group_id.as_str()) {
                 this.refresh_gallery_images(cx);
@@ -475,26 +456,28 @@ fn render_group_button(
                     drag.source_group_id.as_deref() != Some(target_group_id_for_check.as_str())
                 })
         })
-        .on_drag_move(cx.listener(move |_, event: &DragMoveEvent<GalleryImageDrag>, window, cx| {
-            let Some(drag) = event.dragged_item().downcast_ref::<GalleryImageDrag>() else {
-                return;
-            };
-            if drag.source_group_id.as_deref() == Some(target_group_id_for_scale.as_str())
-                || !event.bounds.contains(&window.mouse_position())
-            {
-                return;
-            }
-            if drag
-                .preview_scale
-                .replace(GALLERY_DRAG_PREVIEW_ACCEPT_SCALE)
-                != GALLERY_DRAG_PREVIEW_ACCEPT_SCALE
-            {
-                #[cfg(target_os = "windows")]
-                DragPreviewService::refresh(cx);
-            }
-            #[cfg(not(target_os = "windows"))]
-            let _ = cx;
-        }))
+        .on_drag_move(cx.listener(
+            move |_, event: &DragMoveEvent<GalleryImageDrag>, window, cx| {
+                let Some(drag) = event.dragged_item().downcast_ref::<GalleryImageDrag>() else {
+                    return;
+                };
+                if drag.source_group_id.as_deref() == Some(target_group_id_for_scale.as_str())
+                    || !event.bounds.contains(&window.mouse_position())
+                {
+                    return;
+                }
+                if drag
+                    .preview_scale
+                    .replace(GALLERY_DRAG_PREVIEW_ACCEPT_SCALE)
+                    != GALLERY_DRAG_PREVIEW_ACCEPT_SCALE
+                {
+                    #[cfg(target_os = "windows")]
+                    DragPreviewService::refresh(cx);
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = cx;
+            },
+        ))
         .on_drop(cx.listener(move |this, drag: &GalleryImageDrag, _, cx| {
             if drag.source_group_id.as_deref() == Some(target_group_id_for_drop.as_str()) {
                 return;
@@ -702,9 +685,9 @@ fn render_gallery_drop_target(
             if phase != DispatchPhase::Bubble {
                 return;
             }
-            let is_file_drag = cx.active_drag().is_some_and(|drag| {
-                drag.value.downcast_ref::<ExternalPaths>().is_some()
-            });
+            let is_file_drag = cx
+                .active_drag()
+                .is_some_and(|drag| drag.value.downcast_ref::<ExternalPaths>().is_some());
             let hovering = is_file_drag && hitbox.is_hovered(window);
             main_window_for_move.update(cx, |main, cx| {
                 if main.gallery_drop_hovering != hovering {
@@ -718,24 +701,22 @@ fn render_gallery_drop_target(
                 |_, _, _| (),
                 move |_, _, window, _| {
                     let main_window = main_window_for_reset.clone();
-                    window.on_mouse_event(
-                        move |event: &FileDropEvent, phase, _, cx| {
-                            if phase != DispatchPhase::Bubble
-                                || !matches!(event, FileDropEvent::Exited | FileDropEvent::Ended)
-                            {
-                                return;
+                    window.on_mouse_event(move |event: &FileDropEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Bubble
+                            || !matches!(event, FileDropEvent::Exited | FileDropEvent::Ended)
+                        {
+                            return;
+                        }
+                        let Some(main_window) = main_window.upgrade() else {
+                            return;
+                        };
+                        let _ = main_window.update(cx, |main, cx| {
+                            if main.gallery_drop_hovering {
+                                main.gallery_drop_hovering = false;
+                                cx.notify();
                             }
-                            let Some(main_window) = main_window.upgrade() else {
-                                return;
-                            };
-                            let _ = main_window.update(cx, |main, cx| {
-                                if main.gallery_drop_hovering {
-                                    main.gallery_drop_hovering = false;
-                                    cx.notify();
-                                }
-                            });
-                        },
-                    );
+                        });
+                    });
                 },
             )
             .absolute()
@@ -788,7 +769,8 @@ fn render_gallery_grid(
 ) -> AnyElement {
     let columns = usize::from(columns.max(1));
     let rows = images.len().div_ceil(columns);
-    let row_height = cell_size + GALLERY_GRID_VERTICAL_PADDING * 2.0 * crate::ui::scale::window_scale(window);
+    let row_height =
+        cell_size + GALLERY_GRID_VERTICAL_PADDING * 2.0 * crate::ui::scale::window_scale(window);
     let total_height = row_height * rows as f32;
     let max_offset = f32::from(main.gallery_scroll_handle.max_offset().y);
     let viewport_height = if max_offset > 0.0 && max_offset < total_height {
@@ -859,7 +841,11 @@ fn render_gallery_row(
         .gap(ui_rem(GALLERY_GRID_GAP))
         .px(ui_rem(GALLERY_GRID_HORIZONTAL_PADDING))
         .py(ui_rem(GALLERY_GRID_VERTICAL_PADDING))
-        .children(images.iter().map(|image| render_gallery_image(image, main, cx)))
+        .children(
+            images
+                .iter()
+                .map(|image| render_gallery_image(image, main, cx)),
+        )
         .into_any_element()
 }
 
@@ -893,7 +879,13 @@ fn render_gallery_image(
                 .rounded_lg()
                 .into_any_element()
         })
-        .unwrap_or_else(|| div().size_full().rounded_lg().bg(cx.theme().colors.secondary).into_any_element());
+        .unwrap_or_else(|| {
+            div()
+                .size_full()
+                .rounded_lg()
+                .bg(cx.theme().colors.secondary)
+                .into_any_element()
+        });
     let mut tile = div()
         .id(format!("gallery-image-{}", image.name))
         .w_full()
@@ -907,10 +899,7 @@ fn render_gallery_image(
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .ring_2()
         .ring_color(transparent_black())
-        .hover(|this| {
-            this.bg(theme.secondary_hover)
-                .ring_color(theme.primary)
-        })
+        .hover(|this| this.bg(theme.secondary_hover).ring_color(theme.primary))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.paste_gallery_image(click_path.clone(), cx);
         }))
@@ -1001,11 +990,13 @@ fn render_gallery_image(
         let move_item = if move_items.is_empty() {
             MenuItem::submenu(
                 translator.translate("main.gallery.menu.move_to_group"),
-                vec![MenuItem::action(
-                    MenuActionId::new("move-gallery-none"),
-                    translator.translate("main.gallery.menu.no_other_group"),
-                )
-                .disabled()],
+                vec![
+                    MenuItem::action(
+                        MenuActionId::new("move-gallery-none"),
+                        translator.translate("main.gallery.menu.no_other_group"),
+                    )
+                    .disabled(),
+                ],
             )
         } else {
             MenuItem::submenu(
@@ -1036,11 +1027,8 @@ fn render_gallery_image(
         let image_name = image_name.clone();
         let main_window = main_window.clone();
         let owner_window = window.window_handle();
-        let position = crate::windows::menu::MenuPosition::new(
-            anchor.x,
-            anchor.y,
-            window.scale_factor(),
-        );
+        let position =
+            crate::windows::menu::MenuPosition::new(anchor.x, anchor.y, window.scale_factor());
         MenuService::open_context_menu(
             menu,
             position,
@@ -1207,12 +1195,7 @@ fn empty_state(
             .bg(theme.primary)
             .hover(|this| this.bg(theme.primary_hover))
             .on_click(cx.listener(move |_, _, window, cx| {
-                choose_gallery_images(
-                    main_window.clone(),
-                    window,
-                    cx,
-                    &translator_for_click,
-                );
+                choose_gallery_images(main_window.clone(), window, cx, &translator_for_click);
             }))
             .child(translator.translate("main.gallery.choose_images"))
             .into_any_element()
@@ -1241,12 +1224,7 @@ fn empty_state(
                         .border_2()
                         .border_dashed()
                         .border_color(theme.border)
-                        .child(hover_icon(
-                            "gallery-empty",
-                            "photo",
-                            40.0,
-                            theme.foreground,
-                        )),
+                        .child(hover_icon("gallery-empty", "photo", 40.0, theme.foreground)),
                 )
                 .child(
                     div()
@@ -1319,9 +1297,7 @@ fn open_edit_group_form(
         move |window, cx| {
             let delete_main_window = main_window.clone();
             let on_saved = move |group, cx: &mut App| {
-                main_window.update(cx, |this, cx| {
-                    this.update_image_library_group(group, cx)
-                });
+                main_window.update(cx, |this, cx| this.update_image_library_group(group, cx));
             };
             let on_deleted = move |group_id: String, cx: &mut App| {
                 delete_main_window.update(cx, |this, cx| {
@@ -1353,9 +1329,8 @@ fn open_rename_gallery_image_form(
             crate::windows::dialog::DialogMode::Modal,
             move |window, cx| {
                 let on_saved = move |new_name, cx: &mut App| {
-                    main_window.update(cx, |this, cx| {
-                        this.rename_gallery_image(path, new_name, cx)
-                    });
+                    main_window
+                        .update(cx, |this, cx| this.rename_gallery_image(path, new_name, cx));
                 };
                 cx.new(|cx| RenameGalleryImageForm::new(window, cx, name, on_saved))
             },
@@ -1424,8 +1399,7 @@ fn begin_external_file_drag(path: &PathBuf, window: &mut Window, cx: &mut App) {
     #[cfg(target_os = "windows")]
     {
         use crate::platform::{
-            clipboard::ClipboardPayload,
-            external_drag::ExternalDragService,
+            clipboard::ClipboardPayload, external_drag::ExternalDragService,
             image_temp_file::hdrop_bytes_for_paths,
         };
 

@@ -18,7 +18,9 @@ impl MiddleMouseRuntime {
         let (sender, receiver) = async_channel::unbounded();
         let state_for_input = state.clone();
         let subscription = Listen::subscribe(move |event| {
-            let mut state = state_for_input.lock().unwrap_or_else(|error| error.into_inner());
+            let mut state = state_for_input
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             if let Some(press) = state.handle_event(event, Instant::now()) {
                 let _ = sender.try_send(press);
             }
@@ -28,18 +30,27 @@ impl MiddleMouseRuntime {
             while let Ok((generation, deadline)) = receiver.recv().await {
                 let state = state_for_events.clone();
                 cx.spawn(async move |cx| {
-                    cx.background_executor().timer(deadline.saturating_duration_since(Instant::now())).await;
+                    cx.background_executor()
+                        .timer(deadline.saturating_duration_since(Instant::now()))
+                        .await;
                     cx.update(|cx| {
-                        let fire = state.lock().unwrap_or_else(|error| error.into_inner())
+                        let fire = state
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
                             .complete(generation, Instant::now());
                         if fire {
                             crate::windows::main::toggle_main_window(cx);
                         }
                     });
-                }).detach();
+                })
+                .detach();
             }
-        }).detach();
-        Self { state, subscription: Some(subscription) }
+        })
+        .detach();
+        Self {
+            state,
+            subscription: Some(subscription),
+        }
     }
 
     pub(super) fn configure(&self, config: MiddleMouseShortcutConfig, available: bool) {
@@ -80,34 +91,45 @@ impl HoldState {
     }
 
     fn modifiers_match(&self) -> bool {
-        let control = self.keys.contains(&Key::ControlLeft) || self.keys.contains(&Key::ControlRight);
+        let control =
+            self.keys.contains(&Key::ControlLeft) || self.keys.contains(&Key::ControlRight);
         let alt = self.keys.contains(&Key::AltLeft) || self.keys.contains(&Key::AltRight);
         let shift = self.keys.contains(&Key::ShiftLeft) || self.keys.contains(&Key::ShiftRight);
         let platform = self.keys.contains(&Key::MetaLeft) || self.keys.contains(&Key::MetaRight);
-        let expected = self.config.modifier.map(|modifier| modifier.binding_flags())
+        let expected = self
+            .config
+            .modifier
+            .map(|modifier| modifier.binding_flags())
             .unwrap_or((false, false, false));
         !platform && (control, alt, shift) == expected
     }
 
     fn handle_event(&mut self, event: Event, now: Instant) -> Option<(u64, Instant)> {
         match event {
-            Event::KeyDown { key, .. } => { self.keys.insert(key); }
-            Event::KeyUp { key, .. } => { self.keys.remove(&key); }
-            Event::MouseDown { button: MouseButton::Middle } => {
+            Event::KeyDown { key, .. } => {
+                self.keys.insert(key);
+            }
+            Event::KeyUp { key, .. } => {
+                self.keys.remove(&key);
+            }
+            Event::MouseDown {
+                button: MouseButton::Middle,
+            } => {
                 if self.middle_pressed {
                     return None;
                 }
                 self.middle_pressed = true;
                 if self.available && self.config.enabled && self.modifiers_match() {
                     self.generation = self.generation.wrapping_add(1);
-                    let deadline = now + Duration::from_millis(
-                        u64::from(self.config.hold_threshold_ms),
-                    );
+                    let deadline =
+                        now + Duration::from_millis(u64::from(self.config.hold_threshold_ms));
                     self.pending = Some((self.generation, deadline));
                     return self.pending;
                 }
             }
-            Event::MouseUp { button: MouseButton::Middle } => {
+            Event::MouseUp {
+                button: MouseButton::Middle,
+            } => {
                 self.middle_pressed = false;
                 self.pending = None;
             }
@@ -121,8 +143,11 @@ impl HoldState {
     }
 
     fn complete(&mut self, generation: u64, now: Instant) -> bool {
-        if !self.pending.is_some_and(|(pending, deadline)| pending == generation && now >= deadline)
-            || !self.available || !self.config.enabled
+        if !self
+            .pending
+            .is_some_and(|(pending, deadline)| pending == generation && now >= deadline)
+            || !self.available
+            || !self.config.enabled
         {
             return false;
         }
@@ -136,11 +161,19 @@ mod tests {
     use super::*;
     use crate::config::QuickPasteShortcutModifier;
 
-    const DOWN: Event = Event::MouseDown { button: MouseButton::Middle };
-    const UP: Event = Event::MouseUp { button: MouseButton::Middle };
+    const DOWN: Event = Event::MouseDown {
+        button: MouseButton::Middle,
+    };
+    const UP: Event = Event::MouseUp {
+        button: MouseButton::Middle,
+    };
 
     fn state(modifier: Option<QuickPasteShortcutModifier>) -> HoldState {
-        HoldState::new(MiddleMouseShortcutConfig { enabled: true, modifier, hold_threshold_ms: 200 })
+        HoldState::new(MiddleMouseShortcutConfig {
+            enabled: true,
+            modifier,
+            hold_threshold_ms: 200,
+        })
     }
 
     #[test]
@@ -165,13 +198,31 @@ mod tests {
         let now = Instant::now();
         assert!(state.handle_event(DOWN, now).is_none());
         state.handle_event(UP, now);
-        state.handle_event(Event::KeyDown { key: Key::ControlRight, code: None }, now);
+        state.handle_event(
+            Event::KeyDown {
+                key: Key::ControlRight,
+                code: None,
+            },
+            now,
+        );
         let (generation, deadline) = state.handle_event(DOWN, now).unwrap();
         state.handle_event(UP, deadline - Duration::from_millis(1));
         assert!(!state.complete(generation, deadline));
         let (generation, deadline) = state.handle_event(DOWN, now).unwrap();
-        state.handle_event(Event::KeyUp { key: Key::ControlRight, code: None }, now);
-        state.handle_event(Event::KeyDown { key: Key::ControlRight, code: None }, now);
+        state.handle_event(
+            Event::KeyUp {
+                key: Key::ControlRight,
+                code: None,
+            },
+            now,
+        );
+        state.handle_event(
+            Event::KeyDown {
+                key: Key::ControlRight,
+                code: None,
+            },
+            now,
+        );
         assert!(!state.complete(generation, deadline));
     }
 
@@ -179,13 +230,31 @@ mod tests {
     fn middle_mouse_none_rejects_modifiers_and_pause_cancels_pending() {
         let mut state = state(None);
         let now = Instant::now();
-        state.handle_event(Event::KeyDown { key: Key::MetaLeft, code: None }, now);
+        state.handle_event(
+            Event::KeyDown {
+                key: Key::MetaLeft,
+                code: None,
+            },
+            now,
+        );
         assert!(state.handle_event(DOWN, now).is_none());
         state.handle_event(UP, now);
-        state.handle_event(Event::KeyUp { key: Key::MetaLeft, code: None }, now);
+        state.handle_event(
+            Event::KeyUp {
+                key: Key::MetaLeft,
+                code: None,
+            },
+            now,
+        );
         let (generation, deadline) = state.handle_event(DOWN, now).unwrap();
-        let runtime = MiddleMouseRuntime { state: Arc::new(Mutex::new(state)), subscription: None };
-        let config = MiddleMouseShortcutConfig { enabled: true, ..Default::default() };
+        let runtime = MiddleMouseRuntime {
+            state: Arc::new(Mutex::new(state)),
+            subscription: None,
+        };
+        let config = MiddleMouseShortcutConfig {
+            enabled: true,
+            ..Default::default()
+        };
         runtime.configure(config, false);
         runtime.configure(config, true);
         assert!(!runtime.state.lock().unwrap().complete(generation, deadline));
@@ -197,10 +266,22 @@ mod tests {
             let mut state = state(Some(QuickPasteShortcutModifier::Control));
             let now = Instant::now();
             state.handle_event(Event::KeyDown { key, code: None }, now);
-            state.handle_event(Event::KeyDown { key: Key::ShiftLeft, code: None }, now);
+            state.handle_event(
+                Event::KeyDown {
+                    key: Key::ShiftLeft,
+                    code: None,
+                },
+                now,
+            );
             assert!(state.handle_event(DOWN, now).is_none());
             state.handle_event(UP, now);
-            state.handle_event(Event::KeyUp { key: Key::ShiftLeft, code: None }, now);
+            state.handle_event(
+                Event::KeyUp {
+                    key: Key::ShiftLeft,
+                    code: None,
+                },
+                now,
+            );
             let (generation, deadline) = state.handle_event(DOWN, now).unwrap();
             assert!(state.complete(generation, deadline));
         }
@@ -214,10 +295,18 @@ mod tests {
         state.handle_event(UP, now);
         state.config.enabled = true;
         let (generation, deadline) = state.handle_event(DOWN, now).unwrap();
-        let runtime = MiddleMouseRuntime { state: Arc::new(Mutex::new(state)), subscription: None };
-        runtime.configure(MiddleMouseShortcutConfig {
-            enabled: true, hold_threshold_ms: 1000, ..Default::default()
-        }, true);
+        let runtime = MiddleMouseRuntime {
+            state: Arc::new(Mutex::new(state)),
+            subscription: None,
+        };
+        runtime.configure(
+            MiddleMouseShortcutConfig {
+                enabled: true,
+                hold_threshold_ms: 1000,
+                ..Default::default()
+            },
+            true,
+        );
         let mut state = runtime.state.lock().unwrap();
         assert!(!state.complete(generation, deadline));
         assert!(state.handle_event(DOWN, deadline).is_none());
