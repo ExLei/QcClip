@@ -143,8 +143,7 @@ mod windows_clipboard {
     };
 
     use clipboard_rs::{
-        Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
-        WatcherShutdown,
+        ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext, WatcherShutdown,
     };
     use thiserror::Error;
     use windows::{
@@ -162,7 +161,10 @@ mod windows_clipboard {
                     QueryFullProcessImageNameW,
                 },
             },
-            UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId},
+            UI::{
+                Shell::{DragQueryFileW, HDROP},
+                WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId},
+            },
         },
         core::{PCWSTR, PWSTR},
     };
@@ -195,30 +197,24 @@ mod windows_clipboard {
         Enumerate(String),
     }
 
-    pub struct WindowsClipboardSource {
-        context: ClipboardContext,
-    }
+    pub struct WindowsClipboardSource;
 
     impl WindowsClipboardSource {
-        pub fn new() -> Result<Self, SystemClipboardError> {
-            ClipboardContext::new()
-                .map(|context| Self { context })
-                .map_err(|error| SystemClipboardError::Initialize(error.to_string()))
+        pub fn new() -> Self {
+            Self
         }
 
         pub fn capture_current(&self) -> Result<Option<CapturedClipboard>, SystemClipboardError> {
-            let native_formats = enumerate_native_formats()?;
+            // 枚举、原始格式和文件摘要共用一次打开，避免外部工具在读取中途替换内容。
+            let clipboard = ClipboardGuard::open().map_err(SystemClipboardError::Enumerate)?;
+            let native_formats = clipboard.formats();
             if should_ignore_clipboard(&native_formats, |format_id| {
-                read_with_retry(|| read_native_buffer(format_id))
+                clipboard.read_buffer(format_id)
             }) {
                 tracing::debug!("剪贴板忽略标记已跳过本次捕获");
                 return Ok(None);
             }
             let source_application = source_application();
-            let library_formats = self
-                .context
-                .available_formats()
-                .map_err(|error| SystemClipboardError::Enumerate(error.to_string()))?;
             let mut formats = Vec::with_capacity(native_formats.len());
             for (order, native_format) in native_formats.into_iter().enumerate() {
                 let kind = classify_format(native_format.id, &native_format.name);
@@ -227,22 +223,10 @@ mod windows_clipboard {
                     continue;
                 }
                 let unsupported = uses_non_global_handle(native_format.id);
-                let library_can_read = native_format.id >= 0xc000
-                    && library_formats
-                        .iter()
-                        .any(|name| name == &native_format.name);
                 let read_result = if unsupported {
                     None
                 } else {
-                    Some(read_with_retry(|| {
-                        if library_can_read {
-                            self.context
-                                .get_buffer(&native_format.name)
-                                .map_err(|error| error.to_string())
-                        } else {
-                            read_native_buffer(native_format.id)
-                        }
-                    }))
+                    Some(clipboard.read_buffer(native_format.id))
                 };
 
                 let mut format = match read_result {
@@ -269,7 +253,7 @@ mod windows_clipboard {
                     }
                     Some(Err(error)) => {
                         tracing::warn!(format_id = native_format.id, format_key = %key,
-                            source = ?source_application, %error, "重试后仍无法读取剪贴板格式");
+                            source = ?source_application, %error, "无法读取剪贴板格式");
                         RawFormat::failed(
                             "windows",
                             key,
@@ -277,7 +261,7 @@ mod windows_clipboard {
                             kind,
                             order as u32,
                             "clipboard_read_failed",
-                            format!("重试后仍无法读取该格式：{error}"),
+                            format!("无法读取该格式：{error}"),
                         )
                     }
                 };
@@ -293,26 +277,13 @@ mod windows_clipboard {
             let preview_candidate = if formats.iter().any(|format| {
                 format.format_kind == FormatKind::FileList && format.capture_state.has_data()
             }) {
-                self.context
-                    .get_files()
+                clipboard
+                    .file_list_preview()
                     .map_err(|error| {
                         tracing::warn!(%error, "读取剪贴板文件列表摘要失败");
                         error
                     })
                     .ok()
-                    .map(|files| {
-                        let count = files.len();
-                        let first = files.first().map(|file| {
-                            Path::new(file)
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .unwrap_or(file)
-                        });
-                        first.map_or_else(
-                            || format!("{count} 个文件"),
-                            |name| format!("{count} 个文件 · {name}"),
-                        )
-                    })
             } else {
                 None
             };
@@ -362,7 +333,7 @@ mod windows_clipboard {
         pub fn start(
             suppressor: ClipboardWriteSuppressor,
         ) -> Result<(Self, super::ClipboardEventReceiver), SystemClipboardError> {
-            let source = WindowsClipboardSource::new()?;
+            let source = WindowsClipboardSource::new();
             let initial = match source.capture_current() {
                 Ok(initial) => initial,
                 Err(error) => {
@@ -648,62 +619,71 @@ mod windows_clipboard {
             }
             Err(last_error.unwrap_or_else(|| "未知错误".to_owned()))
         }
+
+        fn formats(&self) -> Vec<NativeFormat> {
+            let mut formats = Vec::new();
+            let mut current = 0_u32;
+            loop {
+                // SAFETY: 当前守卫持有剪贴板，格式枚举始终属于同一次打开。
+                current = unsafe { EnumClipboardFormats(current) };
+                if current == 0 {
+                    break;
+                }
+                formats.push(NativeFormat {
+                    id: current,
+                    name: native_format_name(current),
+                });
+            }
+            formats
+        }
+
+        fn read_buffer(&self, format_id: u32) -> Result<Vec<u8>, String> {
+            // SAFETY: 剪贴板在守卫的整个生命周期内保持打开，句柄仅在此期间读取。
+            let handle =
+                unsafe { GetClipboardData(format_id) }.map_err(|error| error.to_string())?;
+            let memory = HGLOBAL(handle.0);
+            let byte_length = unsafe { GlobalSize(memory) };
+            if byte_length == 0 {
+                return Ok(Vec::new());
+            }
+            let pointer = unsafe { GlobalLock(memory) };
+            if pointer.is_null() {
+                return Err("无法锁定剪贴板全局内存".to_owned());
+            }
+            // SAFETY: pointer 指向已锁定的全局内存，长度由 GlobalSize 获取。
+            let bytes =
+                unsafe { slice::from_raw_parts(pointer.cast::<u8>(), byte_length) }.to_vec();
+            let _ = unsafe { GlobalUnlock(memory) };
+            Ok(bytes)
+        }
+
+        fn file_list_preview(&self) -> Result<String, String> {
+            // SAFETY: CF_HDROP 句柄及其查询均在当前剪贴板守卫存活期间使用。
+            let handle = unsafe { GetClipboardData(15) }.map_err(|error| error.to_string())?;
+            let drop_handle = HDROP(handle.0);
+            let count = unsafe { DragQueryFileW(drop_handle, u32::MAX, None) };
+            if count == 0 {
+                return Ok("0 个文件".to_owned());
+            }
+            let length = unsafe { DragQueryFileW(drop_handle, 0, None) };
+            let mut buffer = vec![0_u16; length as usize + 1];
+            let copied = unsafe { DragQueryFileW(drop_handle, 0, Some(&mut buffer)) };
+            if copied == 0 {
+                return Ok(format!("{count} 个文件"));
+            }
+            let path = String::from_utf16_lossy(&buffer[..copied as usize]);
+            let name = Path::new(&path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&path);
+            Ok(format!("{count} 个文件 · {name}"))
+        }
     }
 
     impl Drop for ClipboardGuard {
         fn drop(&mut self) {
             let _ = unsafe { CloseClipboard() };
         }
-    }
-
-    fn enumerate_native_formats() -> Result<Vec<NativeFormat>, SystemClipboardError> {
-        let _guard = ClipboardGuard::open().map_err(SystemClipboardError::Enumerate)?;
-        let mut formats = Vec::new();
-        let mut current = 0_u32;
-        loop {
-            current = unsafe { EnumClipboardFormats(current) };
-            if current == 0 {
-                break;
-            }
-            formats.push(NativeFormat {
-                id: current,
-                name: native_format_name(current),
-            });
-        }
-        Ok(formats)
-    }
-
-    fn read_native_buffer(format_id: u32) -> Result<Vec<u8>, String> {
-        let _guard = ClipboardGuard::open()?;
-        let handle = unsafe { GetClipboardData(format_id) }.map_err(|error| error.to_string())?;
-        let memory = HGLOBAL(handle.0);
-        let byte_length = unsafe { GlobalSize(memory) };
-        if byte_length == 0 {
-            return Ok(Vec::new());
-        }
-        let pointer = unsafe { GlobalLock(memory) };
-        if pointer.is_null() {
-            return Err("无法锁定剪贴板全局内存".to_owned());
-        }
-        let bytes = unsafe { slice::from_raw_parts(pointer.cast::<u8>(), byte_length) }.to_vec();
-        let _ = unsafe { GlobalUnlock(memory) };
-        Ok(bytes)
-    }
-
-    fn read_with_retry(
-        mut operation: impl FnMut() -> Result<Vec<u8>, String>,
-    ) -> Result<Vec<u8>, String> {
-        let mut last_error = None;
-        for attempt in 0..READ_ATTEMPTS {
-            match operation() {
-                Ok(bytes) => return Ok(bytes),
-                Err(error) => last_error = Some(error),
-            }
-            if attempt + 1 < READ_ATTEMPTS {
-                thread::sleep(READ_RETRY_DELAY);
-            }
-        }
-        Err(last_error.unwrap_or_else(|| "未知错误".to_owned()))
     }
 
     fn native_format_name(format_id: u32) -> String {

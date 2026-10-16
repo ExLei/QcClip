@@ -21,13 +21,20 @@ pub(super) struct ClipboardObservation {
 
 struct PendingCapture {
     observation: ClipboardObservation,
-    fingerprint: [u8; 32],
+    fingerprint: Vec<FormatFingerprint>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FormatFingerprint {
+    namespace: String,
+    key: String,
+    data_hash: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ClipboardFingerprint {
     Empty,
-    Content([u8; 32]),
+    Content(Vec<FormatFingerprint>),
 }
 
 struct TransientClipboardFilter {
@@ -39,9 +46,10 @@ struct TransientClipboardFilter {
 impl TransientClipboardFilter {
     fn new(initial: Option<&CapturedClipboard>) -> Self {
         let baseline = initial.and_then(fingerprint);
+        let clipboard_is_empty = baseline == Some(ClipboardFingerprint::Empty);
         Self {
             baseline,
-            clipboard_is_empty: baseline == Some(ClipboardFingerprint::Empty),
+            clipboard_is_empty,
             pending: VecDeque::new(),
         }
     }
@@ -59,17 +67,19 @@ impl TransientClipboardFilter {
             return ready;
         };
 
-        // 临时内容可能未被捕获，还原也可能产生多次事件；稳定内容未变化时统一跳过。
-        if self.baseline == Some(ClipboardFingerprint::Content(fingerprint)) {
+        // 工具可能只还原部分格式；保留原基准，避免连续划词逐步丢失格式后被当作新内容。
+        if let Some(ClipboardFingerprint::Content(baseline)) = &self.baseline
+            && is_restored_content(baseline, &fingerprint)
+        {
             self.pending.clear();
-            tracing::debug!("剪贴板内容与稳定内容相同，跳过重复捕获或还原事件");
+            tracing::debug!("剪贴板内容与稳定内容一致或为其格式子集，跳过重复捕获或还原事件");
             return ready;
         }
 
         if let Some(index) = self
             .pending
             .iter()
-            .rposition(|pending| pending.fingerprint == fingerprint)
+            .rposition(|pending| is_restored_content(&pending.fingerprint, &fingerprint))
         {
             // 只撤销还原点之后的内容，保留此前尚未入库的正常复制。
             self.pending.truncate(index + 1);
@@ -107,17 +117,25 @@ impl TransientClipboardFilter {
     }
 }
 
+fn is_restored_content(reference: &[FormatFingerprint], current: &[FormatFingerprint]) -> bool {
+    !current.is_empty() && current.iter().all(|format| reference.contains(format))
+}
+
 fn fingerprint(captured: &CapturedClipboard) -> Option<ClipboardFingerprint> {
     if captured.formats.is_empty() {
         return Some(ClipboardFingerprint::Empty);
     }
-    let has_unicode = captured.formats.iter().any(|format| {
-        format.format_namespace == "windows"
-            && format.format_key == "CF_UNICODETEXT"
-            && format.capture_state.has_data()
-            && format.restore_state == RestoreState::Restorable
-            && format.bytes.as_ref().is_some_and(|bytes| !bytes.is_empty())
-    });
+    let has_format = |key: &str| {
+        captured.formats.iter().any(|format| {
+            format.format_namespace == "windows"
+                && format.format_key == key
+                && format.capture_state.has_data()
+                && format.restore_state == RestoreState::Restorable
+                && format.bytes.as_ref().is_some_and(|bytes| !bytes.is_empty())
+        })
+    };
+    let has_unicode = has_format("CF_UNICODETEXT");
+    let has_dibv5 = has_format("CF_DIBV5");
     let mut formats = captured
         .formats
         .iter()
@@ -130,8 +148,10 @@ fn fingerprint(captured: &CapturedClipboard) -> Option<ClipboardFingerprint> {
                 return None;
             }
             if format.format_namespace == "windows" {
-                // ANSI 派生文本和控制标记不属于还原比对内容，避免编码或元数据变化干扰判断。
-                if has_unicode && matches!(format.format_key.as_str(), "CF_TEXT" | "CF_OEMTEXT") {
+                // 派生文本和位图可能被系统重新转换，优先比对 Unicode 文本和 DIBV5。
+                if (has_unicode && matches!(format.format_key.as_str(), "CF_TEXT" | "CF_OEMTEXT"))
+                    || (has_dibv5 && format.format_key == "CF_DIB")
+                {
                     return None;
                 }
                 if [
@@ -146,15 +166,24 @@ fn fingerprint(captured: &CapturedClipboard) -> Option<ClipboardFingerprint> {
                 }
             }
             let bytes = format.bytes.as_deref().filter(|bytes| !bytes.is_empty())?;
-            Some((
-                format.format_namespace.as_str(),
-                format.format_key.as_str(),
-                normalize_text_bytes(&format.format_namespace, &format.format_key, bytes),
-            ))
+            Some(FormatFingerprint {
+                namespace: format.format_namespace.clone(),
+                key: format.format_key.clone(),
+                data_hash: hash_format_set([(
+                    format.format_namespace.as_str(),
+                    format.format_key.as_str(),
+                    normalize_text_bytes(&format.format_namespace, &format.format_key, bytes),
+                )]),
+            })
         })
-        .peekable();
-    formats.peek()?;
-    Some(ClipboardFingerprint::Content(hash_format_set(formats)))
+        .collect::<Vec<_>>();
+    if formats.is_empty() {
+        return None;
+    }
+    formats.sort_unstable_by(|left, right| {
+        (&left.namespace, &left.key).cmp(&(&right.namespace, &right.key))
+    });
+    Some(ClipboardFingerprint::Content(formats))
 }
 
 pub(super) fn filter_events(
@@ -227,6 +256,170 @@ mod tests {
             observed_at,
             recordable,
         }
+    }
+
+    fn excel_clipboard() -> CapturedClipboard {
+        let mut captured = text("Excel 原文本");
+        for (index, (key, kind)) in [
+            ("registered:Biff8", FormatKind::Custom),
+            ("registered:HTML Format", FormatKind::Html),
+            ("registered:Csv", FormatKind::Custom),
+            ("registered:Object Descriptor", FormatKind::Custom),
+            ("CF_DIB", FormatKind::Image),
+            ("CF_DIBV5", FormatKind::Image),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            captured.formats.push(RawFormat::captured(
+                "windows",
+                key,
+                key,
+                kind,
+                vec![index as u8 + 1; 4],
+                index as u32 + 1,
+                true,
+            ));
+        }
+        captured
+    }
+
+    fn partially_restored_excel() -> CapturedClipboard {
+        let mut captured = excel_clipboard();
+        captured.formats.retain(|format| {
+            !matches!(
+                format.format_key.as_str(),
+                "registered:Biff8" | "registered:HTML Format"
+            )
+        });
+        captured
+    }
+
+    #[test]
+    fn partial_excel_restores_and_derived_bitmap_changes_do_not_emit_fragments() {
+        let now = Instant::now();
+        let original = excel_clipboard();
+        let partial = partially_restored_excel();
+        let mut image_only = partial.clone();
+        image_only
+            .formats
+            .retain(|format| matches!(format.format_key.as_str(), "CF_DIB" | "CF_DIBV5"));
+        image_only
+            .formats
+            .iter_mut()
+            .find(|format| format.format_key == "CF_DIB")
+            .unwrap()
+            .bytes = Some(vec![99; 4]);
+        let mut filter = TransientClipboardFilter::new(Some(&original));
+        for (index, restored) in [partial, image_only].into_iter().enumerate() {
+            let start = now + Duration::from_secs(index as u64);
+            assert!(
+                filter
+                    .observe(observation(text("划词内容"), start, true))
+                    .is_empty()
+            );
+            assert!(
+                filter
+                    .observe(observation(
+                        restored,
+                        start + Duration::from_millis(50),
+                        true
+                    ))
+                    .is_empty()
+            );
+            assert!(filter.take_ready(start + RESTORE_WINDOW).is_empty());
+        }
+        assert_eq!(filter.baseline, fingerprint(&original));
+    }
+
+    #[test]
+    fn partial_restore_of_a_pending_excel_copy_retains_the_complete_original_once() {
+        let now = Instant::now();
+        let original = excel_clipboard();
+        let mut filter = TransientClipboardFilter::new(Some(&text("之前的内容")));
+        filter.observe(observation(original.clone(), now, true));
+        filter.observe(observation(
+            text("划词内容"),
+            now + Duration::from_millis(50),
+            true,
+        ));
+        filter.observe(observation(
+            partially_restored_excel(),
+            now + Duration::from_millis(100),
+            true,
+        ));
+        assert_eq!(filter.take_ready(now + RESTORE_WINDOW), vec![original]);
+        assert!(filter.take_ready(now + Duration::from_secs(1)).is_empty());
+    }
+
+    #[test]
+    fn partial_restores_without_a_captured_selection_are_also_silent() {
+        let now = Instant::now();
+        let mut filter = TransientClipboardFilter::new(Some(&excel_clipboard()));
+        filter.observe(observation(partially_restored_excel(), now, true));
+        assert!(filter.take_ready(now + RESTORE_WINDOW).is_empty());
+    }
+
+    #[test]
+    fn changed_primary_bitmap_or_rich_text_is_still_recorded() {
+        let now = Instant::now();
+        let original = excel_clipboard();
+        for key in ["CF_DIBV5", "registered:HTML Format"] {
+            let mut changed = original.clone();
+            changed
+                .formats
+                .iter_mut()
+                .find(|format| format.format_key == key)
+                .unwrap()
+                .bytes = Some(vec![99; 4]);
+            let mut filter = TransientClipboardFilter::new(Some(&original));
+            filter.observe(observation(changed.clone(), now, true));
+            assert_eq!(filter.take_ready(now + RESTORE_WINDOW), vec![changed]);
+        }
+    }
+
+    #[test]
+    fn adding_a_new_format_to_existing_content_is_still_recorded() {
+        let now = Instant::now();
+        let original = excel_clipboard();
+        let mut changed = original.clone();
+        changed.formats.push(RawFormat::captured(
+            "windows",
+            "registered:PNG",
+            "PNG",
+            FormatKind::Image,
+            vec![9; 4],
+            10,
+            true,
+        ));
+        let mut filter = TransientClipboardFilter::new(Some(&original));
+        filter.observe(observation(changed.clone(), now, true));
+        assert_eq!(filter.take_ready(now + RESTORE_WINDOW), vec![changed]);
+    }
+
+    #[test]
+    fn worker_filters_excel_format_fragments_and_keeps_a_later_normal_copy() {
+        let now = Instant::now() - Duration::from_secs(2);
+        let normal = text("正常复制");
+        let (input, receiver) = std::sync::mpsc::channel();
+        let (sender, output) = std::sync::mpsc::channel();
+        for (captured, delay) in [
+            (text("划词内容"), 0),
+            (partially_restored_excel(), 50),
+            (normal.clone(), 500),
+            (text("关闭时尚未确认"), 900),
+        ] {
+            input
+                .send(Ok(observation(
+                    captured,
+                    now + Duration::from_millis(delay),
+                    true,
+                )))
+                .unwrap();
+        }
+        drop(input);
+        filter_events(receiver, sender, Some(excel_clipboard()));
+        assert_eq!(output.into_iter().collect::<Vec<_>>(), vec![Ok(normal)]);
     }
 
     fn invalid_snapshots() -> Vec<CapturedClipboard> {
