@@ -112,7 +112,7 @@ impl WindowsWindowInner {
             WM_QUERYENDSESSION => Some(1),
             WM_ENDSESSION => self.handle_end_session_msg(wparam),
             WM_MOUSEMOVE => self.handle_mouse_move_msg(handle, lparam, wparam),
-            WM_MOUSELEAVE | WM_NCMOUSELEAVE => self.handle_mouse_leave_msg(),
+            WM_MOUSELEAVE | WM_NCMOUSELEAVE => self.handle_mouse_leave_msg(handle),
             WM_NCMOUSEMOVE => self.handle_nc_mouse_move_msg(handle, lparam),
             // Treat double click as a second single click, since we track the double clicks ourselves.
             // If you don't interact with any elements, this will fall through to the windows default
@@ -402,7 +402,7 @@ impl WindowsWindowInner {
         if handled { Some(0) } else { Some(1) }
     }
 
-    fn handle_mouse_leave_msg(&self) -> Option<isize> {
+    fn handle_mouse_leave_msg(&self, handle: HWND) -> Option<isize> {
         self.state.hovered.set(false);
         // The next window's `WM_SETCURSOR` picks its own cursor, so we just clear
         // the flag for tight `is_cursor_visible()` semantics.
@@ -415,22 +415,38 @@ impl WindowsWindowInner {
                 .set(Some(callback));
         }
 
-        // 离开窗口时补发输入事件，清除元素悬停状态，确保重新进入同一项时能再次触发预览。
+        // 客户区与标题栏切换也会产生离开消息，仅在鼠标确实位于其他窗口时清除元素悬停。
+        // 查询失败时不补发事件，避免误清空 GPUI 的标题栏命中缓存。
+        let mut cursor = POINT::default();
+        let cursor_outside_window =
+            unsafe { GetCursorPos(&mut cursor).is_ok() && WindowFromPoint(cursor) != handle };
         if let Some(mut callback) = self.state.callbacks.input.take() {
             let pressed_button = [
                 (VK_LBUTTON, MouseButton::Left),
                 (VK_RBUTTON, MouseButton::Right),
                 (VK_MBUTTON, MouseButton::Middle),
-                (VK_XBUTTON1, MouseButton::Navigate(NavigationDirection::Back)),
-                (VK_XBUTTON2, MouseButton::Navigate(NavigationDirection::Forward)),
+                (
+                    VK_XBUTTON1,
+                    MouseButton::Navigate(NavigationDirection::Back),
+                ),
+                (
+                    VK_XBUTTON2,
+                    MouseButton::Navigate(NavigationDirection::Forward),
+                ),
             ]
             .into_iter()
             .find_map(|(key, button)| is_virtual_key_pressed(key).then_some(button));
             // GetCapture 仅读取当前线程的捕获窗口，不涉及指针访问。
             let has_capture = unsafe { !GetCapture().is_invalid() };
-            dispatch_mouse_leave(pressed_button, has_capture, current_modifiers(), |event| {
-                callback(event);
-            });
+            dispatch_mouse_leave(
+                cursor_outside_window,
+                pressed_button,
+                has_capture,
+                current_modifiers(),
+                |event| {
+                    callback(event);
+                },
+            );
             self.state.callbacks.input.set(Some(callback));
         }
 
@@ -1736,12 +1752,17 @@ fn should_use_ime_cursor_position(ctx: HIMC, cursor_pos: usize) -> bool {
 }
 
 fn dispatch_mouse_leave(
+    cursor_outside_window: bool,
     pressed_button: Option<MouseButton>,
     has_capture: bool,
     modifiers: Modifiers,
     mut dispatch: impl FnMut(PlatformInput),
 ) {
-    // 离开消息可能延迟到鼠标返回后才处理，使用窗口外坐标清除旧命中状态。
+    // 鼠标仍在本窗口（含标题栏），或已重新进入时，不得清除当前命中和悬停状态。
+    if !cursor_outside_window {
+        return;
+    }
+    // 确认离开窗口后，使用窗口外坐标清除旧命中状态。
     let position = point(px(-1.0), px(-1.0));
     // GPUI 离开事件不会更新鼠标位置；按键或捕获期间禁止合成移动，以免干扰拖动。
     if pressed_button.is_none() && !has_capture {
@@ -1765,17 +1786,45 @@ mod tests {
     use gpui::{Modifiers, MouseButton, NavigationDirection, PlatformInput, px};
 
     #[test]
+    fn mouse_leave_with_cursor_still_over_window_does_not_clear_hover_or_hit_test() {
+        for pressed_button in [None, Some(MouseButton::Left)] {
+            for has_capture in [false, true] {
+                let mut events = Vec::new();
+                dispatch_mouse_leave(
+                    false,
+                    pressed_button,
+                    has_capture,
+                    Modifiers::default(),
+                    |event| events.push(event),
+                );
+                assert!(
+                    events.is_empty(),
+                    "区域切换或延迟离开消息不应清除当前悬停和标题栏命中"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn mouse_leave_while_pressing_a_button_does_not_interrupt_dragging() {
         for button in [
-            MouseButton::Left, MouseButton::Right, MouseButton::Middle,
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
             MouseButton::Navigate(NavigationDirection::Back),
             MouseButton::Navigate(NavigationDirection::Forward),
         ] {
             for has_capture in [false, true] {
                 let mut events = Vec::new();
-                dispatch_mouse_leave(Some(button), has_capture, Modifiers::default(), |event| {
-                    events.push(event);
-                });
+                dispatch_mouse_leave(
+                    true,
+                    Some(button),
+                    has_capture,
+                    Modifiers::default(),
+                    |event| {
+                        events.push(event);
+                    },
+                );
                 assert_eq!(events.len(), 1, "按键按下时不应合成移动事件");
                 let PlatformInput::MouseExited(exit) = &events[0] else {
                     panic!("仍应发送鼠标离开事件");
@@ -1788,21 +1837,34 @@ mod tests {
     #[test]
     fn mouse_leave_with_capture_does_not_generate_a_move() {
         let mut events = Vec::new();
-        dispatch_mouse_leave(None, true, Modifiers::default(), |event| events.push(event));
-        assert!(matches!(events.as_slice(), [PlatformInput::MouseExited(_)]),
-            "鼠标被捕获时只应发送离开事件");
+        dispatch_mouse_leave(true, None, true, Modifiers::default(), |event| {
+            events.push(event)
+        });
+        assert!(
+            matches!(events.as_slice(), [PlatformInput::MouseExited(_)]),
+            "鼠标被捕获时只应发送离开事件"
+        );
     }
 
     #[test]
     fn mouse_leave_without_buttons_or_capture_clears_the_old_hit_position() {
-        let modifiers = Modifiers { control: true, ..Default::default() };
+        let modifiers = Modifiers {
+            control: true,
+            ..Default::default()
+        };
         let mut events = Vec::new();
-        dispatch_mouse_leave(None, false, modifiers, |event| events.push(event));
-        let [PlatformInput::MouseMove(movement), PlatformInput::MouseExited(exit)] = events.as_slice() else {
+        dispatch_mouse_leave(true, None, false, modifiers, |event| events.push(event));
+        let [
+            PlatformInput::MouseMove(movement),
+            PlatformInput::MouseExited(exit),
+        ] = events.as_slice()
+        else {
             panic!("普通离开时应先同步窗口外坐标，再发送离开事件");
         };
-        assert!(movement.position.x < px(0.0) && movement.position.y < px(0.0),
-            "离开坐标必须位于窗口外，避免重新命中旧项");
+        assert!(
+            movement.position.x < px(0.0) && movement.position.y < px(0.0),
+            "离开坐标必须位于窗口外，避免重新命中旧项"
+        );
         assert_eq!(exit.position, movement.position);
         assert_eq!(movement.modifiers, modifiers);
         assert_eq!(exit.modifiers, modifiers);
