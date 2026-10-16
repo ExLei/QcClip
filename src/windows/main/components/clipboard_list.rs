@@ -22,7 +22,6 @@ use gpui::{
     ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Window, canvas, div, img,
     linear_color_stop, linear_gradient, point, px, size,
 };
-use gpui_component::scroll::Scrollbar;
 use gpui_component::{
     ActiveTheme as _, ReorderableVirtualListSizes, ThemeColor, VirtualListScrollHandle,
     tooltip::Tooltip, v_flex, v_virtual_list_reorderable,
@@ -73,6 +72,7 @@ use crate::platform::external_drag::ExternalDragService;
 
 mod context_menu;
 mod metrics;
+mod heat_scrollbar;
 
 use context_menu::{
     favorite_item_context_menu, history_item_context_menu, parse_toggle_tag_action,
@@ -164,6 +164,8 @@ pub fn render(
     multi_selected_item_ids: &[HistoryItemId],
     list_status: &ListStatus,
     scroll_handle: &VirtualListScrollHandle,
+    heatmap: &mut crate::windows::main::state::ListHeatmap,
+    heat_scrollbar: &crate::windows::main::state::HeatScrollbarState,
     adaptive_item_heights: &mut HashMap<HistoryItemId, Pixels>,
     list_layout_cache: &mut Option<ListLayoutCache>,
     list_layout_generation: u64,
@@ -198,6 +200,8 @@ pub fn render(
             selected_item_id,
             multi_selected_item_ids,
             scroll_handle,
+            heatmap,
+            heat_scrollbar,
             adaptive_item_heights,
             list_layout_cache,
             list_layout_generation,
@@ -360,6 +364,8 @@ fn render_rows(
     selected_item_id: Option<HistoryItemId>,
     multi_selected_item_ids: &[HistoryItemId],
     scroll_handle: &VirtualListScrollHandle,
+    heatmap: &mut crate::windows::main::state::ListHeatmap,
+    heat_scrollbar: &crate::windows::main::state::HeatScrollbarState,
     adaptive_item_heights: &mut HashMap<HistoryItemId, Pixels>,
     list_layout_cache: &mut Option<ListLayoutCache>,
     list_layout_generation: u64,
@@ -440,13 +446,9 @@ fn render_rows(
                 size(list_width, row_height)
             })
             .collect::<Vec<_>>();
-        let total_height = sizes
-            .iter()
-            .fold(px(0.0), |height, item_size| height + item_size.height);
         ListLayoutCache {
             key: layout_key,
             sizes: ReorderableVirtualListSizes::new(sizes),
-            total_height,
         }
     };
     if list_layout_cache
@@ -526,7 +528,7 @@ fn render_rows(
                                 display_priority,
                                 file_count,
                                 available_preview_width(
-                                    window.viewport_size().width,
+                                    list_width,
                                     list_item_style,
                                     window.rem_size(),
                                 ),
@@ -676,14 +678,9 @@ fn render_rows(
         list = list.py(metrics.card_vertical_inset);
     }
 
-    let scroll_height = layout_cache.total_height
-        + match list_item_style {
-            ListItemStyle::Seamless => px(0.0),
-            ListItemStyle::Card => metrics.card_vertical_inset * 2.0,
-        };
-
     let list_container = div()
         .id("clipboard-list-drop-surface")
+        .relative()
         .flex_grow_1()
         .min_h_0()
         .w_full()
@@ -720,7 +717,8 @@ fn render_rows(
             }
             this.handle_list_scroll_wheel(event, window, cx);
         }))
-        .child(list);
+        .child(list)
+        .child(heat_scrollbar::render(heatmap.buckets(), heat_scrollbar, scroll_handle, list_width, window, cx));
 
     v_flex()
         .flex_grow_1()
@@ -744,7 +742,6 @@ fn render_rows(
         )
         .child(list_container)
         .child(div().h(px(LIST_BOTTOM_BAR_HEIGHT)).w_full().flex_shrink_0())
-        .child(Scrollbar::vertical(scroll_handle).scroll_size(size(list_width, scroll_height)))
         .child(super::floating_toolbar::render(
             toolbar_bottom,
             toolbar_dragging,

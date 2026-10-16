@@ -215,6 +215,8 @@ impl MainWindow {
         self.adaptive_height_cache_key = None;
         self.invalidate_list_layout_cache();
         self.list_scroll_handle = VirtualListScrollHandle::new();
+        self.list_heatmap.replace(Vec::new());
+        self.heat_scrollbar = HeatScrollbarState::default();
         self.list_smooth_scroll.reset();
         self.emoji_smooth_scroll.reset();
         self.symbol_smooth_scroll.reset();
@@ -262,12 +264,12 @@ impl MainWindow {
         let history_repository = self.history_repository.clone();
         let favorite_repository = self.favorite_repository.clone();
         let query_task = cx.background_spawn(async move {
-            let order_ids = if active_tab == TabId::Favorites {
-                favorite_repository.ordered_ids(&query)?
+            let snapshot = if active_tab == TabId::Favorites {
+                favorite_repository.ordered_snapshot(&query)?
             } else {
-                history_repository.ordered_ids_scoped(&query, &policy)?
+                history_repository.ordered_snapshot_scoped(&query, &policy)?
             };
-            let initial_ids = order_ids
+            let initial_ids = snapshot.ids
                 .iter()
                 .take(INITIAL_PAGE_SIZE.saturating_add(1))
                 .copied()
@@ -277,7 +279,7 @@ impl MainWindow {
             } else {
                 history_repository.query_by_ids_scoped(&query, &initial_ids, &policy)?
             };
-            Ok((order_ids, records))
+            Ok((snapshot, records))
         });
         self.list_query_task = Some(cx.spawn(async move |this, cx| {
             let result = query_task.await;

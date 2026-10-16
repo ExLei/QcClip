@@ -33,6 +33,7 @@ struct VirtualListScrollHandleState {
     items_count: usize,
     /// Content bounds size (excluding padding and border) from the last frame.
     last_content_size: Option<Size<Pixels>>,
+    item_layout: Option<Rc<RefCell<ItemSizeLayout>>>,
     pub deferred_scroll_to_item: Option<DeferredScrollToItem>,
 }
 
@@ -93,6 +94,7 @@ impl VirtualListScrollHandle {
                 axis: Axis::Vertical,
                 items_count: 0,
                 last_content_size: None,
+                item_layout: None,
                 deferred_scroll_to_item: None,
             })),
             base_handle: ScrollHandle::default(),
@@ -102,6 +104,17 @@ impl VirtualListScrollHandle {
     /// Get the base scroll handle.
     pub fn base_handle(&self) -> &ScrollHandle {
         &self.base_handle
+    }
+
+    /// 返回最近布局中条目的起始坐标，index 等于条目数时返回内容末端。
+    pub fn item_offset(&self, index: usize) -> Option<Pixels> {
+        let state = self.state.borrow();
+        let layout = state.item_layout.as_ref()?.borrow();
+        if index == layout.sizes.len() {
+            Some(layout.content_size.along(state.axis))
+        } else {
+            layout.origins.get(index).copied()
+        }
     }
 
     /// Scroll to the item at the given index.
@@ -443,14 +456,11 @@ impl VirtualList {
     fn scroll_to_deferred_item(
         &self,
         scroll_offset: Point<Pixels>,
-        items_bounds: &[Bounds<Pixels>],
+        item_bounds: Option<Bounds<Pixels>>,
         content_bounds: &Bounds<Pixels>,
         scroll_to_item: DeferredScrollToItem,
     ) -> Point<Pixels> {
-        let Some(bounds) = items_bounds
-            .get(scroll_to_item.item_index + scroll_to_item.offset)
-            .cloned()
-        else {
+        let Some(bounds) = item_bounds else {
             return scroll_offset;
         };
 
@@ -518,7 +528,7 @@ impl VirtualList {
 pub struct VirtualListFrameState {
     /// Visible items to be painted.
     items: SmallVec<[AnyElement; 32]>,
-    size_layout: ItemSizeLayout,
+    size_layout: Rc<RefCell<ItemSizeLayout>>,
 }
 
 #[derive(Default, Clone)]
@@ -579,7 +589,7 @@ impl Element for VirtualList {
     ) -> (gpui::LayoutId, Self::RequestLayoutState) {
         let rem_size = window.rem_size();
         let font_size = window.text_style().font_size.to_pixels(rem_size);
-        let mut size_layout = ItemSizeLayout::default();
+        let mut size_layout = Rc::new(RefCell::new(ItemSizeLayout::default()));
         // Measure vertical lists at the last known content width so relative
         // widths and text truncation resolve like the visible rows; an
         // unconstrained measure would turn one long non-wrapping text into a
@@ -604,8 +614,10 @@ impl Element for VirtualList {
             |style, window, cx| {
                 size_layout = window.with_element_state(
                     global_id.unwrap(),
-                    |state: Option<ItemSizeLayout>, _window| {
-                        let mut state = state.unwrap_or(ItemSizeLayout::default());
+                    |state: Option<Rc<RefCell<ItemSizeLayout>>>, _window| {
+                        // 帧状态和滚动句柄共享布局，查询坐标时不复制全量行高数组。
+                        let shared = state.unwrap_or_default();
+                        let mut state = shared.borrow_mut();
 
                         // Including the gap between items for calculate the item size
                         let gap = style
@@ -642,7 +654,8 @@ impl Element for VirtualList {
                             state.content_size.width = longest_item_size.width;
                         }
 
-                        (state.clone(), state)
+                        drop(state);
+                        (shared.clone(), shared)
                     },
                 );
 
@@ -651,7 +664,7 @@ impl Element for VirtualList {
                     match self.sizing_behavior {
                         ListSizingBehavior::Infer => {
                             window.with_text_style(style.text_style().cloned(), |window| {
-                                let size_layout = size_layout.clone();
+                                let content_size = size_layout.borrow().content_size;
 
                                 window.request_measured_layout(style, {
                                     move |known_dimensions, available_space, _, _| {
@@ -662,7 +675,7 @@ impl Element for VirtualList {
                                                     AvailableSpace::Definite(x) => x,
                                                     AvailableSpace::MinContent
                                                     | AvailableSpace::MaxContent => {
-                                                        size_layout.content_size.width
+                                                        content_size.width
                                                     }
                                                 },
                                             );
@@ -671,7 +684,7 @@ impl Element for VirtualList {
                                                     AvailableSpace::Definite(x) => x,
                                                     AvailableSpace::MinContent
                                                     | AvailableSpace::MaxContent => {
-                                                        size_layout.content_size.height
+                                                        content_size.height
                                                     }
                                                 },
                                             );
@@ -681,7 +694,7 @@ impl Element for VirtualList {
                                                     AvailableSpace::Definite(x) => x,
                                                     AvailableSpace::MinContent
                                                     | AvailableSpace::MaxContent => {
-                                                        size_layout.content_size.width
+                                                        content_size.width
                                                     }
                                                 },
                                             );
@@ -690,7 +703,7 @@ impl Element for VirtualList {
                                                     AvailableSpace::Definite(x) => x,
                                                     AvailableSpace::MinContent
                                                     | AvailableSpace::MaxContent => {
-                                                        size_layout.content_size.height
+                                                        content_size.height
                                                     }
                                                 },
                                             );
@@ -729,7 +742,8 @@ impl Element for VirtualList {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        layout.size_layout.last_layout_bounds = bounds;
+        layout.size_layout.borrow_mut().last_layout_bounds = bounds;
+        let size_layout = layout.size_layout.borrow();
 
         let style = self
             .base
@@ -740,8 +754,8 @@ impl Element for VirtualList {
             .padding
             .to_pixels(bounds.size.into(), window.rem_size());
 
-        let item_sizes = &layout.size_layout.sizes;
-        let item_origins = &layout.size_layout.origins;
+        let item_sizes = &size_layout.sizes;
+        let item_origins = &size_layout.origins;
 
         let content_bounds = Bounds::from_corners(
             bounds.origin
@@ -762,15 +776,13 @@ impl Element for VirtualList {
         scroll_state.axis = axis;
         scroll_state.items_count = self.items_count;
         scroll_state.last_content_size = Some(content_bounds.size);
+        scroll_state.item_layout = Some(layout.size_layout.clone());
 
         let mut scroll_offset = self.scroll_handle.offset();
         if let Some(scroll_to_item) = scroll_state.deferred_scroll_to_item.take() {
-            let items_bounds = item_origins
-                .iter()
-                .enumerate()
-                .map(|(i, &origin)| {
-                    let item_size = item_sizes[i];
-
+            let index = scroll_to_item.item_index.saturating_add(scroll_to_item.offset);
+            let item_bounds = item_origins.get(index).zip(item_sizes.get(index))
+                .map(|(&origin, &item_size)| {
                     Bounds {
                         origin: match self.axis {
                             Axis::Horizontal => point(content_bounds.left() + origin, px(0.)),
@@ -781,20 +793,20 @@ impl Element for VirtualList {
                             Axis::Vertical => size(content_bounds.size.width, item_size),
                         },
                     }
-                })
-                .collect::<Vec<_>>();
+                });
             scroll_offset = self.scroll_to_deferred_item(
                 scroll_offset,
-                &items_bounds,
+                item_bounds,
                 &content_bounds,
                 scroll_to_item,
             );
         }
+        drop(scroll_state);
 
         scroll_offset = scroll_offset
             .max(&point(
-                content_bounds.size.width - layout.size_layout.content_size.width,
-                content_bounds.size.height - layout.size_layout.content_size.height,
+                content_bounds.size.width - size_layout.content_size.width,
+                content_bounds.size.height - size_layout.content_size.height,
             ))
             .min(&point(px(0.), px(0.)));
         if scroll_offset != self.scroll_handle.offset() {
@@ -805,13 +817,13 @@ impl Element for VirtualList {
             global_id,
             inspector_id,
             bounds,
-            layout.size_layout.content_size,
+            size_layout.content_size,
             window,
             cx,
             |_style, _, hitbox, window, cx| {
                 if self.items_count > 0 {
                     let min_scroll_offset = content_bounds.size.along(self.axis)
-                        - layout.size_layout.content_size.along(self.axis);
+                        - size_layout.content_size.along(self.axis);
 
                     let is_scrolled = !scroll_offset.along(self.axis).is_zero();
                     if is_scrolled {
@@ -933,12 +945,14 @@ mod tests {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let item_sizes = self.item_sizes.clone();
             let visible_ranges = self.visible_ranges.clone();
+            let scroll_handle = self.scroll_handle.clone();
             virtual_list(
                 cx.entity(),
                 "virtual-list-test",
                 self.axis,
                 self.item_sizes.clone(),
                 move |_, visible_range, _, _| {
+                    let _ = scroll_handle.item_offset(visible_range.start);
                     visible_ranges.borrow_mut().push(visible_range.clone());
                     visible_range
                         .map(|ix| div().w(item_sizes[ix].width).h(item_sizes[ix].height))
@@ -975,6 +989,10 @@ mod tests {
         let initial_range = visible_ranges.borrow().last().cloned().unwrap();
         assert_eq!(initial_range.start, 0);
         assert!(initial_range.end < item_sizes.len());
+        assert_eq!(scroll_handle.item_offset(0), Some(px(0.)));
+        assert_eq!(scroll_handle.item_offset(12), Some(px(240.)));
+        assert_eq!(scroll_handle.item_offset(20), Some(px(400.)));
+        assert_eq!(scroll_handle.item_offset(21), None);
 
         scroll_handle.scroll_to_item(12, ScrollStrategy::Top);
         cx.update(|window, cx| window.draw(cx).clear(cx));
@@ -994,6 +1012,56 @@ mod tests {
     #[gpui::test]
     fn horizontal_visible_range_and_deferred_scroll_are_preserved(cx: &mut TestAppContext) {
         exercise_axis(cx, Axis::Horizontal);
+    }
+
+    #[gpui::test]
+    fn deferred_scroll_uses_variable_heights_and_skips_invalid_indices(cx: &mut TestAppContext) {
+        let scroll_handle = VirtualListScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let scroll_handle = scroll_handle.clone();
+            move |_, _| VirtualListHarness {
+                axis: Axis::Vertical,
+                item_sizes: Rc::new(vec![
+                    size(px(10.), px(20.)), size(px(10.), px(80.)), size(px(10.), px(40.)),
+                ]),
+                scroll_handle,
+                visible_ranges: Rc::default(),
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        scroll_handle.scroll_to_item(1, ScrollStrategy::Center);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(scroll_handle.offset().y, px(-30.));
+        scroll_handle.scroll_to_item_with_offset(usize::MAX, ScrollStrategy::Top, 2);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(scroll_handle.offset().y, px(-30.));
+        scroll_handle.scroll_to_item(2, ScrollStrategy::Top);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(scroll_handle.offset().y, px(-80.));
+    }
+
+    #[test]
+    fn item_offsets_share_variable_height_layout_and_local_reordering() {
+        let values = ReorderableVirtualListSizes::new(vec![
+            size(px(10.), px(20.)), size(px(10.), px(80.)), size(px(10.), px(40.)),
+        ]);
+        let layout = Rc::new(RefCell::new(ItemSizeLayout::default()));
+        update_reorderable_item_size_layout(&mut layout.borrow_mut(), &values, Axis::Vertical, px(3.), 3);
+        let handle = VirtualListScrollHandle::new();
+        handle.state.borrow_mut().item_layout = Some(layout.clone());
+        let shared_handle = handle.clone();
+        assert_eq!(handle.item_offset(0), Some(px(0.)));
+        assert_eq!(handle.item_offset(1), Some(px(23.)));
+        assert_eq!(handle.item_offset(2), Some(px(106.)));
+        assert_eq!(handle.item_offset(3), Some(px(146.)));
+        values.move_item(0, 2);
+        update_reorderable_item_size_layout(&mut layout.borrow_mut(), &values, Axis::Vertical, px(3.), 3);
+        assert_eq!(shared_handle.item_offset(1), Some(px(83.)));
+        assert_eq!(shared_handle.item_offset(2), Some(px(126.)));
+        assert_eq!(shared_handle.item_offset(3), Some(px(146.)));
+        rebuild_item_size_layout(&mut layout.borrow_mut(), &[size(px(10.), px(50.))], Axis::Vertical, px(0.), 1);
+        assert_eq!(handle.item_offset(1), Some(px(50.)));
+        assert_eq!(handle.item_offset(2), None);
     }
 
     #[gpui::test]

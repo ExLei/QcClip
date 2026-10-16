@@ -113,6 +113,8 @@ impl Render for MainWindow {
                     &self.multi_selected_item_ids,
                     &self.list_status,
                     &self.list_scroll_handle,
+                    &mut self.list_heatmap,
+                    &self.heat_scrollbar,
                     &mut self.adaptive_item_heights,
                     &mut self.list_layout_cache,
                     self.list_layout_generation,

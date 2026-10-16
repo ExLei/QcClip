@@ -15,6 +15,24 @@ fn paste_order_target(source_tab: TabId, cx: &gpui::App) -> Option<PasteOrderTar
 }
 
 impl MainWindow {
+    fn refresh_after_paste(
+        &mut self,
+        source_tab: TabId,
+        history_id: HistoryItemId,
+        reordered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !reordered
+            && self.active_tab == source_tab
+            && matches!(self.list_status, ListStatus::Ready)
+            && self.history_query().paste_filter.is_none()
+        {
+            self.refresh_loaded_list_item(source_tab, history_id, cx);
+        } else {
+            self.refresh_list_item_for_tab(source_tab, history_id, cx);
+        }
+    }
+
     pub(crate) fn paste_history_index(&mut self, index: usize, cx: &mut Context<Self>) {
         let order_ids = self.list_order_ids.clone();
         let active_tab = self.active_tab;
@@ -99,7 +117,7 @@ impl MainWindow {
                 Ok(()) => {
                     if let Some(this) = this.upgrade() {
                         this.update(cx, |this, cx| {
-                            this.refresh_list_item_for_tab(source_tab, history_id, cx);
+                            this.refresh_after_paste(source_tab, history_id, move_to_first.is_some(), cx);
                         });
                     }
                 }
@@ -145,7 +163,7 @@ impl MainWindow {
             Ok(()) => {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
-                        this.refresh_list_item_for_tab(source_tab, history_id, cx);
+                        this.refresh_after_paste(source_tab, history_id, move_to_first.is_some(), cx);
                     });
                 }
             }
@@ -183,7 +201,7 @@ impl MainWindow {
                             .find(|item| item.item_id == item_id)
                             .map(|item| item.history_id)
                         {
-                            this.refresh_list_item_for_tab(active_tab, list_item_id, cx);
+                            this.refresh_after_paste(active_tab, list_item_id, move_to_first.is_some(), cx);
                         }
                     });
                 }
@@ -223,7 +241,7 @@ impl MainWindow {
                     && let Some(this) = this.upgrade()
                 {
                     this.update(cx, |this, cx| {
-                        this.refresh_list_item_for_tab(source_tab, history_id, cx);
+                        this.refresh_after_paste(source_tab, history_id, move_to_first.is_some(), cx);
                     });
                 }
             }
@@ -353,9 +371,10 @@ impl MainWindow {
                                     this.refresh_history(cx);
                                 } else {
                                     for list_item_id in &refresh_list_ids {
-                                        this.refresh_list_item_for_tab(
+                                        this.refresh_after_paste(
                                             active_tab,
                                             *list_item_id,
+                                            move_to_first.is_some(),
                                             cx,
                                         );
                                     }

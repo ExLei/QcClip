@@ -1261,8 +1261,39 @@ fn is_resize_hit_test_value(hit_test: isize) -> bool {
     )
 }
 
+#[cfg(target_os = "windows")]
+fn is_native_resize_mouse_down(message: u32, hit_test: isize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN};
+
+    matches!(message, WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK)
+        && is_resize_hit_test_value(hit_test)
+}
+
 #[cfg(test)]
 mod window_resize_hit_test_tests {
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_resize_press_preserves_edges_without_taking_client_or_titlebar_clicks() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTCLOSE, HTLEFT,
+            HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+            WM_LBUTTONDOWN, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
+            WM_NCMOUSEMOVE, WM_NCRBUTTONDOWN,
+        };
+
+        for edge in [HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT] {
+            for message in [WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK] {
+                assert!(super::is_native_resize_mouse_down(message, edge as isize));
+            }
+            for message in [WM_LBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSEMOVE, WM_NCRBUTTONDOWN] {
+                assert!(!super::is_native_resize_mouse_down(message, edge as isize));
+            }
+        }
+        for area in [HTCLIENT, HTCAPTION, HTCLOSE, HTMAXBUTTON, HTMINBUTTON] {
+            assert!(!super::is_native_resize_mouse_down(WM_NCLBUTTONDOWN, area as isize));
+        }
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn only_resize_edges_and_corners_are_ignored() {
@@ -2318,7 +2349,7 @@ unsafe extern "system" fn frameless_window_proc(
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetPropW, HTCLIENT, IsIconic, IsZoomed, RemovePropW,
+        DefWindowProcW, GetPropW, HTCLIENT, IsIconic, IsZoomed, RemovePropW,
         SIZE_MINIMIZED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCCALCSIZE, WM_NCDESTROY,
         WM_NCHITTEST, WM_SIZE, WM_SIZING,
     };
@@ -2340,6 +2371,17 @@ unsafe extern "system" fn frameless_window_proc(
     // 最大化与最小化时交回 GPUI 处理，避免与系统的工作区计算冲突。
     let is_zoom_or_minimized =
         unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() };
+
+    if !is_zoom_or_minimized
+        && !hook.is_null()
+        // SAFETY: hook 由本模块安装，窗口销毁前保持有效。
+        && unsafe { (*hook).resizable }
+        && is_native_resize_mouse_down(message, wparam.0 as isize)
+    {
+        // 缩放边缘优先交给系统，避免 GPUI 控件消费按下事件后阻止窗口缩放。
+        // SAFETY: 消息来自当前窗口，参数保持原样传递给系统窗口过程。
+        return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+    }
 
     // `WM_NCCALCSIZE` 的 `rgrc[0]` 已是窗口矩形，返回 0 即表示客户区覆盖整个窗口。
     if message == WM_NCCALCSIZE && wparam.0 != 0 && !is_zoom_or_minimized {
@@ -2503,8 +2545,7 @@ unsafe fn resize_hit_test(
     let mut rect = RECT::default();
     // SAFETY: rect 是本栈帧上的有效 RECT，hwnd 来自当前 GPUI 窗口。
     unsafe { GetWindowRect(hwnd, &mut rect) }.ok()?;
-    // 保持 Windows 原生的缩放热区宽度。滚动条滑块的按下事件会在
-    // WM_NCLBUTTONDOWN 阶段由 GPUI 消费，轨道空白区域则继续交给窗口缩放。
+    // 保持 Windows 原生的缩放热区宽度，边缘按下事件由窗口钩子优先交给系统。
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let padded = unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
     let frame_x = unsafe { GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) } + padded;

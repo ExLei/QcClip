@@ -1,4 +1,7 @@
 {
+  "main.heatmap.region": "第 {start}–{end} 条",
+  "main.heatmap.summary": "粘贴 {total} 次 · 最高 {peak} 次",
+  "main.heatmap.unused": "粘贴 0 次",
   "settings.item_display.title": "条目信息与操作",
   "settings.item_display.information": "首行信息",
   "settings.item_display.toolbar": "来源与序号",

@@ -14,7 +14,8 @@ use super::{
     Database,
     models::{LIST_ORDER_BASE, LIST_ORDER_GAP},
     query::{
-        HistoryContentFilter, HistoryListRecord, HistoryQuery, HistoryQueryError, PasteFilter,
+        HistoryContentFilter, HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot,
+        PasteFilter, collect_order_snapshot,
         append_search_filter, append_tag_filter, load_preview_options, parse_application_icon_source,
         parse_content_kind,
         parse_tag_ids, preview_text_expression,
@@ -434,7 +435,19 @@ impl FavoriteRepository {
     }
 
     pub fn ordered_ids(&self, query: &HistoryQuery) -> Result<Vec<i64>, HistoryQueryError> {
-        // 排序只需要 ID，不能复用列表查询，否则会加载完整预览文本。
+        Ok(self.query_order(query, false)?.ids)
+    }
+
+    pub fn ordered_snapshot(&self, query: &HistoryQuery) -> Result<ListOrderSnapshot, HistoryQueryError> {
+        self.query_order(query, true)
+    }
+
+    fn query_order(
+        &self,
+        query: &HistoryQuery,
+        include_heat: bool,
+    ) -> Result<ListOrderSnapshot, HistoryQueryError> {
+        // 只读取排序和热度元数据，避免加载完整预览文本及原始内容。
         let connection = self.database.connect()?;
         let mut conditions = vec!["i.capture_state = 'ready'".to_owned()];
         let mut parameters = Vec::new();
@@ -479,8 +492,9 @@ impl FavoriteRepository {
             .is_some_and(|value| !value.is_empty())
             .then_some("LEFT JOIN clipboard_history AS h ON h.item_id = f.item_id\n             ")
             .unwrap_or_default();
+        let columns = if include_heat { "f.id, f.paste_count" } else { "f.id" };
         let sql = format!(
-            "SELECT f.id
+            "SELECT {columns}
              FROM favorites AS f
              JOIN clipboard_items AS i ON i.id = f.item_id
              {history_join}WHERE {}
@@ -490,11 +504,8 @@ impl FavoriteRepository {
                       f.id DESC",
             conditions.join(" AND ")
         );
-        connection
-            .prepare(&sql)?
-            .query_map(params_from_iter(parameters.iter()), |row| row.get(0))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(HistoryQueryError::from)
+        let mut statement = connection.prepare(&sql)?;
+        collect_order_snapshot(statement.query(params_from_iter(parameters.iter()))?, include_heat)
     }
 
     fn query_internal(
@@ -889,6 +900,19 @@ mod tests {
                 .expect("收藏 ID 排序失败"),
             vec![2, 1]
         );
+        connection.execute(
+            "UPDATE favorites SET paste_count = 23 WHERE id = 2", [],
+        ).expect("无法更新收藏粘贴次数");
+        let snapshot = favorite_repository.ordered_snapshot(&HistoryQuery::default())
+            .expect("无法读取收藏热度快照");
+        assert_eq!(snapshot.ids, vec![2, 1]);
+        assert_eq!(snapshot.paste_counts, vec![23, 0]);
+        let filtered = favorite_repository.ordered_snapshot(&HistoryQuery {
+            paste_filter: Some(PasteFilter::Pasted),
+            ..HistoryQuery::default()
+        }).expect("无法筛选收藏热度");
+        assert_eq!(filtered.ids, vec![2]);
+        assert_eq!(filtered.paste_counts, vec![23]);
 
         let limited_query = HistoryQuery {
             preview_char_limit: Some(2),

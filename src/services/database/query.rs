@@ -200,6 +200,29 @@ impl HistoryQuery {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ListOrderSnapshot {
+    pub ids: Vec<HistoryItemId>,
+    pub paste_counts: Vec<u64>,
+}
+
+pub(super) fn collect_order_snapshot(
+    mut rows: rusqlite::Rows<'_>,
+    include_heat: bool,
+) -> Result<ListOrderSnapshot, HistoryQueryError> {
+    let mut snapshot = ListOrderSnapshot::default();
+    while let Some(row) = rows.next()? {
+        snapshot.ids.push(row.get(0)?);
+        if include_heat {
+            let count: i64 = row.get(1)?;
+            snapshot.paste_counts.push(u64::try_from(count).map_err(|_| {
+                HistoryQueryError::InvalidNonNegativeValue("paste_count".to_owned())
+            })?);
+        }
+    }
+    Ok(snapshot)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistoryListRecord {
     /// 当前列表关系 ID：历史查询返回历史 ID，收藏查询返回收藏 ID。

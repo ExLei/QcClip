@@ -1,4 +1,7 @@
 {
+  "main.heatmap.region": "Items {start}–{end}",
+  "main.heatmap.summary": "{total} pastes · Peak {peak}",
+  "main.heatmap.unused": "0 pastes",
   "settings.item_display.title": "Item information and actions",
   "settings.item_display.information": "First-line information",
   "settings.item_display.toolbar": "Source and number",

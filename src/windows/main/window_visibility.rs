@@ -1556,6 +1556,11 @@ pub(crate) fn handle_mouse_move(position: Point<f32>, cx: &mut App) {
         return;
     }
 
+    let scrollbar_pressed = cx.read_global::<MainWindowService, _>(|service, cx| {
+        service.main_view.as_ref().is_some_and(|view| {
+            view.read(cx).heat_scrollbar.drag_origin.is_some()
+        })
+    });
     if point_in_client_bounds(position, attachment.client_bounds) {
         if mouse_leave_state != window_state::MouseLeaveState::Armed {
             cx.update_global::<MainWindowService, _>(|service, _| {
@@ -1570,6 +1575,7 @@ pub(crate) fn handle_mouse_move(position: Point<f32>, cx: &mut App) {
         fixed,
         mouse_leave_state,
         menu_is_open,
+        scrollbar_pressed,
     ) {
         let is_resize_hit_test = window.is_some_and(|window| {
             window
@@ -1726,11 +1732,13 @@ fn should_hide_for_pointer(
     fixed: bool,
     mouse_leave_state: window_state::MouseLeaveState,
     menu_is_open: bool,
+    scrollbar_pressed: bool,
 ) -> bool {
     !fixed
         && mouse_leave_state == window_state::MouseLeaveState::Armed
         && !point_in_client_bounds(position, client_bounds)
         && !menu_is_open
+        && !scrollbar_pressed
 }
 
 #[cfg(test)]
@@ -1880,12 +1888,14 @@ mod tests {
             false,
             window_state::MouseLeaveState::Armed,
             true,
+            false,
         ));
         assert!(should_hide_for_pointer(
             position,
             bounds,
             false,
             window_state::MouseLeaveState::Armed,
+            false,
             false,
         ));
         assert!(!should_hide_for_pointer(
@@ -1894,7 +1904,42 @@ mod tests {
             false,
             window_state::MouseLeaveState::Disarmed,
             false,
+            false,
         ));
+    }
+
+    #[test]
+    fn scrollbar_press_blocks_edge_hide_until_release_even_outside_window() {
+        let bounds = attachment().client_bounds;
+        let mut scrollbar = super::super::state::HeatScrollbarState::default();
+        let outside_positions = [
+            Point { x: bounds.left as f32 - 1.0, y: 300.0 },
+            Point { x: bounds.right as f32 + 1.0, y: 300.0 },
+            Point { x: 1700.0, y: bounds.top as f32 - 1.0 },
+            Point { x: 1700.0, y: bounds.bottom as f32 + 1.0 },
+        ];
+        let should_hide = |position, scrollbar: &super::super::state::HeatScrollbarState| {
+            should_hide_for_pointer(position, bounds, false,
+                window_state::MouseLeaveState::Armed, false, scrollbar.drag_origin.is_some())
+        };
+        for position in outside_positions {
+            assert!(should_hide(position, &scrollbar));
+        }
+        scrollbar.drag_origin = Some((gpui::point(px(20.0), px(200.0)), 0.5));
+        for position in outside_positions {
+            assert!(!should_hide(position, &scrollbar));
+        }
+        scrollbar.dragging = true;
+        scrollbar.clear_on_window_exit();
+        for position in outside_positions {
+            assert!(!should_hide(position, &scrollbar));
+        }
+        scrollbar.drag_origin = None;
+        scrollbar.dragging = false;
+        for position in outside_positions {
+            assert!(should_hide(position, &scrollbar));
+        }
+        assert!(!should_hide(Point { x: 1700.0, y: 300.0 }, &scrollbar));
     }
 
     #[test]

@@ -15,7 +15,8 @@ use super::{
     Database,
     models::{LIST_ORDER_BASE, LIST_ORDER_GAP},
     query::{
-        HistoryListRecord, HistoryQuery, HistoryQueryError, PasteFilter, append_search_filter,
+        HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot, PasteFilter,
+        collect_order_snapshot, append_search_filter,
         append_tag_filter, append_tag_filter_for_item,
         load_preview_options, parse_application_icon_source, parse_content_kind, parse_tag_ids,
         preview_text_expression,
@@ -112,7 +113,7 @@ impl HistoryRepository {
         &self,
         query: &HistoryQuery,
     ) -> Result<Vec<HistoryItemId>, HistoryQueryError> {
-        self.ordered_ids_with_policy(query, None)
+        Ok(self.query_order(query, None, false)?.ids)
     }
 
     pub fn ordered_ids_scoped(
@@ -120,15 +121,24 @@ impl HistoryRepository {
         query: &HistoryQuery,
         policy: &HistoryConfig,
     ) -> Result<Vec<HistoryItemId>, HistoryQueryError> {
-        self.ordered_ids_with_policy(query, Some(policy))
+        Ok(self.query_order(query, Some(policy), false)?.ids)
     }
 
-    fn ordered_ids_with_policy(
+    pub fn ordered_snapshot_scoped(
+        &self,
+        query: &HistoryQuery,
+        policy: &HistoryConfig,
+    ) -> Result<ListOrderSnapshot, HistoryQueryError> {
+        self.query_order(query, Some(policy), true)
+    }
+
+    fn query_order(
         &self,
         query: &HistoryQuery,
         policy: Option<&HistoryConfig>,
-    ) -> Result<Vec<HistoryItemId>, HistoryQueryError> {
-        // 排序只需要 ID，不能复用列表查询，否则会加载完整预览文本。
+        include_heat: bool,
+    ) -> Result<ListOrderSnapshot, HistoryQueryError> {
+        // 只读取排序和热度元数据，避免加载完整预览文本及原始内容。
         let connection = self.database.connect()?;
         let needs_item_join = query
             .search
@@ -186,8 +196,9 @@ impl HistoryRepository {
         let item_join = needs_item_join.then_some(
             "JOIN clipboard_items AS i ON i.id = h.item_id\n             ",
         ).unwrap_or_default();
+        let columns = if include_heat { "h.id, h.paste_count" } else { "h.id" };
         let sql = format!(
-            "SELECT h.id
+            "SELECT {columns}
              FROM clipboard_history AS h
              {item_join}WHERE {}
              ORDER BY h.is_pinned DESC,
@@ -196,11 +207,8 @@ impl HistoryRepository {
                       h.id DESC",
             conditions.join(" AND ")
         );
-        connection
-            .prepare(&sql)?
-            .query_map(params_from_iter(parameters.iter()), |row| row.get(0))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(HistoryQueryError::from)
+        let mut statement = connection.prepare(&sql)?;
+        collect_order_snapshot(statement.query(params_from_iter(parameters.iter()))?, include_heat)
     }
 
     #[cfg(test)]
@@ -2098,6 +2106,18 @@ mod tests {
                 .expect("历史 ID 排序失败"),
             vec![first, third, second]
         );
+        connection.execute(
+            "UPDATE clipboard_history SET paste_count = 17 WHERE id = ?1", [third],
+        ).expect("无法更新测试粘贴次数");
+        let query = HistoryQuery {
+            paste_filter: Some(PasteFilter::Pasted),
+            ..HistoryQuery::default()
+        };
+        let snapshot = services.repository
+            .ordered_snapshot_scoped(&query, &HistoryConfig::default())
+            .expect("无法读取历史热度快照");
+        assert_eq!(snapshot.ids, vec![third]);
+        assert_eq!(snapshot.paste_counts, vec![17]);
     }
 
     #[test]

@@ -38,6 +38,7 @@ impl MainWindow {
         } else {
             self.list_order_ids[target_position..=source_position].rotate_right(1);
         }
+        self.list_heatmap.move_item(source_position, target_position);
         if let Some(cache) = self.list_layout_cache.as_ref() {
             cache.sizes.move_item(source_position, target_position);
         }
@@ -843,6 +844,9 @@ impl MainWindow {
     }
 
     fn apply_loaded_list_record(&mut self, record: HistoryListRecord) {
+        if let Some(index) = self.list_order_positions.get(&record.history_id).copied() {
+            self.list_heatmap.update(index, record.paste_count);
+        }
         let mut item = record_to_list_item(record);
         let history_id = item.history_id;
         let old_shortcut = self
@@ -990,6 +994,7 @@ impl MainWindow {
         order_ids.remove(source_position);
         let target_position = if item.is_pinned { 0 } else { pinned_count.min(order_ids.len()) };
         order_ids.insert(target_position, list_item_id);
+        self.list_heatmap.move_item(source_position, target_position);
         self.list_order_ids = order_ids;
         self.reindex_list_order_positions(
             source_position.min(target_position)..source_position.max(target_position) + 1,
@@ -1029,6 +1034,7 @@ impl MainWindow {
         if removed_positions.is_empty() {
             return true;
         }
+        self.list_heatmap.remove_positions(&removed_positions);
         let visible_removed_count = removed_positions.len();
         for history_id in history_ids {
             if let Some(item) = self.loaded_items.get(history_id) {
@@ -1104,12 +1110,15 @@ impl MainWindow {
             destination_position = target_position.min(self.list_order_ids.len());
             order_changed |= source_position != destination_position;
             self.list_order_ids.insert(destination_position, history_id);
+            self.list_heatmap.update(source_position, item.paste_count);
+            self.list_heatmap.move_item(source_position, destination_position);
             self.reindex_list_order_positions(
                 source_position.min(destination_position)..source_position.max(destination_position) + 1,
             );
         } else {
             destination_position = target_position.min(self.list_order_ids.len());
             self.list_order_ids.insert(destination_position, history_id);
+            self.list_heatmap.insert(destination_position, item.paste_count);
             self.reindex_list_order_positions(destination_position..self.list_order_ids.len());
             self.total_item_count = self.total_item_count.saturating_add(1);
             if self.selected_item_id.is_none() && self.total_item_count == 1 {
@@ -1172,13 +1181,13 @@ impl MainWindow {
                     repository.count_scoped(&query, &policy)?,
                 )
             };
-            let order_ids = if active_tab == TabId::Favorites {
-                favorite_repository.ordered_ids(&query)?
+            let snapshot = if active_tab == TabId::Favorites {
+                favorite_repository.ordered_snapshot(&query)?
             } else {
-                repository.ordered_ids_scoped(&query, &policy)?
+                repository.ordered_snapshot_scoped(&query, &policy)?
             };
-            Result::<(Option<HistoryListRecord>, usize, Vec<HistoryItemId>), HistoryQueryError>::Ok(
-                (record, total, order_ids),
+            Result::<(Option<HistoryListRecord>, usize, ListOrderSnapshot), HistoryQueryError>::Ok(
+                (record, total, snapshot),
             )
         });
         cx.spawn(async move |this, cx| {
@@ -1189,8 +1198,8 @@ impl MainWindow {
                         return;
                     }
                     match result {
-                        Ok((record, total, order_ids)) => {
-                            this.apply_list_record(list_item_id, record, total, order_ids)
+                        Ok((record, total, snapshot)) => {
+                            this.apply_list_record(list_item_id, record, total, snapshot)
                         }
                         Err(error) => tracing::error!("列表增量更新失败：{error}"),
                     }
@@ -1256,15 +1265,16 @@ impl MainWindow {
     pub(super) fn accept_query_result(
         &mut self,
         generation: u64,
-        result: Result<(Vec<HistoryItemId>, Vec<HistoryListRecord>), HistoryQueryError>,
+        result: Result<(ListOrderSnapshot, Vec<HistoryListRecord>), HistoryQueryError>,
     ) -> bool {
         if generation != self.query_generation {
             return false;
         }
         match result {
-            Ok((order_ids, records)) => {
-                self.total_item_count = order_ids.len();
-                self.list_order_ids = order_ids;
+            Ok((snapshot, records)) => {
+                self.total_item_count = snapshot.ids.len();
+                self.list_heatmap.replace(snapshot.paste_counts);
+                self.list_order_ids = snapshot.ids;
                 self.rebuild_list_order_positions();
                 let (records, has_more) = split_page(records, INITIAL_PAGE_SIZE);
                 let items = records.into_iter().map(record_to_list_item).collect();
@@ -1277,6 +1287,7 @@ impl MainWindow {
                 self.loaded_items.clear();
                 self.list_order_ids.clear();
                 self.list_order_positions.clear();
+                self.list_heatmap.replace(Vec::new());
                 self.clear_image_cache();
                 self.clear_file_list_cache();
                 self.total_item_count = 0;
@@ -1308,6 +1319,9 @@ impl MainWindow {
                 let (records, _) = split_page(records, page_size);
                 let mut newly_loaded = Vec::new();
                 for (record_offset, record) in records.into_iter().enumerate() {
+                    if let Some(index) = self.list_order_positions.get(&record.history_id).copied() {
+                        self.list_heatmap.update(index, record.paste_count);
+                    }
                     let mut item = record_to_list_item(record);
                     item.shortcut = format!(
                         "Ctrl+{}",
@@ -1348,14 +1362,15 @@ impl MainWindow {
         list_item_id: HistoryItemId,
         record: Option<HistoryListRecord>,
         total: usize,
-        order_ids: Vec<HistoryItemId>,
+        snapshot: ListOrderSnapshot,
     ) {
         if self.list_drag_source_id.is_some() {
             return;
         }
         let was_loaded = self.loaded_items.contains_key(&list_item_id);
         let has_record = record.is_some();
-        self.list_order_ids = order_ids;
+        self.list_heatmap.replace(snapshot.paste_counts);
+        self.list_order_ids = snapshot.ids;
         self.rebuild_list_order_positions();
         self.invalidate_list_layout_cache();
         // 被更新或删除的内容可能改变预览高度，其他行的缓存可以继续复用。

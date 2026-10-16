@@ -1,11 +1,13 @@
 mod actions;
 mod gallery;
 mod history;
+mod heatmap;
 mod list;
 mod selection;
 mod tags_search;
 
 pub(super) use history::ClipboardListenerToggleResult;
+pub(crate) use heatmap::{HeatBucket, HeatScrollbarState, ListHeatmap};
 
 use std::{
     cell::RefCell,
@@ -47,7 +49,7 @@ use crate::{
     services::custom_text::CustomTextService,
     services::database::{
         FavoriteRepository, HistoryRepository, TagRepository,
-        query::{HistoryFilter, HistoryListRecord, HistoryQuery, HistoryQueryError},
+        query::{HistoryFilter, HistoryListRecord, HistoryQuery, HistoryQueryError, ListOrderSnapshot},
     },
     services::image_preview::ImagePreviewService,
     services::paste::PasteService,
@@ -137,7 +139,6 @@ pub(crate) struct ListLayoutCacheKey {
 pub(crate) struct ListLayoutCache {
     pub(crate) key: ListLayoutCacheKey,
     pub(crate) sizes: ReorderableVirtualListSizes,
-    pub(crate) total_height: Pixels,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -237,6 +238,8 @@ pub struct MainWindow {
     pub(super) multi_selection_anchor: Option<HistoryItemId>,
     pub(super) loading_page_range: Option<Range<usize>>,
     pub list_scroll_handle: VirtualListScrollHandle,
+    pub(crate) list_heatmap: ListHeatmap,
+    pub(crate) heat_scrollbar: HeatScrollbarState,
     pub(crate) adaptive_item_heights: HashMap<HistoryItemId, Pixels>,
     pub(super) adaptive_height_cache_key: Option<AdaptiveHeightCacheKey>,
     pub(crate) list_layout_generation: u64,
@@ -452,6 +455,8 @@ impl MainWindow {
             multi_selection_anchor: None,
             loading_page_range: None,
             list_scroll_handle: VirtualListScrollHandle::new(),
+            list_heatmap: ListHeatmap::default(),
+            heat_scrollbar: HeatScrollbarState::default(),
             adaptive_item_heights: HashMap::new(),
             adaptive_height_cache_key: None,
             list_layout_generation: 0,
