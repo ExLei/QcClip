@@ -696,7 +696,7 @@ pub(crate) fn apply_window_material(
 }
 
 #[cfg(target_os = "windows")]
-fn window_hwnd(window: &Window) -> Result<windows::Win32::Foundation::HWND, String> {
+pub(super) fn window_hwnd(window: &Window) -> Result<windows::Win32::Foundation::HWND, String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::IsWindow};
 
@@ -894,6 +894,9 @@ pub(crate) fn set_window_shadow_visible(window: &Window, visible: bool) -> Resul
 
     let hwnd = window_hwnd(window)?;
     let previous_metrics = client_area_metrics(hwnd)?;
+    if let Err(error) = super::window_appearance::set_decorations_visible(hwnd, visible) {
+        tracing::warn!("同步窗口装饰状态失败：{error}");
+    }
     // 普通窗口的系统阴影由窗口框架和 DWM 非客户区共同参与绘制。贴边隐藏时需要
     // 同时关闭这两部分，恢复时再全部还原，否则会留下透明的框架区域。
     let previous_style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
@@ -2658,14 +2661,16 @@ pub fn configure_window(window: &Window) {
 
     // Normal 窗口和工具窗口的 DWM 默认圆角策略可能不同，这里固定使用标准圆角。
     let corner_preference = DWM_WINDOW_CORNER_PREFERENCE(2);
-    if let Err(error) = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &corner_preference as *const _ as _,
-            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
-        )
-    } {
+    if super::window_appearance::supports_native_rounding()
+        && let Err(error) = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &corner_preference as *const _ as _,
+                std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+            )
+        }
+    {
         tracing::error!("设置窗口圆角失败：{error}");
     }
 

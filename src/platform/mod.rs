@@ -12,3 +12,4 @@ pub mod os_version;
 pub mod shell_open;
 pub(crate) mod single_instance;
 pub mod window;
+pub(crate) mod window_appearance;

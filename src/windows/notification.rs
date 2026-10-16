@@ -717,6 +717,7 @@ impl Render for NotificationWindow {
             .text_size(ui_rem(13.0))
             .child(background)
             .child(card)
+            .child(crate::window_material::window_frame())
     }
 }
 

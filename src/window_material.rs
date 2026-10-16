@@ -93,6 +93,7 @@ impl Render for BackgroundRoot {
                 Root::render_notification_layer(window, cx)
                     .map(|layer| div().absolute().inset_0().size_full().child(layer)),
             )
+            .child(window_frame())
     }
 }
 
@@ -109,6 +110,32 @@ pub(crate) fn with_background(
         .font_family(cx.theme().font_family.clone())
         .child(background)
         .child(view)
+        .child(window_frame())
+}
+
+/// 边框只参与绘制，不占布局空间，也不创建会拦截鼠标的命中区域。
+pub(crate) fn window_frame() -> impl IntoElement {
+    gpui::canvas(
+        |_, window, _| crate::platform::window_appearance::frame_style(window),
+        |bounds, style, window, cx| {
+            let Some(style) = style else {
+                return;
+            };
+            let color = cx.theme().window_border;
+            let shortest_side = f32::from(bounds.size.width).min(f32::from(bounds.size.height));
+            let radius = style.corner_radius.min(shortest_side / 2.0).max(0.0);
+            window.paint_quad(gpui::quad(
+                bounds,
+                px(radius),
+                gpui::transparent_black(),
+                px(1.5),
+                color,
+                gpui::BorderStyle::Solid,
+            ));
+        },
+    )
+    .absolute()
+    .inset_0()
 }
 
 pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement {
@@ -359,8 +386,20 @@ fn apply_to_window(window: &Window, cx: &mut App) {
     } else {
         1.0
     };
+    let system_material = matches!(material, WindowMaterial::Acrylic | WindowMaterial::Blur);
+    // 先移除旧系统的区域圆角，再启用系统材质，避免圆角外出现材质残留。
+    if system_material
+        && let Err(error) = crate::platform::window_appearance::apply(window, material)
+    {
+        tracing::warn!("应用窗口外观失败：{error}");
+    }
     window.set_background_appearance(background_appearance(material));
     platform_window::apply_window_material(window, material, brightness, !mode.is_dark());
+    if !system_material
+        && let Err(error) = crate::platform::window_appearance::apply(window, material)
+    {
+        tracing::warn!("应用窗口外观失败：{error}");
+    }
 }
 
 fn background_appearance(material: WindowMaterial) -> WindowBackgroundAppearance {
