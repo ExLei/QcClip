@@ -9,6 +9,10 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+#[cfg(target_os = "windows")]
+#[path = "directory_watcher.rs"]
+mod directory_watcher;
+
 const DEFAULT_THEME: &str = include_str!("./default-theme.json");
 pub(crate) static DEFAULT_THEME_COLORS: LazyLock<
     HashMap<ThemeMode, (Arc<ThemeColor>, Arc<HighlightTheme>)>,
@@ -182,7 +186,20 @@ impl ThemeRegistry {
             .collect();
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(target_os = "windows")]
+    fn _watch_themes_dir(themes_dir: PathBuf, cx: &mut App) -> anyhow::Result<()> {
+        std::fs::create_dir_all(&themes_dir)?;
+        let watcher = directory_watcher::DirectoryWatcher::new(&themes_dir)?;
+        cx.spawn(async move |cx| {
+            while watcher.changed().await.is_ok() {
+                _ = cx.update(Self::reload_themes);
+            }
+        })
+        .detach();
+        Ok(())
+    }
+
+    #[cfg(not(any(target_family = "wasm", target_os = "windows")))]
     fn _watch_themes_dir(themes_dir: PathBuf, cx: &mut App) -> anyhow::Result<()> {
         if !themes_dir.exists() {
             std::fs::create_dir_all(&themes_dir)?;

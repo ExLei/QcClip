@@ -1,4 +1,9 @@
-use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
+use std::{
+    cell::{Cell, OnceCell},
+    rc::Rc,
+    sync::atomic::Ordering,
+    thread::Thread,
+};
 
 use anyhow::Context as _;
 use gpui_util::ResultExt;
@@ -14,7 +19,7 @@ use windows::{
             WindowsAndMessaging::*,
         },
     },
-    core::PCWSTR,
+    core::{PCWSTR, w},
 };
 
 use crate::*;
@@ -31,6 +36,30 @@ pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
+const RENDERING_SUSPENDED_PROP: PCWSTR = w!("GPUI.RenderingSuspended");
+
+pub(crate) fn window_is_renderable(handle: HWND) -> bool {
+    // SAFETY: 只读取窗口可见性和绘制标记，失效句柄会返回不可见。
+    unsafe {
+        IsWindowVisible(handle).as_bool()
+            && !IsIconic(handle).as_bool()
+            && GetPropW(handle, RENDERING_SUSPENDED_PROP).is_invalid()
+    }
+}
+
+fn set_window_redraw(handle: HWND, enabled: bool) {
+    // 保留 HWND 的可见性，避免 WM_SETREDRAW 默认处理移除 WS_VISIBLE，影响贴边显示。
+    // SAFETY: 属性只保存布尔标记，不包含需要释放的内存。
+    unsafe {
+        if enabled {
+            let _ = RemovePropW(handle, RENDERING_SUSPENDED_PROP);
+        } else {
+            SetPropW(handle, RENDERING_SUSPENDED_PROP, Some(HANDLE(1 as _)))
+                .context("暂停窗口绘制失败")
+                .log_err();
+        }
+    }
+}
 
 /// Coordinates window draws on the UI thread. Owned by the platform and
 /// shared with every window (like `WindowsPlatformState::cursor_visible`),
@@ -44,12 +73,20 @@ pub(crate) struct DrawCoordinator {
     /// nest GPUI draws. Nested draws are wasted work whose output is
     /// immediately redrawn, so we defer them instead.
     drawing: Cell<bool>,
+    pub(crate) vsync_thread: OnceCell<Thread>,
 }
 
 impl DrawCoordinator {
     pub(crate) fn new() -> Self {
         Self {
             drawing: Cell::new(false),
+            vsync_thread: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn wake_vsync(&self) {
+        if let Some(thread) = self.vsync_thread.get() {
+            thread.unpark();
         }
     }
 
@@ -107,6 +144,10 @@ impl WindowsWindowInner {
             WM_DISPLAYCHANGE => self.handle_display_change_msg(handle),
             WM_NCHITTEST => self.handle_hit_test_msg(handle, lparam),
             WM_PAINT => self.handle_paint_msg(handle),
+            WM_SETREDRAW => {
+                set_window_redraw(handle, wparam.0 != 0);
+                Some(0)
+            }
             WM_CLOSE => self.handle_close_msg(),
             WM_DESTROY => self.handle_destroy_msg(handle),
             WM_QUERYENDSESSION => Some(1),
@@ -166,11 +207,19 @@ impl WindowsWindowInner {
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
             _ => None,
         };
-        if let Some(n) = handled {
+        let result = if let Some(n) = handled {
             LRESULT(n)
         } else {
             unsafe { DefWindowProcW(handle, msg, wparam, lparam) }
+        };
+        if matches!(
+            msg,
+            WM_SHOWWINDOW | WM_WINDOWPOSCHANGED | WM_SIZE | WM_SETREDRAW | WM_DESTROY
+        ) {
+            // 状态更新后再唤醒，unpark 令牌可覆盖“检查后、休眠前”的竞争窗口。
+            self.state.draw_coordinator.wake_vsync();
         }
+        result
     }
 
     fn handle_end_session_msg(&self, wparam: WPARAM) -> Option<isize> {
@@ -1336,6 +1385,14 @@ impl WindowsWindowInner {
 
     #[inline]
     fn draw_window(&self, handle: HWND, force_render: bool) -> Option<isize> {
+        if !window_is_renderable(handle) {
+            if force_render {
+                self.state.force_render_pending.set(true);
+            }
+            // SAFETY: 暂停期间清除无效区域，避免 WM_PAINT 在消息循环中反复派发。
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            return Some(0);
+        }
         let Some(_guard) = self.state.draw_coordinator.try_begin_draw() else {
             log::debug!("deferring re-entrant draw of window {handle:?}");
             if force_render {
@@ -1784,6 +1841,47 @@ mod tests {
     use super::dispatch_mouse_leave;
     use core::prelude::v1::test;
     use gpui::{Modifiers, MouseButton, NavigationDirection, PlatformInput, px};
+
+    #[test]
+    fn suspended_window_keeps_native_visibility_and_can_resume_rendering() {
+        use super::{set_window_redraw, window_is_renderable};
+        use windows::{Win32::UI::WindowsAndMessaging::*, core::w};
+
+        // SAFETY: 测试窗口使用系统类，位于桌面外，仅由当前测试线程操作和销毁。
+        let window = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!("绘制休眠测试"),
+                WS_POPUP | WS_VISIBLE,
+                -30000,
+                -30000,
+                10,
+                10,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("创建绘制测试窗口失败");
+        assert!(window_is_renderable(window));
+        set_window_redraw(window, false);
+        assert!(!window_is_renderable(window));
+        assert!(
+            unsafe { IsWindowVisible(window).as_bool() },
+            "暂停绘制不能隐藏贴边窗口"
+        );
+        set_window_redraw(window, true);
+        assert!(window_is_renderable(window));
+        unsafe {
+            let _ = ShowWindow(window, SW_HIDE);
+        }
+        assert!(!window_is_renderable(window));
+        unsafe {
+            DestroyWindow(window).expect("销毁绘制测试窗口失败");
+        }
+    }
 
     #[test]
     fn mouse_leave_with_cursor_still_over_window_does_not_clear_hover_or_hit_test() {

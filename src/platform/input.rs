@@ -54,6 +54,7 @@ mod windows_input {
         mouse_move_sequence: u64,
         mouse_down_sequence: u64,
         mouse_event_senders: Vec<(u64, async_channel::Sender<GlobalMouseEvent>)>,
+        pointer_change_sender: Option<async_channel::Sender<()>>,
         next_mouse_event_subscription: u64,
     }
 
@@ -68,6 +69,7 @@ mod windows_input {
                 mouse_move_sequence: 0,
                 mouse_down_sequence: 0,
                 mouse_event_senders: Vec::new(),
+                pointer_change_sender: None,
                 next_mouse_event_subscription: 0,
             }
         }
@@ -145,6 +147,12 @@ mod windows_input {
             lock_state(state)
                 .mouse_event_senders
                 .retain(|(id, _)| *id != subscription_id);
+        }
+    }
+
+    pub(crate) fn set_pointer_change_notifier(sender: Option<async_channel::Sender<()>>) {
+        if let Some(state) = INPUT_STATE.get() {
+            lock_state(state).pointer_change_sender = sender;
         }
     }
 
@@ -246,6 +254,10 @@ mod windows_input {
                 _ => global_event,
             };
             senders = state.mouse_event_senders.clone();
+            if let Some(sender) = &state.pointer_change_sender {
+                // 通道容量为 1，合并高频移动，仅在输入变化时唤醒窗口检查。
+                let _ = sender.try_send(());
+            }
         }
 
         if let Some(event) = global_event {
@@ -592,6 +604,6 @@ pub(crate) use windows_input::{
 
 #[cfg(target_os = "windows")]
 pub(crate) use windows_input::{
-    clear_trigger_key, set_trigger_key_code, simulate_ctrl_v,
+    clear_trigger_key, set_pointer_change_notifier, set_trigger_key_code, simulate_ctrl_v,
     trigger_shortcut_is_physically_pressed,
 };

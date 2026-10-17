@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use gpui::{App, Global, Point};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -8,7 +6,6 @@ use crate::{
     windows::menu::{MenuActionId, MenuIcon, MenuItem, MenuModel, MenuPosition, MenuService},
 };
 
-const TRAY_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const TOGGLE_MAIN_WINDOW_ACTION: &str = "tray.toggle-main-window";
 const TOGGLE_CLIPBOARD_MONITOR_ACTION: &str = "tray.toggle-clipboard-monitor";
 const TOGGLE_GLOBAL_HOTKEYS_ACTION: &str = "tray.toggle-global-hotkeys";
@@ -35,16 +32,14 @@ impl TrayService {
         };
 
         cx.set_global(Self { _icon: icon });
+        let (sender, receiver) = async_channel::unbounded();
+        TrayIconEvent::set_event_handler(Some(move |event| {
+            if let Some(action) = tray_event_action(event) {
+                let _ = sender.try_send(action);
+            }
+        }));
         cx.spawn(async move |cx| {
-            let receiver = TrayIconEvent::receiver();
-            loop {
-                cx.background_executor()
-                    .timer(TRAY_EVENT_POLL_INTERVAL)
-                    .await;
-
-                let Some(action) = receiver.try_iter().find_map(tray_event_action) else {
-                    continue;
-                };
+            while let Ok(action) = receiver.recv().await {
                 cx.update(|cx| match action {
                     TrayEventAction::ToggleMainWindow => {
                         crate::windows::main::toggle_main_window(cx)

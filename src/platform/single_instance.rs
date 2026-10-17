@@ -84,3 +84,90 @@ pub(crate) fn take_activation_request(path: &Path) -> io::Result<bool> {
         Err(error) => Err(error),
     }
 }
+
+pub(crate) fn activation_requests(
+    path: PathBuf,
+) -> io::Result<async_channel::Receiver<io::Result<()>>> {
+    let (sender, receiver) = async_channel::unbounded();
+    std::thread::Builder::new()
+        .name("qcclip-instance-activation".to_owned())
+        .spawn(move || {
+            if let Err(error) = watch_activation_requests(&path, &sender) {
+                let _ = sender.try_send(Err(error));
+            }
+        })?;
+    Ok(receiver)
+}
+
+#[cfg(target_os = "windows")]
+fn watch_activation_requests(
+    path: &Path,
+    sender: &async_channel::Sender<io::Result<()>>,
+) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows::{
+        Win32::{
+            Foundation::{HANDLE, WAIT_OBJECT_0},
+            Storage::FileSystem::{
+                FILE_NOTIFY_CHANGE_FILE_NAME, FindCloseChangeNotification,
+                FindFirstChangeNotificationW, FindNextChangeNotification,
+            },
+            System::Threading::{INFINITE, WaitForSingleObject},
+        },
+        core::PCWSTR,
+    };
+
+    struct ChangeNotification(HANDLE);
+    impl Drop for ChangeNotification {
+        fn drop(&mut self) {
+            // SAFETY: 该句柄由 FindFirstChangeNotificationW 创建，仅释放一次。
+            unsafe {
+                let _ = FindCloseChangeNotification(self.0);
+            }
+        }
+    }
+
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::other("单实例通知目录无效"))?;
+    let directory: Vec<u16> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: 目录路径以空字符结尾，缓冲区在调用期间有效。
+    let notification = ChangeNotification(
+        unsafe {
+            FindFirstChangeNotificationW(
+                PCWSTR(directory.as_ptr()),
+                false,
+                FILE_NOTIFY_CHANGE_FILE_NAME,
+            )
+        }
+        .map_err(io::Error::from)?,
+    );
+    loop {
+        if sender.is_closed() {
+            return Ok(());
+        }
+        if take_activation_request(path)? && sender.try_send(Ok(())).is_err() {
+            return Ok(());
+        }
+        // 先监听再读取请求；通知后先重新武装，避免初始化及连续启动时漏掉唤出请求。
+        // SAFETY: 通知句柄有效，线程阻塞等待系统目录变更，不进行定时轮询。
+        if unsafe { WaitForSingleObject(notification.0, INFINITE) } != WAIT_OBJECT_0 {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe { FindNextChangeNotification(notification.0) }.map_err(io::Error::from)?;
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn watch_activation_requests(
+    path: &Path,
+    sender: &async_channel::Sender<io::Result<()>>,
+) -> io::Result<()> {
+    while !sender.is_closed() {
+        if take_activation_request(path)? && sender.try_send(Ok(())).is_err() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}

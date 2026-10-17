@@ -3,8 +3,9 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{OnceLock, RwLock, mpsc};
+use std::sync::{Arc, OnceLock, RwLock, mpsc};
 use std::thread;
+use std::time::Duration;
 
 use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, OutputStream, Sink, Source};
@@ -13,6 +14,7 @@ use crate::config::{SOUND_VOLUME_MAX, SoundConfig, SoundPreset};
 
 const SAMPLE_RATE: u32 = 44_100;
 const MAX_PENDING_SOUND_REQUESTS: usize = 1;
+const AUDIO_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy)]
 pub(crate) enum SoundEvent {
@@ -54,7 +56,7 @@ struct SoundPlayer {
 static SOUND_CONFIG: OnceLock<RwLock<SoundConfig>> = OnceLock::new();
 static SOUND_DIRECTORY: OnceLock<RwLock<PathBuf>> = OnceLock::new();
 static SOUND_PLAYER: OnceLock<SoundPlayer> = OnceLock::new();
-static SOUND_SINK: OnceLock<Sink> = OnceLock::new();
+static SOUND_SINK: RwLock<Option<Arc<Sink>>> = RwLock::new(None);
 
 pub(crate) fn install(config: SoundConfig, sound_directory: PathBuf) {
     if let Err(error) = fs::create_dir_all(&sound_directory) {
@@ -91,7 +93,9 @@ pub(crate) fn set_config(config: SoundConfig) {
         Ok(mut current) => {
             *current = config;
             if !current.enabled {
-                if let Some(sink) = SOUND_SINK.get() {
+                if let Ok(sink) = SOUND_SINK.read()
+                    && let Some(sink) = sink.as_ref()
+                {
                     sink.stop();
                 }
             }
@@ -212,24 +216,45 @@ fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
     let Some(settings) = SOUND_CONFIG.get() else {
         return;
     };
-    let (stream, stream_handle) = match OutputStream::try_default() {
-        Ok(output) => output,
-        Err(error) => {
-            tracing::error!(%error, "初始化音效输出设备失败");
-            return;
+    let mut output: Option<(OutputStream, Arc<Sink>)> = None;
+    loop {
+        let request = match receive_sound_request(&receiver, output.is_some()) {
+            Ok(request) => request,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if output.as_ref().is_some_and(|(_, sink)| sink.empty()) {
+                    if let Ok(mut sink) = SOUND_SINK.write() {
+                        *sink = None;
+                    }
+                    // 释放输出流才能停止 WASAPI 的持续静音回调。
+                    output = None;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        if output.is_none() {
+            let (stream, stream_handle) = match OutputStream::try_default() {
+                Ok(output) => output,
+                Err(error) => {
+                    tracing::error!(%error, "初始化音效输出设备失败");
+                    continue;
+                }
+            };
+            let sink = match Sink::try_new(&stream_handle) {
+                Ok(sink) => Arc::new(sink),
+                Err(error) => {
+                    tracing::error!(%error, "创建音效播放通道失败");
+                    continue;
+                }
+            };
+            if let Ok(mut current) = SOUND_SINK.write() {
+                *current = Some(sink.clone());
+            }
+            output = Some((stream, sink));
         }
-    };
-    let sink = match Sink::try_new(&stream_handle) {
-        Ok(sink) => sink,
-        Err(error) => {
-            tracing::error!(%error, "创建音效播放通道失败");
-            return;
-        }
-    };
-    let _stream = stream;
-    let sink = SOUND_SINK.get_or_init(|| sink);
-
-    while let Ok(request) = receiver.recv() {
+        let Some((_, sink)) = output.as_ref() else {
+            continue;
+        };
         // 播放期间丢弃新请求，避免滚动等高频操作把过期提示排队播放。
         if !sink.empty() {
             continue;
@@ -258,7 +283,23 @@ fn audio_worker(receiver: mpsc::Receiver<SoundRequest>) {
             }
         }
     }
+    if let Ok(mut sink) = SOUND_SINK.write() {
+        *sink = None;
+    }
     tracing::debug!("音效播放线程已退出");
+}
+
+fn receive_sound_request(
+    receiver: &mpsc::Receiver<SoundRequest>,
+    output_active: bool,
+) -> Result<SoundRequest, mpsc::RecvTimeoutError> {
+    if output_active {
+        receiver.recv_timeout(AUDIO_IDLE_TIMEOUT)
+    } else {
+        receiver
+            .recv()
+            .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+    }
 }
 
 fn append_if_enabled(

@@ -204,6 +204,7 @@ objc2-foundation = { version = "0.3", features = [
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+async-channel = "2"
 # Native menu (NativeMenu) — drives Win32 popup menus.
 raw-window-handle = { workspace = true }
 resvg = "0.48.1"
@@ -211,10 +212,13 @@ windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_GdiPlus",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
+  "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }
@@ -222,6 +226,7 @@ windows = { workspace = true, features = [
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 indoc = "2"
+tempfile = "3"
 
 [lints]
 workspace = true

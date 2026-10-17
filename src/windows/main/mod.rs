@@ -36,6 +36,8 @@ pub(crate) struct MainWindowService {
     window: Option<AnyWindowHandle>,
     main_view: Option<Entity<MainWindow>>,
     mouse_event_listener_id: Option<u64>,
+    #[cfg(target_os = "windows")]
+    pointer_check_sender: Option<async_channel::Sender<()>>,
     window_state: window_state::State,
     pub(crate) memory_trim_state: crate::services::memory_trim::State,
 }
@@ -305,49 +307,93 @@ impl MainWindowService {
         crate::services::memory_trim::schedule_startup_cleanup(cx);
 
         #[cfg(target_os = "windows")]
-        cx.spawn(async move |cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
-                let Some(window_is_open) = cx
-                    .try_read_global::<MainWindowService, _>(|service, _| service.window.is_some())
-                else {
-                    break;
-                };
-                if !window_is_open {
-                    break;
-                }
-                let Some(position) = input::pointer_snapshot().map(|snapshot| snapshot.position)
-                else {
-                    continue;
-                };
-                cx.update(|cx| {
-                    let (visible, pointer_inside) = Self::session_shortcut_scope(cx);
-                    crate::hotkey::sync_session_shortcuts(visible, pointer_inside, cx);
-                });
-                // 每帧都按当前指针位置判定贴边显示/隐藏，鼠标停在触发区不动时也能恢复显示。
-                let drag_request = cx.update(|cx| {
-                    window_drag::sync_edge_bounds_after_native_move(cx);
-                    let drag_request =
-                        crate::platform::external_drag::ExternalDragService::prepare_poll(cx);
-                    let position = input::pointer_snapshot()
-                        .map(|snapshot| snapshot.position)
-                        .unwrap_or(position);
-                    window_visibility::handle_mouse_move(position, cx);
-                    drag_request
-                });
-                if let Some(request) = drag_request {
-                    // DoDragDrop 会同步泵送 Windows 消息，因此不能持有 GPUI App 借用。
-                    let completion =
-                        crate::platform::external_drag::ExternalDragService::execute(request);
-                    cx.update(|cx| {
-                        crate::platform::external_drag::ExternalDragService::finish(completion, cx);
+        {
+            let (sender, receiver) = async_channel::bounded(1);
+            cx.update_global::<Self, _>(|service, _| service.pointer_check_sender = Some(sender));
+            Self::sync_pointer_change_notifier(cx);
+            cx.spawn(async move |cx| {
+                while receiver.recv().await.is_ok() {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                    let _ = receiver.try_recv();
+                    let Some(window_is_open) =
+                        cx.try_read_global::<MainWindowService, _>(|service, _| {
+                            service.window.is_some()
+                        })
+                    else {
+                        break;
+                    };
+                    if !window_is_open {
+                        break;
+                    }
+                    let Some(position) =
+                        input::pointer_snapshot().map(|snapshot| snapshot.position)
+                    else {
+                        continue;
+                    };
+                    let Some((visible, edge_attached)) =
+                        cx.try_read_global::<Self, _>(|service, _| {
+                            (
+                                service.window_state.is_logically_visible(),
+                                service.window_state.edge_attachment().is_some(),
+                            )
+                        })
+                    else {
+                        break;
+                    };
+                    // 普通隐藏窗口不需要鼠标移动轮询；贴边隐藏窗口仍需检测边缘唤出。
+                    if !visible && !edge_attached {
+                        continue;
+                    }
+                    if visible {
+                        cx.update(|cx| {
+                            let (visible, pointer_inside) = Self::session_shortcut_scope(cx);
+                            crate::hotkey::sync_session_shortcuts(visible, pointer_inside, cx);
+                        });
+                    }
+                    // 输入和窗口状态变化都会唤醒检查，指针静止时无需持续轮询。
+                    let drag_request = cx.update(|cx| {
+                        if visible {
+                            window_drag::sync_edge_bounds_after_native_move(cx);
+                        }
+                        let drag_request = if visible {
+                            crate::platform::external_drag::ExternalDragService::prepare_poll(cx)
+                        } else {
+                            None
+                        };
+                        let position = input::pointer_snapshot()
+                            .map(|snapshot| snapshot.position)
+                            .unwrap_or(position);
+                        window_visibility::handle_mouse_move(position, cx);
+                        drag_request
                     });
+                    if let Some(request) = drag_request {
+                        // DoDragDrop 会同步泵送 Windows 消息，因此不能持有 GPUI App 借用。
+                        let completion =
+                            crate::platform::external_drag::ExternalDragService::execute(request);
+                        cx.update(|cx| {
+                            crate::platform::external_drag::ExternalDragService::finish(
+                                completion, cx,
+                            );
+                        });
+                    }
                 }
-            }
-        })
-        .detach();
+            })
+            .detach();
+        }
+    }
+
+    pub(crate) fn request_pointer_check(cx: &App) {
+        #[cfg(target_os = "windows")]
+        if let Some(sender) = cx
+            .try_global::<Self>()
+            .and_then(|service| service.pointer_check_sender.as_ref())
+        {
+            let _ = sender.try_send(());
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = cx;
     }
 
     pub(crate) fn cancel_hover_preview(cx: &mut App) {
@@ -387,6 +433,19 @@ impl MainWindowService {
 
     pub(crate) fn is_logically_visible(cx: &App) -> bool {
         cx.global::<Self>().window_state.is_logically_visible()
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn sync_pointer_change_notifier(cx: &App) {
+        let notifier = cx.read_global::<Self, _>(|service, _| {
+            let needs_pointer_checks = service.window.is_some()
+                && (service.window_state.is_logically_visible()
+                    || service.window_state.edge_attachment().is_some());
+            needs_pointer_checks
+                .then(|| service.pointer_check_sender.as_ref().cloned())
+                .flatten()
+        });
+        input::set_pointer_change_notifier(notifier);
     }
 
     pub(crate) fn session_shortcut_scope(cx: &mut App) -> (bool, bool) {

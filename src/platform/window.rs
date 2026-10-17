@@ -714,6 +714,26 @@ pub(super) fn window_hwnd(window: &Window) -> Result<windows::Win32::Foundation:
 }
 
 #[cfg(target_os = "windows")]
+pub(crate) fn set_window_rendering_enabled(window: &Window, enabled: bool) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::WPARAM,
+        UI::WindowsAndMessaging::{SendMessageW, WM_SETREDRAW},
+    };
+
+    let hwnd = window_hwnd(window)?;
+    // SAFETY: 同步通知当前 GPUI 窗口暂停或恢复绘制，不改变贴边窗口的系统可见性。
+    unsafe {
+        SendMessageW(hwnd, WM_SETREDRAW, Some(WPARAM(usize::from(enabled))), None);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn set_window_rendering_enabled(_window: &Window, _enabled: bool) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 pub(crate) fn set_window_visible(window: &Window, visible: bool) -> Result<(), String> {
     use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNOACTIVATE, ShowWindowAsync};
 

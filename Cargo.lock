@@ -2864,6 +2864,7 @@ name = "gpui_ce_components"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "chrono",
  "core-text",
  "enum-iterator",

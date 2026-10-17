@@ -1,5 +1,6 @@
 use std::{any::TypeId, borrow::Cow, collections::HashMap, rc::Rc, time::Duration};
 
+use futures::{StreamExt, channel::mpsc};
 use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, AnyWindowHandle, App, AppContext, ClickEvent,
     Context, DismissEvent, ElementId, Entity, EventEmitter, FocusHandle, Global,
@@ -695,21 +696,29 @@ pub struct NotificationList {
     stacks: Vec<(Anchor, AnchorStack)>,
     focus_handle: FocusHandle,
     _subscriptions: HashMap<NotificationId, Subscription>,
+    wake_sender: mpsc::UnboundedSender<()>,
 }
 
 impl NotificationList {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (wake_sender, mut wake_receiver) = mpsc::unbounded();
         let view = cx.entity().downgrade();
         cx.spawn_in(window, async move |_, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(50))
-                    .await;
-                if view
-                    .update_in(cx, |view, window, cx| view.advance(window, cx))
-                    .is_err()
-                {
-                    break;
+            while wake_receiver.next().await.is_some() {
+                loop {
+                    let has_notifications = match view.update_in(cx, |view, window, cx| {
+                        view.advance(window, cx);
+                        !view.notifications.is_empty()
+                    }) {
+                        Ok(has_notifications) => has_notifications,
+                        Err(_) => return,
+                    };
+                    if !has_notifications {
+                        break;
+                    }
+                    cx.background_executor()
+                        .timer(Duration::from_millis(50))
+                        .await;
                 }
             }
         })
@@ -719,7 +728,12 @@ impl NotificationList {
             stacks: Vec::new(),
             focus_handle: cx.focus_handle().tab_stop(true),
             _subscriptions: HashMap::new(),
+            wake_sender,
         }
+    }
+
+    fn wake(&self) {
+        let _ = self.wake_sender.unbounded_send(());
     }
 
     fn is_expanded(&self) -> bool {
@@ -810,6 +824,7 @@ impl NotificationList {
                         note.update(cx, |note, cx| note.begin_close(cx));
                     }
                     SystemNotificationRegistry::dismiss(cx, &dismiss_id, window_id);
+                    view.wake();
                 }
             }),
         );
@@ -822,6 +837,7 @@ impl NotificationList {
             },
             cx.background_executor().now(),
         );
+        self.wake();
         cx.notify();
     }
 
@@ -891,6 +907,7 @@ impl NotificationList {
             if let Some(n) = self.notifications.get(&id) {
                 n.update(cx, |note, cx| note.begin_close(cx))
             }
+            self.wake();
         }
         cx.notify();
     }
@@ -924,6 +941,7 @@ impl NotificationList {
                 .dismiss(&id, cx.background_executor().now())
             {
                 n.update(cx, |note, cx| note.begin_close(cx));
+                self.wake();
             }
         }
         cx.notify();
@@ -938,6 +956,7 @@ impl NotificationList {
             if let Some(note) = self.notifications.get(&id) {
                 note.update(cx, |note, cx| note.begin_close(cx));
             }
+            self.wake();
         }
         cx.notify();
     }

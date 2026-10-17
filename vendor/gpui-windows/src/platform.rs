@@ -323,11 +323,24 @@ impl WindowsPlatform {
         let text_system = Arc::downgrade(direct_write_text_system);
         let invalidate_devices = self.invalidate_devices.clone();
 
-        std::thread::Builder::new()
+        let vsync_thread = std::thread::Builder::new()
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
                 loop {
+                    let Some(windows) = all_windows.upgrade() else {
+                        break;
+                    };
+                    let has_renderable_window = windows
+                        .read()
+                        .iter()
+                        .any(|hwnd| window_is_renderable(hwnd.as_raw()));
+                    drop(windows);
+                    if !has_renderable_window {
+                        // 全部窗口隐藏或暂停绘制时不再等待垂直同步，由窗口事件恢复。
+                        std::thread::park();
+                        continue;
+                    }
                     vsync_provider.wait_for_vsync();
                     if check_device_lost(&directx_device.device)
                         || invalidate_devices.fetch_and(false, Ordering::Acquire)
@@ -346,6 +359,9 @@ impl WindowsPlatform {
                         break;
                     };
                     for hwnd in all_windows.read().iter() {
+                        if !window_is_renderable(hwnd.as_raw()) {
+                            continue;
+                        }
                         unsafe {
                             let _ = RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE);
                         }
@@ -353,6 +369,13 @@ impl WindowsPlatform {
                 }
             })
             .unwrap();
+        let _ = self
+            .inner
+            .state
+            .draw_coordinator
+            .vsync_thread
+            .set(vsync_thread.thread().clone());
+        self.inner.state.draw_coordinator.wake_vsync();
     }
 }
 
@@ -583,6 +606,7 @@ impl Platform for WindowsPlatform {
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
         self.raw_window_handles.write().push(handle.into());
+        self.inner.state.draw_coordinator.wake_vsync();
 
         Ok(Box::new(window))
     }

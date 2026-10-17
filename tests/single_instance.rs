@@ -7,6 +7,44 @@ use std::{process::Command, time::Duration};
 
 use single_instance::{SingleInstance, take_activation_request};
 
+#[test]
+fn activation_listener_receives_pending_and_repeated_launch_requests() {
+    let directory = tempfile::tempdir().expect("创建单实例测试目录失败");
+    let instance = SingleInstance::acquire_at(directory.path(), Duration::ZERO)
+        .unwrap()
+        .unwrap();
+    assert!(
+        SingleInstance::acquire_at(directory.path(), Duration::ZERO)
+            .unwrap()
+            .is_none()
+    );
+    let receiver = single_instance::activation_requests(instance.activation_path()).unwrap();
+    let (sender, results) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok(result) = receiver.recv_blocking() {
+            if sender.send(result).is_err() {
+                break;
+            }
+        }
+    });
+    results
+        .recv_timeout(Duration::from_secs(5))
+        .expect("未收到监听启动前的请求")
+        .unwrap();
+    for _ in 0..3 {
+        assert!(
+            SingleInstance::acquire_at(directory.path(), Duration::ZERO)
+                .unwrap()
+                .is_none()
+        );
+        results
+            .recv_timeout(Duration::from_secs(5))
+            .expect("未收到重复启动请求")
+            .unwrap();
+    }
+    assert!(!take_activation_request(&instance.activation_path()).unwrap());
+}
+
 fn child(directory: &std::path::Path, role: &str) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command

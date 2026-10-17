@@ -233,6 +233,7 @@ fn synchronize_disabled_edge_window(
         return;
     };
     let result = window.update(cx, |_, window, cx| {
+        platform_window::set_window_rendering_enabled(window, true)?;
         if let Some(attachment) = previous_attachment {
             // 关闭贴边后，贴边窗口回到当前贴边位置并保持显示。
             platform_window::set_client_position(
@@ -316,6 +317,7 @@ fn synchronize_attached_edge_window(attachment: window_state::EdgeAttachment, cx
     };
     let show_edge = config_runtime::clipboard_config(cx).edge_hide_show_edge;
     let result = window.update(cx, |_, window, _| {
+        platform_window::set_window_rendering_enabled(window, visible)?;
         let bounds = if visible {
             attachment.client_bounds
         } else {
@@ -449,6 +451,7 @@ pub(crate) fn hide_initial_window(
         service.window_state.cancel_visibility_transition();
         service.window_state.set_visibility(false);
     });
+    platform_window::set_window_rendering_enabled(window, false)?;
     crate::services::memory_trim::schedule(cx);
     sync_mouse_leave_state(cx);
     Ok(())
@@ -458,6 +461,7 @@ pub(crate) fn set_edge_hide_temporarily_blocked(blocked: bool, cx: &mut App) {
     cx.update_global::<MainWindowService, _>(|service, _| {
         service.window_state.set_edge_reveal_blocked(blocked);
     });
+    MainWindowService::request_pointer_check(cx);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -479,6 +483,8 @@ pub(crate) fn attach_edge_and_remember(attachment: window_state::EdgeAttachment,
     cx.update_global::<MainWindowService, _>(|service, _| {
         service.window_state.attach_edge(attachment);
     });
+    #[cfg(target_os = "windows")]
+    MainWindowService::sync_pointer_change_notifier(cx);
     persist_edge_position(attachment, cx);
 }
 
@@ -710,6 +716,7 @@ pub(crate) fn set_visibility(
 
     let setup_result = window
         .update(cx, |_, window, _| -> Result<_, String> {
+            platform_window::set_window_rendering_enabled(window, true)?;
             if attachment.is_none() || visible {
                 platform_window::set_window_shadow_visible(window, true)?;
             }
@@ -825,6 +832,7 @@ fn apply_immediate_visibility(
             if visible {
                 platform_window::raise_window_to_topmost(window)?;
             }
+            platform_window::set_window_rendering_enabled(window, visible)?;
             Ok::<(), String>(())
         })
         .map_err(|error| error.to_string())?;
@@ -962,6 +970,7 @@ fn apply_visibility_animation_frame(
                 .finish_visibility_transition(generation)
         });
         if finished {
+            platform_window::set_window_rendering_enabled(window, animation_show(animation))?;
             if animation_show(animation) {
                 MainWindowService::handle_window_shown(window, cx);
                 if cx.read_global::<MainWindowService, _>(|service, _| {
@@ -1018,7 +1027,8 @@ fn restore_visibility_after_animation_failure(
         window,
         should_show_window_shadow(attachment, visible),
     )?;
-    platform_window::set_window_visible(window, attachment.is_some() || visible)
+    platform_window::set_window_visible(window, attachment.is_some() || visible)?;
+    platform_window::set_window_rendering_enabled(window, visible)
 }
 
 fn visibility_animation_progress(
@@ -1398,7 +1408,10 @@ pub(crate) fn sync_mouse_leave_state(cx: &mut App) {
                 edge_mouse_inside,
             ));
     });
+    #[cfg(target_os = "windows")]
+    MainWindowService::sync_pointer_change_notifier(cx);
     crate::hotkey::sync_session_shortcuts(visible, pointer_inside, cx);
+    MainWindowService::request_pointer_check(cx);
 }
 
 fn mouse_leave_state_for(

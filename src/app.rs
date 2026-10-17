@@ -305,36 +305,36 @@ pub fn run() {
                 initial_logical_size,
                 cx,
             );
-            cx.spawn(async move |cx| {
-                loop {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(100))
-                        .await;
-                    match crate::platform::single_instance::take_activation_request(
-                        &activation_path,
-                    ) {
-                        Ok(true) => {
-                            cx.update(|cx| {
-                                crate::windows::main::show_main_window(cx);
-                                if let Some(window) =
-                                    crate::windows::main::MainWindowService::window_handle(cx)
-                                    && let Err(error) =
-                                        window.update(cx, |_, window, _| window.activate_window())
-                                {
-                                    tracing::error!("激活已有实例主窗口失败：{error}");
+            match crate::platform::single_instance::activation_requests(activation_path) {
+                Ok(receiver) => cx
+                    .spawn(async move |cx| {
+                        while let Ok(result) = receiver.recv().await {
+                            match result {
+                                Ok(()) => {
+                                    cx.update(|cx| {
+                                        crate::windows::main::show_main_window(cx);
+                                        if let Some(window) =
+                                            crate::windows::main::MainWindowService::window_handle(
+                                                cx,
+                                            )
+                                            && let Err(error) = window
+                                                .update(cx, |_, window, _| window.activate_window())
+                                        {
+                                            tracing::error!("激活已有实例主窗口失败：{error}");
+                                        }
+                                        cx.activate(true);
+                                    });
                                 }
-                                cx.activate(true);
-                            });
+                                Err(error) => {
+                                    tracing::error!("读取单实例窗口显示请求失败：{error}");
+                                    break;
+                                }
+                            }
                         }
-                        Ok(false) => {}
-                        Err(error) => {
-                            tracing::error!("读取单实例窗口显示请求失败：{error}");
-                            break;
-                        }
-                    }
-                }
-            })
-            .detach();
+                    })
+                    .detach(),
+                Err(error) => tracing::error!("启动单实例窗口显示监听失败：{error}"),
+            }
             crate::services::application_filter::ApplicationFilterService::install(cx);
             #[cfg(target_os = "windows")]
             crate::services::system::check_win_v_on_startup(cx);
