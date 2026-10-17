@@ -10,6 +10,7 @@ use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::NumberInput;
 use gpui_component::scroll::ScrollableElement as _;
+use gpui_component::switch::Switch;
 use gpui_component::{
     Colorize as _, Disableable as _, Selectable as _, Sizable as _, h_flex, tooltip::Tooltip,
     v_flex,
@@ -483,6 +484,29 @@ impl SettingsWindowView {
                             .into(),
                     ),
                     max_items_control,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.data_management.cleanup_on_startup"),
+                    Some(
+                        translator
+                            .translate("settings.data_management.cleanup_on_startup_description")
+                            .into(),
+                    ),
+                    Switch::new("settings-data-cleanup-on-startup")
+                        .large()
+                        .checked(config.cleanup_on_startup)
+                        .disabled(self.data_busy)
+                        .accessibility_label(
+                            translator.translate("settings.data_management.cleanup_on_startup"),
+                        )
+                        .on_click(move |checked, _, cx| {
+                            let mut next = config_runtime::history_config(cx);
+                            next.cleanup_on_startup = *checked;
+                            save_history_config(view.clone(), next, cx);
+                        }),
                 ),
             )
             .child(stats_actions)

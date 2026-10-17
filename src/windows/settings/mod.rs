@@ -866,6 +866,12 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: DataManagement,
+            title_key: "settings.data_management.cleanup_on_startup",
+            description_key: Some("settings.data_management.cleanup_on_startup_description"),
+            ratio: 0.30,
+        },
+        SearchTargetSpec {
+            page: DataManagement,
             title_key: "settings.data_management.stats_title",
             description_key: Some("settings.data_management.stats_description"),
             ratio: 0.46,

@@ -376,6 +376,16 @@ impl DataManagementService {
         Ok(repository.cleanup_out_of_scope(policy)?)
     }
 
+    pub fn cleanup_history_on_startup(
+        &self,
+        policy: &HistoryConfig,
+    ) -> Result<HistoryCleanupReport, DataManagementError> {
+        if !policy.cleanup_on_startup {
+            return Ok(HistoryCleanupReport::default());
+        }
+        self.cleanup_history(policy)
+    }
+
     pub fn clear_all_history(&self) -> Result<HistoryCleanupReport, DataManagementError> {
         self.clear_history(false)
     }
@@ -1405,6 +1415,102 @@ fn read_u64(file: &mut File) -> Result<u64, io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_cleanup_on_startup_requires_opt_in_and_preserves_pins_and_favorites() {
+        use crate::services::{
+            capture::{CaptureService, mock::MockClipboardSource},
+            database::{FavoriteRepository, query::HistoryQuery},
+        };
+
+        let directory = tempfile::tempdir().expect("无法创建测试目录");
+        let service = DataManagementService::legacy_test_service(directory.path());
+        let capture = CaptureService::with_inline_threshold(
+            service.database.clone(),
+            service.blob_store.clone(),
+            0,
+        );
+        let mut ids = Vec::new();
+        for text in [
+            "过期置顶",
+            "过期收藏",
+            "过期普通历史",
+            "超出条数上限",
+            "保留的最新历史",
+        ] {
+            ids.push(
+                capture
+                    .store_captured_clipboard(&MockClipboardSource::text(text).capture())
+                    .expect("无法保存测试历史"),
+            );
+        }
+        let repository =
+            HistoryRepository::new(service.database.clone(), service.blob_store.clone());
+        repository
+            .set_pinned(ids[0], true)
+            .expect("无法置顶测试历史");
+        let connection = service.database.connect().expect("无法连接测试数据库");
+        connection.execute(
+            "UPDATE clipboard_history SET first_seen_at = 0, last_seen_at = 0 WHERE id IN (?1, ?2, ?3)",
+            rusqlite::params![ids[0], ids[1], ids[2]],
+        ).expect("无法设置过期历史");
+        let favorite_item_id: i64 = connection
+            .query_row(
+                "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                [ids[1]],
+                |row| row.get(0),
+            )
+            .expect("无法读取收藏内容");
+        drop(connection);
+        let favorites = FavoriteRepository::with_blob_store(
+            service.database.clone(),
+            service.blob_store.clone(),
+        );
+        favorites
+            .add_to_favorites(favorite_item_id)
+            .expect("无法添加测试收藏");
+        let mut policy = HistoryConfig {
+            retention_days: Some(7),
+            max_items: Some(1),
+            ..HistoryConfig::default()
+        };
+
+        assert_eq!(
+            service
+                .cleanup_history_on_startup(&policy)
+                .expect("关闭启动清理时不应失败"),
+            HistoryCleanupReport::default()
+        );
+        assert_eq!(
+            repository
+                .count(&HistoryQuery::default())
+                .expect("无法统计历史"),
+            5
+        );
+
+        policy.cleanup_on_startup = true;
+        let report = service
+            .cleanup_history_on_startup(&policy)
+            .expect("启动清理失败");
+        assert_eq!(report.history_items_removed, 3);
+        assert_eq!(report.orphan_items_removed, 2);
+        assert_eq!(report.orphan_blob_files_removed, 2);
+        let mut remaining = repository
+            .query(&HistoryQuery::default())
+            .expect("无法读取剩余历史")
+            .into_iter()
+            .map(|record| record.history_id)
+            .collect::<Vec<_>>();
+        remaining.sort_unstable();
+        assert_eq!(remaining, vec![ids[0], ids[4]]);
+        assert_eq!(
+            favorites
+                .query(&HistoryQuery::default())
+                .expect("无法读取保留收藏")
+                .len(),
+            1
+        );
+    }
 
     #[test]
     fn application_reset_clears_managed_data_and_restores_default_location() {

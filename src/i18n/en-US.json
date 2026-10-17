@@ -428,6 +428,8 @@
   "settings.data_management.retention_description": "Entries outside this time range are marked for cleanup. Expand the range to restore them before cleanup.",
   "settings.data_management.max_items": "History retention limit (entries)",
   "settings.data_management.max_items_description": "History entries beyond this item limit are marked for cleanup. Raise the limit to restore them before cleanup.",
+  "settings.data_management.cleanup_on_startup": "Clear pending history on startup",
+  "settings.data_management.cleanup_on_startup_description": "When enabled, permanently delete history beyond the retention period or item limit on each startup. Pinned entries and favorites are kept.",
   "settings.data_management.unlimited": "Unlimited",
   "settings.data_management.recent_days": "Last {count} days",
   "settings.data_management.item_count": "{count} items",

@@ -698,9 +698,9 @@ pub struct ClipboardConfig {
     pub search_engines: Vec<SearchEngine>,
 }
 
-/// 当前历史范围的时间和条数限制。
+/// 当前历史范围的时间、条数限制和启动清理设置。
 ///
-/// 超出范围的记录会进入待清理状态，直到用户主动清理；`None` 表示不启用对应限制。
+/// 超出范围的记录会进入待清理状态，可手动清理或启用启动清理；`None` 表示不启用对应限制。
 /// 置顶历史始终保留；收藏关联独立保留在收藏页。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -708,6 +708,7 @@ pub struct ClipboardConfig {
 pub struct HistoryConfig {
     pub retention_days: Option<u32>,
     pub max_items: Option<u32>,
+    pub cleanup_on_startup: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -908,6 +909,7 @@ impl Default for HistoryConfig {
         Self {
             retention_days: None,
             max_items: None,
+            cleanup_on_startup: false,
         }
     }
 }

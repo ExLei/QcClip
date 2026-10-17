@@ -736,7 +736,7 @@ impl HistoryRepository {
         })
     }
 
-    /// 只在用户主动清理时，永久删除超出当前保留范围的历史。
+    /// 手动清理或启用启动清理时，永久删除超出当前保留范围的历史。
     pub fn cleanup_out_of_scope(
         &self,
         policy: &HistoryConfig,

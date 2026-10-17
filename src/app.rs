@@ -166,6 +166,13 @@ pub fn run() {
                 app_paths.is_portable(),
                 cx,
             );
+            let history_policy = crate::config_runtime::history_config(cx);
+            if let Err(error) = cx
+                .global::<DataManagementService>()
+                .cleanup_history_on_startup(&history_policy)
+            {
+                tracing::error!("启动时清理待清理历史失败：{error}");
+            }
             crate::state_runtime::StateRuntime::install(&state_path, cx);
             crate::services::sound::install(
                 crate::config_runtime::sound_config(cx),

@@ -160,6 +160,13 @@ fn read_history(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Hist
             default.max_items,
             warnings,
         ),
+        cleanup_on_startup: read_field(
+            object,
+            "cleanupOnStartup",
+            "history.cleanupOnStartup",
+            default.cleanup_on_startup,
+            warnings,
+        ),
     }
 }
 
@@ -840,6 +847,30 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_cleanup_on_startup_round_trips_and_defaults_to_disabled() {
+        for content in ["{}", r#"{"history":{"retentionDays":7,"maxItems":100}}"#] {
+            let loaded = super::from_str(content).expect("无法读取历史配置");
+            assert!(!loaded.config.history.cleanup_on_startup);
+            assert!(loaded.warnings.is_empty());
+        }
+        let loaded = super::from_str(r#"{"history":{"cleanupOnStartup":true}}"#)
+            .expect("无法读取启动清理配置");
+        assert!(loaded.config.history.cleanup_on_startup);
+        let encoded = serde_json::to_string(&loaded.config).expect("无法保存启动清理配置");
+        assert!(
+            super::from_str(&encoded)
+                .expect("无法读取保存的配置")
+                .config
+                .history
+                .cleanup_on_startup
+        );
+        let invalid = super::from_str(r#"{"history":{"cleanupOnStartup":"invalid"}}"#)
+            .expect("无法读取无效配置");
+        assert!(!invalid.config.history.cleanup_on_startup);
+        assert_eq!(invalid.warnings.len(), 1);
+    }
+
     #[test]
     fn gallery_gif_autoplay_round_trips_and_defaults_to_disabled() {
         let old = super::from_str(r#"{"appearance":{"animations":{}}}"#).expect("无法读取已有配置");
