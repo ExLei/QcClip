@@ -192,7 +192,7 @@ pub(super) fn render(
     let paint_runs = heat_runs(&buckets);
     let paint_buckets = buckets.clone();
     let move_buckets = buckets.clone();
-    let click_buckets = buckets.clone();
+    let press_buckets = buckets.clone();
     let window_hovered = window.is_window_hovered();
     let pressed = state.drag_origin.is_some();
     let visible = state.visible && (window_hovered || pressed);
@@ -241,7 +241,7 @@ pub(super) fn render(
         )
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 this.set_heat_scrollbar_hovered(true, cx);
                 this.list_smooth_scroll.reset();
@@ -252,18 +252,15 @@ pub(super) fn render(
                     event.position.y,
                     handle.max_offset().y,
                 );
-                let mut offset = handle.offset();
-                if let Some(y) = jump_offset {
-                    offset.y = y;
-                    handle.set_offset(offset);
-                }
+                // 比例偏移只用于计算拖动锚点，点击直接定位热点。
+                let offset = jump_offset.unwrap_or_else(|| handle.offset().y);
                 this.heat_scrollbar.dragging = jump_offset.is_none();
                 this.heat_scrollbar.hovered_bucket = None;
                 let thumb = thumb_bounds(
                     this.heat_scrollbar.bounds,
                     handle.bounds().size.height,
                     handle.max_offset().y,
-                    offset.y,
+                    offset,
                     scale,
                 );
                 let grip = if thumb.size.height > px(0.0) {
@@ -274,6 +271,18 @@ pub(super) fn render(
                 };
                 this.heat_scrollbar.drag_origin = Some((event.position, grip));
                 this.heat_scrollbar.drag_pointer_y = event.position.y;
+                if jump_offset.is_some()
+                    && let Some(slot) = bucket_at(
+                        &press_buckets,
+                        this.heat_scrollbar.bounds,
+                        event.position.y,
+                        |index| this.list_scroll_handle.item_offset(index),
+                    )
+                    && let Some(bucket) = press_buckets.get(slot)
+                {
+                    this.heat_scrollbar.hovered_bucket = Some(slot);
+                    this.navigate_heat_index(bucket.peak_index, window, cx);
+                }
                 cx.notify();
             }),
         )
@@ -325,25 +334,10 @@ pub(super) fn render(
         })
         .on_mouse_up(
             MouseButton::Left,
-            cx.listener(move |this, event: &gpui::MouseUpEvent, window, cx| {
+            cx.listener(|this, _: &gpui::MouseUpEvent, window, cx| {
                 cx.stop_propagation();
-                let press = this.heat_scrollbar.drag_origin.take();
-                let was_dragging = this.heat_scrollbar.dragging;
+                this.heat_scrollbar.drag_origin = None;
                 this.heat_scrollbar.dragging = false;
-                if let Some((start, _)) = press
-                    && !was_dragging
-                    && drag_delta(start, event.position, false, scale).is_none()
-                    && let Some(slot) = bucket_at(
-                        &click_buckets,
-                        this.heat_scrollbar.bounds,
-                        start.y,
-                        |index| this.list_scroll_handle.item_offset(index),
-                    )
-                    && let Some(bucket) = click_buckets.get(slot)
-                {
-                    this.heat_scrollbar.hovered_bucket = Some(slot);
-                    this.navigate_heat_index(bucket.peak_index, window, cx);
-                }
                 if !window.is_window_hovered() {
                     this.heat_scrollbar.clear_on_window_exit();
                 }
