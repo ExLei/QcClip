@@ -370,10 +370,14 @@ impl DataManagementService {
         &self,
         policy: &HistoryConfig,
     ) -> Result<HistoryCleanupReport, DataManagementError> {
-        let _operation = super::data_runtime::begin_operation()
-            .map_err(|_| DataManagementError::DataSwitching)?;
-        let repository = HistoryRepository::new(self.database.clone(), self.blob_store.clone());
-        Ok(repository.cleanup_out_of_scope(policy)?)
+        super::data_runtime::with_exclusive_operation(|| {
+            let repository = HistoryRepository::new(self.database.clone(), self.blob_store.clone());
+            let report = repository.cleanup_out_of_scope(policy)?;
+            if let Err(error) = self.reclaim_database_space() {
+                tracing::warn!("历史清理已完成，但数据库空间回收失败：{error}");
+            }
+            Ok(report)
+        })
     }
 
     pub fn cleanup_history_on_startup(
@@ -400,12 +404,37 @@ impl DataManagementService {
     ) -> Result<HistoryCleanupReport, DataManagementError> {
         super::data_runtime::with_exclusive_operation(|| {
             let repository = HistoryRepository::new(self.database.clone(), self.blob_store.clone());
-            Ok(if keep_pinned {
+            let report = if keep_pinned {
                 repository.clear_unpinned()?
             } else {
                 repository.clear_all()?
-            })
+            };
+            if let Err(error) = self.reclaim_database_space() {
+                tracing::warn!("历史清理已完成，但数据库空间回收失败：{error}");
+            }
+            Ok(report)
         })
+    }
+
+    fn reclaim_database_space(&self) -> Result<(), DataManagementError> {
+        let connection = self.database.connect()?;
+        if !Database::maintenance_supported(&connection)? {
+            return Ok(());
+        }
+        let free_pages: i64 =
+            connection.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+        if free_pages > 0 {
+            // 删除记录只释放数据库内部页，需要在删除事务提交后重建文件以归还磁盘空间。
+            connection.execute_batch("VACUUM;")?;
+        }
+        let (busy, _, _): (i64, i64, i64) =
+            connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
+        if busy != 0 {
+            tracing::warn!("历史清理已完成，但数据库仍被占用，日志空间暂未完全回收");
+        }
+        Ok(())
     }
 
     pub(crate) fn prepare_application_reset(
@@ -1415,6 +1444,115 @@ fn read_u64(file: &mut File) -> Result<u64, io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bulk_history_cleanup_reclaims_database_space_and_preserves_favorite_content() {
+        use crate::services::{
+            capture::{CaptureService, mock::MockClipboardSource},
+            database::{FavoriteRepository, query::HistoryQuery},
+        };
+
+        for mode in ["all", "unpinned", "pending", "startup", "already_deleted"] {
+            let directory = tempfile::tempdir().expect("无法创建测试目录");
+            let service = DataManagementService::legacy_test_service(directory.path());
+            let capture = CaptureService::with_inline_threshold(
+                service.database.clone(),
+                service.blob_store.clone(),
+                usize::MAX,
+            );
+            let favorite_text = "需要保留的收藏原始内容";
+            let pinned_id = capture
+                .store_captured_clipboard(&MockClipboardSource::text(favorite_text).capture())
+                .expect("无法保存收藏历史");
+            let repository =
+                HistoryRepository::new(service.database.clone(), service.blob_store.clone());
+            repository
+                .set_pinned(pinned_id, true)
+                .expect("无法置顶历史");
+            let connection = service.database.connect().expect("无法连接测试数据库");
+            let item_id: i64 = connection
+                .query_row(
+                    "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                    [pinned_id],
+                    |row| row.get(0),
+                )
+                .expect("无法读取收藏内容编号");
+            drop(connection);
+            FavoriteRepository::new(service.database.clone())
+                .add_to_favorites(item_id)
+                .expect("无法添加收藏");
+            for index in 0..8 {
+                let text = format!("{index}{}", "x".repeat(128 * 1024));
+                capture
+                    .store_captured_clipboard(&MockClipboardSource::text(&text).capture())
+                    .expect("无法保存大文本历史");
+            }
+            let connection = service.database.connect().expect("无法连接测试数据库");
+            connection.execute("UPDATE clipboard_history SET first_seen_at = 0, last_seen_at = 0 WHERE is_pinned = 0", [])
+                .expect("无法设置过期历史");
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .expect("无法写回测试数据库");
+            drop(connection);
+            let before = fs::metadata(service.database.path())
+                .expect("无法读取清理前文件大小")
+                .len();
+            let policy = HistoryConfig {
+                retention_days: Some(7),
+                cleanup_on_startup: true,
+                ..HistoryConfig::default()
+            };
+            let report = match mode {
+                "all" => service.clear_all_history(),
+                "unpinned" => service.clear_unpinned_history(),
+                "pending" => service.cleanup_history(&policy),
+                "startup" => service.cleanup_history_on_startup(&policy),
+                "already_deleted" => {
+                    repository.clear_all().expect("无法模拟旧版本清空历史");
+                    service.clear_all_history()
+                }
+                _ => unreachable!(),
+            }
+            .expect("批量清理失败");
+            let after = fs::metadata(service.database.path())
+                .expect("无法读取清理后文件大小")
+                .len();
+            assert!(
+                after < before / 2,
+                "{mode} 未回收数据库空间：清理前 {before}，清理后 {after}"
+            );
+            let stats = service.stats(&policy).expect("无法读取数据统计");
+            assert_eq!(stats.database_bytes, after, "{mode} 仍残留日志空间");
+            assert_eq!(stats.favorite_count, 1);
+            let keep_pinned = matches!(mode, "unpinned" | "pending" | "startup");
+            assert_eq!(
+                repository
+                    .count(&HistoryQuery::default())
+                    .expect("无法统计历史"),
+                usize::from(keep_pinned)
+            );
+            assert_eq!(
+                report.history_items_removed,
+                if mode == "already_deleted" {
+                    0
+                } else if keep_pinned {
+                    8
+                } else {
+                    9
+                }
+            );
+            let connection = service.database.connect().expect("无法连接测试数据库");
+            let saved: Vec<u8> = connection.query_row(
+                "SELECT cf.inline_data FROM clipboard_formats cf JOIN favorites f ON f.item_id = cf.item_id WHERE cf.is_primary = 1",
+                [], |row| row.get(0),
+            ).expect("无法读取保留收藏的原始数据");
+            assert_eq!(saved, favorite_text.as_bytes());
+            let integrity: String = connection
+                .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+                .expect("数据库完整性检查失败");
+            assert_eq!(integrity, "ok");
+        }
+    }
 
     #[test]
     fn history_cleanup_on_startup_requires_opt_in_and_preserves_pins_and_favorites() {
