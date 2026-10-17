@@ -42,13 +42,13 @@ use crate::{
         capture::{FormatKind, FormatRole},
         clipboard::{
             ClipboardItemId, ClipboardListItem, ContentKind, FormatPreview, HistoryItemId,
-            ImageDimensions, Tag, is_empty_textual_preview,
+            ImageDimensions, ImagePreviewSource, Tag, is_empty_textual_preview,
             select_user_visible_previews_with_priority,
         },
     },
     i18n::{self, Translator},
     platform::window::logical_to_physical_desktop,
-    services::capture::extract_links,
+    services::{capture::extract_links, image_preview::LoadedImagePreview},
     ui::{hover_icon, html as html_preview, icon},
     windows::main::state::{
         FileListKey, ListDropTarget, ListItemLoadAnimation, ListLayoutCache, ListLayoutCacheKey,
@@ -114,7 +114,7 @@ struct ListItemDrag {
     metrics: ListItemMetrics,
     list_item_style: ListItemStyle,
     display_preview: Option<FormatPreview>,
-    image: Option<Arc<RenderImage>>,
+    image: Option<LoadedImagePreview>,
     source_app_icon: Option<Arc<RenderImage>>,
     file_list: Option<Entity<FileListView>>,
     preview_size: Rc<Cell<Option<Size<Pixels>>>>,
@@ -127,18 +127,12 @@ struct ListItemDragPreview {
 }
 
 impl Render for ListItemDragPreview {
-    fn render(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.render_preview {
             return div().into_any_element();
         }
 
-        render_drag_preview(
-            &self.drag,
-            &self.html_images,
-            &self.drag.item.shortcut,
-            window,
-            cx,
-        )
+        render_drag_preview(&self.drag, &self.html_images, &self.drag.item.shortcut, cx)
     }
 }
 
@@ -154,7 +148,7 @@ struct ClipboardRowContent {
     preview_priority: ClipboardDisplayPriority,
     display_preview: Option<FormatPreview>,
     html_images: HashMap<PathBuf, Arc<RenderImage>>,
-    image: Option<Arc<RenderImage>>,
+    image: Option<LoadedImagePreview>,
     source_app_icon: Option<Arc<RenderImage>>,
     file_list: Option<Entity<FileListView>>,
     active_tab: TabId,
@@ -1593,6 +1587,21 @@ fn render_selection_indicator(
     indicator.into_any_element()
 }
 
+fn image_meta_byte_length(
+    format_kind: FormatKind,
+    source: Option<&ImagePreviewSource>,
+    loaded_byte_length: Option<u64>,
+) -> Option<u64> {
+    if format_kind == FormatKind::FileList {
+        // 文件列表原始数据是路径，体积必须使用实际解码的图片文件大小。
+        return loaded_byte_length;
+    }
+    loaded_byte_length.or_else(|| match source? {
+        ImagePreviewSource::Inline { bytes } => Some(bytes.len() as u64),
+        ImagePreviewSource::External { byte_length, .. } => Some(*byte_length),
+    })
+}
+
 fn render_item_surface<T>(
     item: &ClipboardListItem,
     selected: bool,
@@ -1601,7 +1610,7 @@ fn render_item_surface<T>(
     list_item_style: ListItemStyle,
     display_preview: Option<&FormatPreview>,
     html_images: &HashMap<PathBuf, Arc<RenderImage>>,
-    image: Option<Arc<RenderImage>>,
+    image: Option<LoadedImagePreview>,
     source_app_icon: Option<Arc<RenderImage>>,
     file_list: Option<Entity<FileListView>>,
     width: Option<Pixels>,
@@ -1609,7 +1618,6 @@ fn render_item_surface<T>(
     hover_actions: Option<(AnyElement, usize)>,
     selection_window: Option<Entity<MainWindow>>,
     hover_allowed: bool,
-    window: &Window,
     cx: &mut Context<T>,
 ) -> gpui::Div {
     let translator = i18n::translator(cx);
@@ -1649,6 +1657,20 @@ fn render_item_surface<T>(
             )],
         )
     };
+    let image_size = display_preview
+        .filter(|preview| {
+            preview.content_kind == ContentKind::Image
+                && matches!(preview.role(), FormatRole::Image | FormatRole::FileList)
+        })
+        .filter(|_| display.enabled(ItemDisplayField::ImageSize))
+        .map(|preview| {
+            let bytes = image_meta_byte_length(
+                preview.format_kind,
+                preview.image_source.as_ref(),
+                image.as_ref().and_then(|loaded| loaded.byte_length),
+            );
+            i18n::file_size(&translator, bytes, false)
+        });
     let theme = cx.theme().colors;
     let info_bar_background = if drag_preview {
         gpui::transparent_black()
@@ -1664,22 +1686,6 @@ fn render_item_surface<T>(
         && display.enabled(ItemDisplayField::Shortcut)
         && !shortcut_number.is_empty();
     let identity_count = usize::from(show_source) + usize::from(show_shortcut);
-    let unit_width = metrics.rem_size * (20.0 / 16.0);
-    let shortcut_width = if show_shortcut {
-        let mut text_style = window.text_style();
-        text_style.font_family = cx.theme().font_family.clone();
-        let line = window.text_system().shape_line(
-            shortcut_number.clone().into(),
-            metrics.rem_size * 0.75,
-            &[text_style.to_run(shortcut_number.len())],
-            None,
-        );
-        (line.width + metrics.rem_size * (8.0 / 16.0)).max(unit_width)
-    } else {
-        px(0.0)
-    };
-    let identity_width = unit_width * usize::from(show_source) as f32 + shortcut_width;
-    let toolbar_width = unit_width * action_count as f32 + identity_width;
     let has_toolbar = action_count + identity_count > 0;
     let mut identity = div()
         .h_full()
@@ -1788,7 +1794,7 @@ fn render_item_surface<T>(
         } else {
             preview = preview.child(file_list);
         }
-    } else if let Some(image) = image {
+    } else if let Some(loaded) = image {
         preview = preview.child(
             div()
                 .w_full()
@@ -1797,7 +1803,7 @@ fn render_item_surface<T>(
                 .min_h_0()
                 .overflow_hidden()
                 .child(
-                    img(image)
+                    img(loaded.image)
                         .h(content_metrics.preview_height)
                         .max_w_full()
                         .max_h(content_metrics.preview_height)
@@ -1847,9 +1853,6 @@ fn render_item_surface<T>(
         .h(metrics.meta_row_height)
         .w_full()
         .min_w_0()
-        .when(has_toolbar, |this| {
-            this.pr((toolbar_width - metrics.rem_size * (10.0 / 16.0)).max(px(0.0)))
-        })
         .flex_none()
         .flex()
         .items_center()
@@ -1868,7 +1871,8 @@ fn render_item_surface<T>(
         })
         .when(display.enabled(ItemDisplayField::Length), |this| {
             this.child(div().min_w_0().truncate().child(length))
-        });
+        })
+        .children(image_size.map(|label| div().flex_shrink_0().child(label)));
     if display.info_visibility == ItemRegionVisibility::Active && !selected {
         meta_row = meta_row.invisible();
         if hover_allowed {
@@ -1890,7 +1894,6 @@ fn render_item_surface<T>(
     };
     row = row.px(ui_rem(10.0)).py(metrics.vertical_padding);
     if metrics.show_meta {
-        // 首行给右上角控件让出实际宽度，避免信息较长时互相遮挡。
         row = row.child(meta_row);
     }
     if show_note_header {
@@ -2018,7 +2021,6 @@ fn render_drag_preview(
     drag: &ListItemDrag,
     html_images: &HashMap<PathBuf, Arc<RenderImage>>,
     shortcut: &str,
-    window: &Window,
     cx: &mut Context<ListItemDragPreview>,
 ) -> AnyElement {
     let Some(preview_size) = drag.preview_size.get() else {
@@ -2050,7 +2052,6 @@ fn render_drag_preview(
         None,
         None,
         false,
-        window,
         cx,
     );
     let surface = if drag.list_item_style == ListItemStyle::Card {
@@ -2234,7 +2235,7 @@ fn render_row(
     preview_priority: ClipboardDisplayPriority,
     display_preview: Option<FormatPreview>,
     html_images: &HashMap<PathBuf, Arc<RenderImage>>,
-    image: Option<Arc<RenderImage>>,
+    image: Option<LoadedImagePreview>,
     source_app_icon: Option<Arc<RenderImage>>,
     file_list: Option<gpui::Entity<FileListView>>,
     active_tab: TabId,
@@ -2285,7 +2286,6 @@ fn render_row(
         hover_actions,
         Some(main_window.clone()),
         hover_allowed,
-        window,
         cx,
     );
     let target_is_pinned = item.is_pinned;
@@ -3246,7 +3246,8 @@ fn render_placeholder_row(
 mod tests {
     use super::{
         ADAPTIVE_IMAGE_PREVIEW_LINES, ListItemMetrics, compute_reorder_animation_start_offsets,
-        estimate_text_lines, file_list_meta_label, image_meta_label, resolve_row_height,
+        estimate_text_lines, file_list_meta_label, image_meta_byte_length, image_meta_label,
+        resolve_row_height,
     };
     use crate::config::{CardItemGap, ListItemHeight, ListItemStyle};
     use crate::domain::clipboard::ImageDimensions;
@@ -3334,6 +3335,40 @@ mod tests {
             "1024 x 1024"
         );
         assert_eq!(image_meta_label(&translator, None), "图片");
+    }
+
+    #[test]
+    fn image_size_uses_raw_payload_or_actual_image_file_bytes() {
+        use crate::domain::{capture::FormatKind, clipboard::ImagePreviewSource};
+
+        let inline = ImagePreviewSource::Inline {
+            bytes: vec![0; 1234].into(),
+        };
+        let external = ImagePreviewSource::External {
+            sha256: [0; 32],
+            byte_length: 5678,
+            relative_path: "图片.raw".into(),
+        };
+        for (source, expected) in [(&inline, 1234), (&external, 5678)] {
+            assert_eq!(
+                image_meta_byte_length(FormatKind::Image, Some(source), None),
+                Some(expected)
+            );
+            assert_eq!(
+                image_meta_byte_length(FormatKind::FileList, Some(source), None),
+                None
+            );
+            assert_eq!(
+                image_meta_byte_length(FormatKind::FileList, Some(source), Some(8192)),
+                Some(8192)
+            );
+        }
+        assert_eq!(image_meta_byte_length(FormatKind::Image, None, None), None);
+        let translator = Translator::builtin(Locale::zh_cn());
+        assert_eq!(
+            crate::i18n::file_size(&translator, Some(8192), false),
+            "8.0 KB"
+        );
     }
 
     #[test]

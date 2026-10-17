@@ -29,6 +29,7 @@ impl ItemRegionVisibility {
 pub enum ItemDisplayField {
     Time,
     Length,
+    ImageSize,
     Source,
     Shortcut,
     Edit,
@@ -42,9 +43,10 @@ pub enum ItemDisplayField {
 }
 
 impl ItemDisplayField {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Time,
         Self::Length,
+        Self::ImageSize,
         Self::Source,
         Self::Shortcut,
         Self::Edit,
@@ -61,6 +63,7 @@ impl ItemDisplayField {
         match self {
             Self::Time => "settings.item_display.time",
             Self::Length => "settings.item_display.length",
+            Self::ImageSize => "settings.item_display.image_size",
             Self::Source => "settings.item_display.source",
             Self::Shortcut => "settings.item_display.shortcut",
             Self::Edit => "main.menu.edit",
@@ -109,7 +112,9 @@ impl ItemDisplayConfig {
 
     pub fn shows_info_row(&self) -> bool {
         self.info_visibility != ItemRegionVisibility::Hidden
-            && (self.enabled(ItemDisplayField::Time) || self.enabled(ItemDisplayField::Length))
+            && (self.enabled(ItemDisplayField::Time)
+                || self.enabled(ItemDisplayField::Length)
+                || self.enabled(ItemDisplayField::ImageSize))
     }
 
     pub fn preset(&self) -> Option<ItemDisplayPreset> {
@@ -231,6 +236,12 @@ mod tests {
         let mut config = ItemDisplayConfig::default();
         config.set_enabled(ItemDisplayField::Time, false);
         config.set_enabled(ItemDisplayField::Length, false);
+        assert!(config.shows_info_row());
+        config.set_enabled(ItemDisplayField::ImageSize, false);
+        assert!(!config.shows_info_row());
+        config.set_enabled(ItemDisplayField::ImageSize, true);
+        assert!(config.shows_info_row());
+        config.info_visibility = ItemRegionVisibility::Hidden;
         assert!(!config.shows_info_row());
         config.set_enabled(ItemDisplayField::Time, true);
         config.info_visibility = ItemRegionVisibility::Active;

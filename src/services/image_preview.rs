@@ -50,6 +50,7 @@ const MAX_IMAGE_DECODE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_FILE_FALLBACK_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_LOCAL_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
 
+#[derive(Clone, PartialEq)]
 pub struct LoadedImagePreview {
     pub image: Arc<RenderImage>,
     pub dimensions: Option<ImageDimensions>,

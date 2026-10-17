@@ -15,6 +15,7 @@
   "settings.item_display.full": "Full",
   "settings.item_display.time": "Copy time",
   "settings.item_display.length": "Characters / image size / file count",
+  "settings.item_display.image_size": "Image / image file size",
   "settings.item_display.source": "Source application icon",
   "settings.item_display.shortcut": "Item number",
   "settings.personalization.app_font": "App font",

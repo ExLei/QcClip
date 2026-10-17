@@ -60,7 +60,11 @@ pub(super) fn open_item_display_sheet(
                 "information",
                 "settings.item_display.information",
                 display.info_visibility,
-                vec![ItemDisplayField::Time, ItemDisplayField::Length],
+                vec![
+                    ItemDisplayField::Time,
+                    ItemDisplayField::Length,
+                    ItemDisplayField::ImageSize,
+                ],
             ),
             (
                 "identity",

@@ -15,6 +15,7 @@
   "settings.item_display.full": "完整",
   "settings.item_display.time": "复制时间",
   "settings.item_display.length": "字数 / 图片尺寸 / 文件数量",
+  "settings.item_display.image_size": "图片 / 图片文件体积",
   "settings.item_display.source": "来源应用图标",
   "settings.item_display.shortcut": "条目序号",
   "settings.personalization.app_font": "应用字体",

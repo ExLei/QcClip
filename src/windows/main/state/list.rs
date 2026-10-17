@@ -263,10 +263,10 @@ impl MainWindow {
             .cloned()
             .collect::<Vec<_>>();
         for key in stale_keys {
-            if let Some(image) = self.loaded_images.remove(&key)
+            if let Some(loaded) = self.loaded_images.remove(&key)
                 && let Some(window) = window.as_deref_mut()
             {
-                let _ = window.drop_image(image);
+                let _ = window.drop_image(loaded.image);
             }
         }
         self.image_load_failures
@@ -430,7 +430,7 @@ impl MainWindow {
                                 if let Some(dimensions) = loaded.dimensions {
                                     this.update_image_preview_dimensions(&key, dimensions);
                                 }
-                                this.loaded_images.insert(key, loaded.image);
+                                this.loaded_images.insert(key, loaded);
                                 cx.notify();
                             }
                             Ok(_) => {}
@@ -726,7 +726,7 @@ impl MainWindow {
         item_id: ClipboardItemId,
         format_namespace: &str,
         format_key: &str,
-    ) -> Option<Arc<RenderImage>> {
+    ) -> Option<LoadedImagePreview> {
         self.loaded_images
             .get(&ImagePreviewKey::new(item_id, format_namespace, format_key))
             .cloned()
@@ -769,8 +769,8 @@ impl MainWindow {
             return;
         }
         if self.image_cache_invalidated_item_ids.is_empty() {
-            for (_, image) in self.loaded_images.drain() {
-                let _ = window.drop_image(image);
+            for (_, loaded) in self.loaded_images.drain() {
+                let _ = window.drop_image(loaded.image);
             }
             for (_, image) in self.loaded_html_images.drain() {
                 let _ = window.drop_image(image);
@@ -783,8 +783,8 @@ impl MainWindow {
                 .cloned()
                 .collect::<Vec<_>>();
             for key in stale_keys {
-                if let Some(image) = self.loaded_images.remove(&key) {
-                    let _ = window.drop_image(image);
+                if let Some(loaded) = self.loaded_images.remove(&key) {
+                    let _ = window.drop_image(loaded.image);
                 }
             }
         }
