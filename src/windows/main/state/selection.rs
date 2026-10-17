@@ -1,5 +1,30 @@
 use super::*;
 
+fn extend_multi_selection_range(
+    selected_ids: &mut Vec<HistoryItemId>,
+    order_ids: &[HistoryItemId],
+    anchor_index: usize,
+    target_index: usize,
+    keep_existing: bool,
+) {
+    if !keep_existing {
+        selected_ids.clear();
+    }
+    for offset in 0..=anchor_index.abs_diff(target_index) {
+        let index = if anchor_index <= target_index {
+            anchor_index + offset
+        } else {
+            anchor_index - offset
+        };
+        let Some(id) = order_ids.get(index).copied() else {
+            continue;
+        };
+        if !selected_ids.contains(&id) {
+            selected_ids.push(id);
+        }
+    }
+}
+
 impl MainWindow {
     pub fn select_item(&mut self, history_id: HistoryItemId) {
         self.keyboard_selection_mouse_move_sequence = None;
@@ -37,22 +62,13 @@ impl MainWindow {
                 .get(&history_id)
                 .copied()
                 .unwrap_or(anchor_index);
-            let range = if anchor_index <= target_index {
-                anchor_index..=target_index
-            } else {
-                target_index..=anchor_index
-            };
-            if !modifiers.control {
-                self.multi_selected_item_ids.clear();
-            }
-            for index in range {
-                let Some(id) = self.list_order_ids.get(index).copied() else {
-                    continue;
-                };
-                if !self.multi_selected_item_ids.contains(&id) {
-                    self.multi_selected_item_ids.push(id);
-                }
-            }
+            extend_multi_selection_range(
+                &mut self.multi_selected_item_ids,
+                &self.list_order_ids,
+                anchor_index,
+                target_index,
+                modifiers.control,
+            );
             self.multi_selection_anchor = Some(anchor);
         } else if modifiers.control {
             if let Some(index) = self
