@@ -774,7 +774,7 @@ impl HistoryRepository {
         if query.limit == 0 {
             return Ok(Vec::new());
         }
-        let connection = self.database.connect()?;
+        let connection = self.database.connect_read()?;
         let mut conditions = vec!["i.capture_state = 'ready'".to_owned()];
         let mut parameters = Vec::new();
 

@@ -366,3 +366,45 @@ fn future_schema_skips_startup_recovery_and_resource_collection() {
     assert_eq!(count, 1);
     drop(pending);
 }
+
+#[test]
+fn list_read_connection_is_read_only_and_rechecks_compatibility() {
+    let directory = tempfile::tempdir().expect("无法创建临时目录");
+    let database = Database::open(directory.path().join("read.sqlite3")).expect("无法创建数据库");
+    let reader = database.connect_read().expect("无法创建只读连接");
+    assert!(
+        reader
+            .is_readonly(rusqlite::MAIN_DB)
+            .expect("无法检查只读状态")
+    );
+    assert!(reader.execute("DELETE FROM tags", []).is_err());
+    drop(reader);
+
+    let writer = database.connect_write().expect("无法创建写入连接");
+    future_database(&writer, 1, 2);
+    assert!(database.connect_read().is_ok());
+    writer
+        .execute(
+            "UPDATE database_compatibility SET minimum_read_version = 2",
+            [],
+        )
+        .expect("无法修改读取版本");
+    assert!(matches!(
+        database.connect_read(),
+        Err(super::DatabaseError::UnsupportedReadVersion { .. })
+    ));
+}
+
+#[test]
+fn list_read_connection_rejects_core_schema_changes_after_open() {
+    let directory = tempfile::tempdir().expect("无法创建临时目录");
+    let database = Database::open(directory.path().join("read.sqlite3")).expect("无法创建数据库");
+    let writer = database.connect_write().expect("无法创建写入连接");
+    writer
+        .execute_batch("ALTER TABLE tags RENAME COLUMN name TO future_name;")
+        .expect("无法模拟核心字段变化");
+    assert!(matches!(
+        database.connect_read(),
+        Err(super::DatabaseError::Validation(_))
+    ));
+}

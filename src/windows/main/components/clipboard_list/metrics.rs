@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(super) struct ListItemMetrics {
     pub(super) rem_size: Pixels,
     pub(super) row_height: Pixels,

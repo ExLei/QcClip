@@ -132,6 +132,18 @@ impl Database {
         Ok(database)
     }
 
+    pub(crate) fn connect_read(&self) -> Result<DatabaseConnection, DatabaseError> {
+        let operation =
+            data_runtime::begin_operation().map_err(|_| DatabaseError::DataSwitching)?;
+        let connection = self.open_connection(true, false)?;
+        migrations::validate_schema(&connection)?;
+        self.validate_connection(&connection)?;
+        Ok(DatabaseConnection {
+            connection,
+            _operation: operation,
+        })
+    }
+
     pub(crate) fn connect(&self) -> Result<DatabaseConnection, DatabaseError> {
         let operation =
             data_runtime::begin_operation().map_err(|_| DatabaseError::DataSwitching)?;

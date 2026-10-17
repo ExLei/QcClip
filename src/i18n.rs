@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use gpui::{App, AppContext, BorrowAppContext as _, Global};
 
@@ -49,13 +49,16 @@ impl Default for Locale {
 #[derive(Debug, Clone, Default)]
 pub struct MessageBundle {
     locale: Locale,
-    entries: HashMap<String, String>,
+    entries: Arc<HashMap<String, String>>,
 }
 
 impl MessageBundle {
     pub fn from_json_str(locale: Locale, json: &str) -> Result<Self, serde_json::Error> {
         let entries = serde_json::from_str(json)?;
-        Ok(Self { locale, entries })
+        Ok(Self {
+            locale,
+            entries: Arc::new(entries),
+        })
     }
 
     pub fn get(&self, key: &str) -> Option<&str> {
@@ -283,6 +286,35 @@ mod tests {
             "3 characters"
         );
         assert_eq!(translator.translate("missing.key"), "i18n:missing.key");
+    }
+
+    #[test]
+    fn translator_snapshot_keeps_active_and_fallback_text_after_registry_is_dropped() {
+        let snapshot = {
+            let registry = BundleRegistry::from_bundles([
+                MessageBundle::from_json_str(
+                    Locale::zh_cn(),
+                    r#"{"shared":"中文","fallback":"回退文本"}"#,
+                )
+                .expect("中文测试资源无效"),
+                MessageBundle::from_json_str(Locale::en_us(), r#"{"shared":"English"}"#)
+                    .expect("英文测试资源无效"),
+            ]);
+            let translator = Translator::from_registry(&registry, Locale::en_us(), Locale::zh_cn());
+            translator.clone()
+        };
+        assert_eq!(snapshot.translate("shared"), "English");
+        assert_eq!(snapshot.translate("fallback"), "回退文本");
+        assert_eq!(snapshot.translate("missing"), "i18n:missing");
+    }
+
+    #[test]
+    fn switching_translator_does_not_change_an_existing_snapshot() {
+        let mut translator = Translator::builtin(Locale::zh_cn());
+        let snapshot = translator.clone();
+        translator = Translator::builtin(Locale::en_us());
+        assert_eq!(snapshot.translate("main.preview.image"), "图片");
+        assert_eq!(translator.translate("main.preview.image"), "Image");
     }
 
     #[test]

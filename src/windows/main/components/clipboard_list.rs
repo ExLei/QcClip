@@ -142,6 +142,110 @@ impl Render for ListItemDragPreview {
     }
 }
 
+#[derive(PartialEq)]
+struct ClipboardRowContent {
+    item: ClipboardListItem,
+    can_reorder: bool,
+    focused: bool,
+    selection_number: Option<usize>,
+    metrics: ListItemMetrics,
+    list_item_style: ListItemStyle,
+    display_priority: ClipboardDisplayPriority,
+    preview_priority: ClipboardDisplayPriority,
+    display_preview: Option<FormatPreview>,
+    html_images: HashMap<PathBuf, Arc<RenderImage>>,
+    image: Option<Arc<RenderImage>>,
+    source_app_icon: Option<Arc<RenderImage>>,
+    file_list: Option<Entity<FileListView>>,
+    active_tab: TabId,
+    tags: Vec<Tag>,
+    reorder_animation: Option<(u64, Pixels)>,
+    load_animation: Option<(u64, usize)>,
+    load_offset: Pixels,
+    hover_allowed: bool,
+    appearance: crate::config::AppearanceConfig,
+    clipboard: crate::config::ClipboardConfig,
+    minute: u64,
+}
+
+struct ClipboardRowView {
+    content: ClipboardRowContent,
+    main_window: gpui::WeakEntity<MainWindow>,
+}
+
+impl Render for ClipboardRowView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = &self.content;
+        self.main_window
+            .update(cx, |_, cx| {
+                render_row(
+                    content.item.clone(),
+                    content.can_reorder,
+                    content.focused.then_some(content.item.history_id),
+                    content.selection_number,
+                    content.metrics,
+                    content.list_item_style,
+                    content.display_priority,
+                    content.preview_priority,
+                    content.display_preview.clone(),
+                    &content.html_images,
+                    content.image.clone(),
+                    content.source_app_icon.clone(),
+                    content.file_list.clone(),
+                    content.active_tab,
+                    &content.tags,
+                    content.reorder_animation,
+                    content
+                        .load_animation
+                        .map(|(generation, order)| ListItemLoadAnimation { generation, order }),
+                    content.load_offset,
+                    content.hover_allowed,
+                    window,
+                    cx,
+                )
+            })
+            .unwrap_or_else(|_| div().into_any_element())
+    }
+}
+
+fn render_cached_row(
+    content: ClipboardRowContent,
+    window: &mut Window,
+    cx: &mut Context<MainWindow>,
+) -> AnyElement {
+    let main_window = cx.entity().downgrade();
+    let row_height = content.metrics.row_height;
+    let mut content = Some(content);
+    let row = window.use_keyed_state(
+        (
+            "clipboard-row-view",
+            content.as_ref().unwrap().item.history_id as u64,
+        ),
+        cx,
+        |_, _| ClipboardRowView {
+            content: content.take().unwrap(),
+            main_window,
+        },
+    );
+    // 内容变化当帧走普通视图，丢弃旧的绘制缓存；后续稳定帧才复用。
+    let changed = content.is_some_and(|content| {
+        row.update(cx, |row, _| {
+            if row.content == content {
+                false
+            } else {
+                row.content = content;
+                true
+            }
+        })
+    });
+    if changed {
+        row.into_any_element()
+    } else {
+        let mut slot = div().w_full().h(row_height);
+        row.cached(slot.style().clone()).into_any_element()
+    }
+}
+
 pub(crate) fn quick_paste_row_metrics(
     window: &Window,
     cx: &App,
@@ -478,8 +582,6 @@ fn render_rows(
                 .list_reorder_animation
                 .as_ref()
                 .map(|animation| (animation.generation, animation.start_offsets.clone()));
-            // request_layout 会用 0..1 测量行高；只有单项列表需要在这次调用中补做图片预取。
-            let is_measurement_range = range.start == 0 && range.end == 1;
             let rows = range
                 .clone()
                 .map(|index| {
@@ -556,33 +658,43 @@ fn render_rows(
                                     .iter()
                                     .position(|id| *id == item.history_id)
                                     .map(|index| index + 1);
-                                render_row(
-                                    item,
-                                    can_reorder,
-                                    selected_item_id,
-                                    selection_number,
-                                    row_metrics,
-                                    list_item_style,
-                                    display_priority,
-                                    preview_priority,
-                                    display_preview,
-                                    &this.loaded_html_images,
-                                    image,
-                                    source_app_icon,
-                                    file_list,
-                                    active_tab,
-                                    &this.tags,
-                                    reorder_animation
-                                        .as_ref()
-                                        .and_then(|(generation, offsets)| {
-                                            offsets
-                                                .get(&item_history_id)
-                                                .copied()
-                                                .map(|offset| (*generation, offset))
+                                render_cached_row(
+                                    ClipboardRowContent {
+                                        focused: selected_item_id == Some(item_history_id),
+                                        item,
+                                        can_reorder,
+                                        selection_number,
+                                        metrics: row_metrics,
+                                        list_item_style,
+                                        display_priority,
+                                        preview_priority,
+                                        display_preview,
+                                        html_images: this.loaded_html_images.clone(),
+                                        image,
+                                        source_app_icon,
+                                        file_list,
+                                        active_tab,
+                                        tags: this.tags.clone(),
+                                        reorder_animation: reorder_animation.as_ref().and_then(
+                                            |(generation, offsets)| {
+                                                offsets
+                                                    .get(&item_history_id)
+                                                    .copied()
+                                                    .map(|offset| (*generation, offset))
+                                            },
+                                        ),
+                                        load_animation: load_animation.map(|animation| {
+                                            (animation.generation, animation.order)
                                         }),
-                                    load_animation,
-                                    list_width,
-                                    hover_allowed,
+                                        load_offset: list_width,
+                                        hover_allowed,
+                                        appearance: config_runtime::appearance_config(cx),
+                                        clipboard: config_runtime::clipboard_config(cx),
+                                        minute: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|duration| duration.as_secs() / 60)
+                                            .unwrap_or_default(),
+                                    },
                                     window,
                                     cx,
                                 )
@@ -613,7 +725,7 @@ fn render_rows(
             }
 
             // 先完成当前帧的行构造，再清理下一帧不需要的内容，避免行高与行内容来自不同缓存状态。
-            if should_prepare_range(&range, this.total_item_count) {
+            if !range.is_empty() {
                 let visible_rows = range.end.saturating_sub(range.start).max(1);
                 let prefetch_rows = (visible_rows / 2).max(MIN_PREFETCH_ROWS);
                 let cache_start = range.start.saturating_sub(visible_rows / 2);
@@ -651,24 +763,22 @@ fn render_rows(
                 );
                 this.ensure_application_icons_for_range(cache_range.clone(), (32, 32), cx);
                 this.ensure_file_lists_for_range(cache_range.clone(), cx);
-                if !is_measurement_range {
-                    // 缓存范围包含可见区域前后的预取区；向上滚动时也要检查前方缺失项，
-                    // 否则数据会等到进入视口后才开始加载。
-                    let missing_index = (cache_start..cache_end).find(|index| {
-                        this.list_order_ids
-                            .get(*index)
-                            .is_some_and(|history_id| !this.loaded_items.contains_key(history_id))
-                    });
-                    if let Some(offset) = missing_index {
-                        let page_size = cache_end
-                            .saturating_sub(offset)
-                            .max(visible_rows.saturating_mul(2))
-                            .max(MIN_PREFETCH_ROWS.saturating_mul(2));
-                        if list_layout_settings_changed {
-                            this.load_page_without_animation(cx, offset, page_size);
-                        } else {
-                            this.load_page(cx, offset, page_size);
-                        }
+                // 缓存范围包含可见区域前后的预取区；向上滚动时也要检查前方缺失项，
+                // 否则数据会等到进入视口后才开始加载。
+                let missing_index = (cache_start..cache_end).find(|index| {
+                    this.list_order_ids
+                        .get(*index)
+                        .is_some_and(|history_id| !this.loaded_items.contains_key(history_id))
+                });
+                if let Some(offset) = missing_index {
+                    let page_size = cache_end
+                        .saturating_sub(offset)
+                        .max(visible_rows.saturating_mul(2))
+                        .max(MIN_PREFETCH_ROWS.saturating_mul(2));
+                    if list_layout_settings_changed {
+                        this.load_page_without_animation(cx, offset, page_size);
+                    } else {
+                        this.load_page(cx, offset, page_size);
                     }
                 }
             }
@@ -677,6 +787,7 @@ fn render_rows(
         },
     )
     .track_scroll(scroll_handle)
+    .with_cross_axis_measurement(false)
     .overflow_hidden()
     .h_full()
     .w_full();
@@ -819,10 +930,6 @@ fn compute_reorder_animation_start_offsets(
         .collect()
 }
 
-fn should_prepare_range(range: &Range<usize>, total_item_count: usize) -> bool {
-    !(range.start == 0 && range.end == 1) || total_item_count == 1
-}
-
 fn source_application_icon(
     row_id: HistoryItemId,
     source_name: Option<&str>,
@@ -941,6 +1048,39 @@ fn render_tag_indicator(
         .into_any_element()
 }
 
+fn hover_action_fields(
+    item: &ClipboardListItem,
+    active_tab: TabId,
+    display: &crate::config::ItemDisplayConfig,
+) -> Vec<ItemDisplayField> {
+    use ItemDisplayField::*;
+    [
+        Edit,
+        Note,
+        PastePlain,
+        OpenDefault,
+        OpenBrowser,
+        Favorite,
+        Pin,
+        Delete,
+    ]
+    .into_iter()
+    .filter(|field| display.enabled(*field))
+    .filter(|field| match field {
+        Edit => has_editable_text(item),
+        PastePlain => item.all_format_options.iter().any(|preview| {
+            preview.role() == FormatRole::PlainText
+                && preview.is_restorable
+                && !is_empty_textual_preview(preview)
+        }),
+        OpenDefault => can_open_with_default(item),
+        OpenBrowser => has_plain_text_links(item),
+        Delete => active_tab != TabId::Favorites,
+        _ => true,
+    })
+    .collect()
+}
+
 fn render_hover_actions(
     item: &ClipboardListItem,
     active_tab: TabId,
@@ -952,6 +1092,76 @@ fn render_hover_actions(
     if display.actions_visibility == ItemRegionVisibility::Hidden {
         return None;
     }
+    let fields = hover_action_fields(item, active_tab, &display);
+    let button_count = fields.len();
+    if button_count == 0 {
+        return None;
+    }
+    let expanded_width =
+        gpui_component::Theme::global(cx).font_size * (button_count as f32 * 20.0 / 16.0);
+    let visible = display.actions_visibility.is_visible(selected);
+    let animations_enabled =
+        crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListActions);
+    let motion = Duration::from_millis(160).with_easing(gpui::ease_in_out);
+    let row_id = item.history_id;
+    let item = item.clone();
+    let main_window = cx.entity();
+    let buttons = canvas(
+        move |bounds, window, cx| {
+            let visible_bounds = bounds.intersect(&window.content_mask().bounds);
+            if visible_bounds.size.width <= px(0.0) || visible_bounds.size.height <= px(0.0) {
+                return None;
+            }
+            // 按动画后的实际裁剪范围构造按钮，收起后的行不再布局整棵按钮树。
+            let mut buttons = main_window.update(cx, |_, cx| {
+                render_hover_action_buttons(&item, active_tab, &fields, cx)
+            });
+            buttons.layout_as_root(bounds.size.into(), window, cx);
+            buttons.prepaint_at(bounds.origin, window, cx);
+            Some(buttons)
+        },
+        |_, buttons, window, cx| {
+            if let Some(mut buttons) = buttons {
+                buttons.paint(window, cx);
+            }
+        },
+    )
+    .w(expanded_width)
+    .h_full()
+    .flex_none();
+    Some((
+        div()
+            .id(("hover-actions", row_id as u64))
+            .h_full()
+            .w(if visible { expanded_width } else { px(0.0) })
+            .opacity(if visible { 1.0 } else { 0.0 })
+            .flex()
+            .items_center()
+            .flex_none()
+            .overflow_hidden()
+            .when(hover_allowed && animations_enabled, |this| {
+                this.transitions(|transitions| transitions.w(motion.clone()).opacity(motion))
+            })
+            .when(
+                hover_allowed && display.actions_visibility == ItemRegionVisibility::Active,
+                |this| {
+                    this.group_hover(format!("clipboard-row-hover-{row_id}"), |style| {
+                        style.w(expanded_width).opacity(1.0)
+                    })
+                },
+            )
+            .child(buttons)
+            .into_any_element(),
+        button_count,
+    ))
+}
+
+fn render_hover_action_buttons(
+    item: &ClipboardListItem,
+    active_tab: TabId,
+    fields: &[ItemDisplayField],
+    cx: &mut Context<MainWindow>,
+) -> AnyElement {
     let translator = i18n::translator(cx);
     let theme = cx.theme().colors;
     let row_id = item.history_id;
@@ -1167,44 +1377,15 @@ fn render_hover_actions(
         (ItemDisplayField::Delete, delete_button),
     ]
     .into_iter()
-    .filter(|(field, _)| display.enabled(*field))
+    .filter(|(field, _)| fields.contains(field))
     .filter_map(|(_, button)| button)
     .collect::<Vec<_>>();
-    let button_count = buttons.len();
-    if button_count == 0 {
-        return None;
-    }
-    let expanded_width =
-        gpui_component::Theme::global(cx).font_size * (button_count as f32 * 20.0 / 16.0);
-    let visible = display.actions_visibility.is_visible(selected);
-    let animations_enabled =
-        crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListActions);
-    let motion = Duration::from_millis(160).with_easing(gpui::ease_in_out);
-    Some((
-        div()
-            .id(("hover-actions", row_id as u64))
-            .h_full()
-            .w(if visible { expanded_width } else { px(0.0) })
-            .opacity(if visible { 1.0 } else { 0.0 })
-            .flex()
-            .items_center()
-            .flex_none()
-            .overflow_hidden()
-            .when(hover_allowed && animations_enabled, |this| {
-                this.transitions(|transitions| transitions.w(motion.clone()).opacity(motion))
-            })
-            .when(
-                hover_allowed && display.actions_visibility == ItemRegionVisibility::Active,
-                |this| {
-                    this.group_hover(format!("clipboard-row-hover-{row_id}"), |style| {
-                        style.w(expanded_width).opacity(1.0)
-                    })
-                },
-            )
-            .children(buttons)
-            .into_any_element(),
-        button_count,
-    ))
+    div()
+        .size_full()
+        .flex()
+        .items_center()
+        .children(buttons)
+        .into_any_element()
 }
 
 fn hover_action_button(
@@ -3070,6 +3251,64 @@ mod tests {
     use crate::i18n::{Locale, Translator};
     use gpui::px;
     use std::collections::HashMap;
+
+    #[test]
+    fn lazy_action_width_matches_available_buttons_and_display_settings() {
+        use crate::config::{ItemDisplayConfig, ItemDisplayField::*};
+        use crate::domain::capture::FormatKind;
+        use crate::domain::clipboard::{ClipboardListItem, ContentKind, FormatPreview};
+        use crate::windows::main::tabs::TabId;
+        let mut item = ClipboardListItem {
+            history_id: 1,
+            item_id: 1,
+            favorite_id: None,
+            tag_ids: Vec::new(),
+            note_text: String::new(),
+            preview_text: "链接".into(),
+            preview_char_count: 2,
+            preview_options: Vec::new(),
+            all_format_options: vec![FormatPreview {
+                format_namespace: "mime".into(),
+                format_key: "text/plain".into(),
+                format_name: "纯文本".into(),
+                format_order: 0,
+                format_kind: FormatKind::Text,
+                text: "https://example.com".into(),
+                char_count: 19,
+                content_kind: ContentKind::Link,
+                html_content: None,
+                image_source: None,
+                image_dimensions: None,
+                is_restorable: true,
+            }],
+            content_kind: ContentKind::Link,
+            paste_count: 0,
+            is_pinned: false,
+            sort_order: 1,
+            last_seen_at: 0,
+            shortcut: String::new(),
+            source_app_name: None,
+            source_app_icon: None,
+            is_selected: false,
+        };
+        let mut display = ItemDisplayConfig::default();
+        assert_eq!(
+            super::hover_action_fields(&item, TabId::Clipboard, &display),
+            vec![Edit, Note, PastePlain, OpenBrowser, Favorite, Pin, Delete]
+        );
+        display.set_enabled(Note, false);
+        assert_eq!(
+            super::hover_action_fields(&item, TabId::Favorites, &display),
+            vec![Edit, PastePlain, OpenBrowser, Favorite, Pin]
+        );
+        item.all_format_options[0].is_restorable = false;
+        assert_eq!(
+            super::hover_action_fields(&item, TabId::Clipboard, &display),
+            vec![Favorite, Pin, Delete]
+        );
+        display.fields.clear();
+        assert!(super::hover_action_fields(&item, TabId::Clipboard, &display).is_empty());
+    }
 
     #[test]
     fn file_list_meta_label_includes_file_count() {

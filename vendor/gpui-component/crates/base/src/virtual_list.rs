@@ -203,6 +203,7 @@ where
         render_items: Box::new(render_range),
         sizing_behavior: ListSizingBehavior::default(),
         item_to_measure_index: 0,
+        measure_cross_axis: true,
     }
 }
 
@@ -266,6 +267,7 @@ where
         render_items: Box::new(render_range),
         sizing_behavior: ListSizingBehavior::default(),
         item_to_measure_index: 0,
+        measure_cross_axis: true,
     }
 }
 
@@ -283,6 +285,7 @@ pub struct VirtualList {
     >,
     sizing_behavior: ListSizingBehavior,
     item_to_measure_index: usize,
+    measure_cross_axis: bool,
 }
 
 #[derive(Clone, Default)]
@@ -443,6 +446,12 @@ impl VirtualList {
         self
     }
 
+    /// 关闭交叉轴测量时，行填满视口，不再额外构造和布局一行来推断尺寸。
+    pub fn with_cross_axis_measurement(mut self, enabled: bool) -> Self {
+        self.measure_cross_axis = enabled;
+        self
+    }
+
     /// Specify for table.
     ///
     /// Table is special, because the `scroll_handle` is based on Table head (That is not a virtual list).
@@ -507,6 +516,20 @@ impl VirtualList {
     ) -> Size<Pixels> {
         if self.items_count == 0 {
             return Size::default();
+        }
+
+        if !self.measure_cross_axis {
+            let viewport = self
+                .scroll_handle
+                .state
+                .borrow()
+                .last_content_size
+                .unwrap_or_default();
+            return if self.axis.is_vertical() {
+                size(viewport.width, px(0.0))
+            } else {
+                size(px(0.0), viewport.height)
+            };
         }
 
         let item_ix = self.item_to_measure_index.min(self.items_count - 1);
@@ -743,8 +766,6 @@ impl Element for VirtualList {
         cx: &mut App,
     ) -> Self::PrepaintState {
         layout.size_layout.borrow_mut().last_layout_bounds = bounds;
-        let size_layout = layout.size_layout.borrow();
-
         let style = self
             .base
             .interactivity()
@@ -753,9 +774,6 @@ impl Element for VirtualList {
         let paddings = style
             .padding
             .to_pixels(bounds.size.into(), window.rem_size());
-
-        let item_sizes = &size_layout.sizes;
-        let item_origins = &size_layout.origins;
 
         let content_bounds = Bounds::from_corners(
             bounds.origin
@@ -771,6 +789,18 @@ impl Element for VirtualList {
         );
 
         let axis = self.axis;
+
+        if !self.measure_cross_axis {
+            let mut size_layout = layout.size_layout.borrow_mut();
+            if axis.is_vertical() {
+                size_layout.content_size.width = content_bounds.size.width;
+            } else {
+                size_layout.content_size.height = content_bounds.size.height;
+            }
+        }
+        let size_layout = layout.size_layout.borrow();
+        let item_sizes = &size_layout.sizes;
+        let item_origins = &size_layout.origins;
 
         let mut scroll_state = self.scroll_handle.state.borrow_mut();
         scroll_state.axis = axis;
@@ -936,6 +966,8 @@ mod tests {
 
     struct VirtualListHarness {
         axis: Axis,
+        measure_cross_axis: bool,
+        viewport_size: Size<Pixels>,
         item_sizes: Rc<Vec<Size<Pixels>>>,
         scroll_handle: VirtualListScrollHandle,
         visible_ranges: Rc<RefCell<Vec<Range<usize>>>>,
@@ -960,12 +992,13 @@ mod tests {
                 },
             )
             .track_scroll(&self.scroll_handle)
-            .w(px(60.))
-            .h(px(60.))
+            .with_cross_axis_measurement(self.measure_cross_axis)
+            .w(self.viewport_size.width)
+            .h(self.viewport_size.height)
         }
     }
 
-    fn exercise_axis(cx: &mut TestAppContext, axis: Axis) {
+    fn exercise_axis(cx: &mut TestAppContext, axis: Axis, measure_cross_axis: bool) {
         let item_size = match axis {
             Axis::Horizontal => size(px(20.), px(10.)),
             Axis::Vertical => size(px(10.), px(20.)),
@@ -979,6 +1012,8 @@ mod tests {
             let visible_ranges = visible_ranges.clone();
             move |_, _| VirtualListHarness {
                 axis,
+                measure_cross_axis,
+                viewport_size: size(px(60.), px(60.)),
                 item_sizes,
                 scroll_handle,
                 visible_ranges,
@@ -989,6 +1024,9 @@ mod tests {
         let initial_range = visible_ranges.borrow().last().cloned().unwrap();
         assert_eq!(initial_range.start, 0);
         assert!(initial_range.end < item_sizes.len());
+        if !measure_cross_axis {
+            assert!(visible_ranges.borrow().iter().all(|range| range.len() > 1));
+        }
         assert_eq!(scroll_handle.item_offset(0), Some(px(0.)));
         assert_eq!(scroll_handle.item_offset(12), Some(px(240.)));
         assert_eq!(scroll_handle.item_offset(20), Some(px(400.)));
@@ -1002,16 +1040,59 @@ mod tests {
             Axis::Horizontal => assert!(scroll_handle.offset().x < px(0.)),
             Axis::Vertical => assert!(scroll_handle.offset().y < px(0.)),
         }
+        if !measure_cross_axis {
+            assert!(visible_ranges.borrow().iter().all(|range| range.len() > 1));
+        }
     }
 
     #[gpui::test]
     fn vertical_visible_range_and_deferred_scroll_are_preserved(cx: &mut TestAppContext) {
-        exercise_axis(cx, Axis::Vertical);
+        exercise_axis(cx, Axis::Vertical, true);
     }
 
     #[gpui::test]
     fn horizontal_visible_range_and_deferred_scroll_are_preserved(cx: &mut TestAppContext) {
-        exercise_axis(cx, Axis::Horizontal);
+        exercise_axis(cx, Axis::Horizontal, true);
+    }
+
+    #[gpui::test]
+    fn viewport_width_skips_measurement_and_preserves_vertical_scrolling(cx: &mut TestAppContext) {
+        exercise_axis(cx, Axis::Vertical, false);
+    }
+
+    #[gpui::test]
+    fn viewport_height_skips_measurement_and_preserves_horizontal_scrolling(cx: &mut TestAppContext) {
+        exercise_axis(cx, Axis::Horizontal, false);
+    }
+
+    #[gpui::test]
+    fn viewport_resize_keeps_single_item_visible_without_horizontal_overflow(cx: &mut TestAppContext) {
+        let scroll_handle = VirtualListScrollHandle::new();
+        let visible_ranges = Rc::new(RefCell::new(Vec::new()));
+        let (view, cx) = cx.add_window_view({
+            let scroll_handle = scroll_handle.clone();
+            let visible_ranges = visible_ranges.clone();
+            move |_, _| VirtualListHarness {
+                axis: Axis::Vertical,
+                measure_cross_axis: false,
+                viewport_size: size(px(60.), px(60.)),
+                item_sizes: Rc::new(vec![size(px(10.), px(20.))]),
+                scroll_handle,
+                visible_ranges,
+            }
+        });
+        for width in [60., 30., 120.] {
+            view.update(cx, |view, cx| {
+                view.viewport_size.width = px(width);
+                cx.notify();
+            });
+            visible_ranges.borrow_mut().clear();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(*visible_ranges.borrow(), vec![0..1]);
+            assert_eq!(scroll_handle.max_offset().x, px(0.));
+            assert_eq!(crate::ScrollbarHandle::content_size(&scroll_handle).width, px(width));
+            assert_eq!(scroll_handle.item_offset(1), Some(px(20.)));
+        }
     }
 
     #[gpui::test]
@@ -1021,6 +1102,8 @@ mod tests {
             let scroll_handle = scroll_handle.clone();
             move |_, _| VirtualListHarness {
                 axis: Axis::Vertical,
+                measure_cross_axis: false,
+                viewport_size: size(px(60.), px(60.)),
                 item_sizes: Rc::new(vec![
                     size(px(10.), px(20.)), size(px(10.), px(80.)), size(px(10.), px(40.)),
                 ]),
@@ -1071,6 +1154,8 @@ mod tests {
             let visible_ranges = visible_ranges.clone();
             move |_, _| VirtualListHarness {
                 axis: Axis::Vertical,
+                measure_cross_axis: false,
+                viewport_size: size(px(60.), px(60.)),
                 item_sizes: Rc::new(Vec::new()),
                 scroll_handle: VirtualListScrollHandle::new(),
                 visible_ranges,
