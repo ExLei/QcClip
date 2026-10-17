@@ -985,11 +985,17 @@ const fn clipboard_mouse_left_behavior_label_key(
         ClipboardMouseLeftBehavior::SinglePaste => {
             "settings.clipboard.mouse_left_behavior.single_paste"
         }
+        ClipboardMouseLeftBehavior::SinglePlainTextPaste => {
+            "settings.clipboard.mouse_left_behavior.single_plain_text_paste"
+        }
         ClipboardMouseLeftBehavior::SingleCopy => {
             "settings.clipboard.mouse_left_behavior.single_copy"
         }
         ClipboardMouseLeftBehavior::DoublePaste => {
             "settings.clipboard.mouse_left_behavior.double_paste"
+        }
+        ClipboardMouseLeftBehavior::DoublePlainTextPaste => {
+            "settings.clipboard.mouse_left_behavior.double_plain_text_paste"
         }
         ClipboardMouseLeftBehavior::DoubleCopy => {
             "settings.clipboard.mouse_left_behavior.double_copy"

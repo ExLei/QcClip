@@ -513,37 +513,50 @@ impl ClipboardWindowPosition {
 pub enum ClipboardMouseLeftBehavior {
     #[default]
     SinglePaste,
+    SinglePlainTextPaste,
     SingleCopy,
     DoublePaste,
+    DoublePlainTextPaste,
     DoubleCopy,
 }
 
 impl ClipboardMouseLeftBehavior {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self::SinglePaste,
+        Self::SinglePlainTextPaste,
         Self::SingleCopy,
         Self::DoublePaste,
+        Self::DoublePlainTextPaste,
         Self::DoubleCopy,
     ];
 
     pub const fn code(self) -> &'static str {
         match self {
             Self::SinglePaste => "single-paste",
+            Self::SinglePlainTextPaste => "single-plain-text-paste",
             Self::SingleCopy => "single-copy",
             Self::DoublePaste => "double-paste",
+            Self::DoublePlainTextPaste => "double-plain-text-paste",
             Self::DoubleCopy => "double-copy",
         }
     }
 
     pub const fn matches_click_count(self, click_count: usize) -> bool {
         match self {
-            Self::SinglePaste | Self::SingleCopy => click_count == 1,
-            Self::DoublePaste | Self::DoubleCopy => click_count == 2,
+            Self::SinglePaste | Self::SinglePlainTextPaste | Self::SingleCopy => click_count == 1,
+            Self::DoublePaste | Self::DoublePlainTextPaste | Self::DoubleCopy => click_count == 2,
         }
     }
 
     pub const fn is_copy(self) -> bool {
         matches!(self, Self::SingleCopy | Self::DoubleCopy)
+    }
+
+    pub const fn is_plain_text_paste(self) -> bool {
+        matches!(
+            self,
+            Self::SinglePlainTextPaste | Self::DoublePlainTextPaste
+        )
     }
 }
 
@@ -1781,18 +1794,25 @@ mod tests {
 
     #[test]
     fn mouse_left_behavior_matches_only_configured_click_count() {
-        for behavior in ClipboardMouseLeftBehavior::ALL {
-            let is_single = matches!(
-                behavior,
-                ClipboardMouseLeftBehavior::SinglePaste | ClipboardMouseLeftBehavior::SingleCopy
-            );
-            let is_copy = matches!(
-                behavior,
-                ClipboardMouseLeftBehavior::SingleCopy | ClipboardMouseLeftBehavior::DoubleCopy
-            );
-            assert_eq!(behavior.matches_click_count(1), is_single);
-            assert_eq!(behavior.matches_click_count(2), !is_single);
+        use ClipboardMouseLeftBehavior::*;
+
+        let cases = [
+            (SinglePaste, 1, false, false),
+            (SinglePlainTextPaste, 1, false, true),
+            (SingleCopy, 1, true, false),
+            (DoublePaste, 2, false, false),
+            (DoublePlainTextPaste, 2, false, true),
+            (DoubleCopy, 2, true, false),
+        ];
+        assert_eq!(ClipboardMouseLeftBehavior::ALL, cases.map(|case| case.0));
+        for (behavior, click_count, is_copy, is_plain_text_paste) in cases {
+            for count in 0..=3 {
+                assert_eq!(behavior.matches_click_count(count), count == click_count);
+            }
             assert_eq!(behavior.is_copy(), is_copy);
+            assert_eq!(behavior.is_plain_text_paste(), is_plain_text_paste);
+            let saved = serde_json::to_value(behavior).expect("左键行为应当可以保存");
+            assert_eq!(saved, behavior.code());
         }
     }
 

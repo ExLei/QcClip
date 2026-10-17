@@ -2614,6 +2614,8 @@ fn render_row(
             this.select_item(row_id);
             if behavior.is_copy() {
                 this.copy_item(item_id, cx);
+            } else if behavior.is_plain_text_paste() {
+                this.paste_selected_item_as_plain_text(cx);
             } else {
                 this.paste_item(item_id, cx);
             }

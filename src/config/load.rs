@@ -1274,6 +1274,23 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_mouse_left_behavior_plain_text_options_round_trip() {
+        for code in ["single-plain-text-paste", "double-plain-text-paste"] {
+            let json = serde_json::json!({
+                "clipboard": { "mouseLeftBehavior": code }
+            });
+            let loaded = from_str(&json.to_string()).expect("纯文本粘贴左键行为应当可以加载");
+
+            assert!(
+                loaded.warnings.is_empty(),
+                "加载纯文本粘贴左键行为不应产生警告"
+            );
+            let saved = serde_json::to_value(&loaded.config).expect("左键行为应当可以保存");
+            assert_eq!(saved["clipboard"]["mouseLeftBehavior"], code);
+        }
+    }
+
+    #[test]
     fn tab_bar_hover_switch_defaults_to_disabled_and_loads_enabled() {
         let loaded = from_str(r#"{"clipboard":{}}"#).expect("应当可以加载旧剪贴板设置");
         assert!(!loaded.config.clipboard.tab_bar_hover_switch);
