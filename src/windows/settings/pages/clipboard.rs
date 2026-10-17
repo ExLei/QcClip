@@ -254,6 +254,22 @@ impl SettingsWindowView {
                     );
                 }
             });
+        let tab_bar_hover_switch = Switch::new("settings-clipboard-tab-bar-hover-switch")
+            .large()
+            .checked(clipboard.tab_bar_hover_switch)
+            .accessibility_label(translator.translate("settings.clipboard.tab_bar_hover_switch"))
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    persist_clipboard_change(
+                        view.clone(),
+                        move |clipboard| clipboard.tab_bar_hover_switch = *checked,
+                        save_error.clone(),
+                        cx,
+                    );
+                }
+            });
         let hover_preview_switch = Switch::new("settings-clipboard-hover-preview")
             .large()
             .checked(clipboard.hover_preview_enabled)
@@ -485,6 +501,18 @@ impl SettingsWindowView {
                             .into(),
                     ),
                     hover_preview_switch,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.tab_bar_hover_switch"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.tab_bar_hover_switch_description")
+                            .into(),
+                    ),
+                    tab_bar_hover_switch,
                 ),
             )
             .child(

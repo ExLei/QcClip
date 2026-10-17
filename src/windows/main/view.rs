@@ -54,10 +54,19 @@ impl Render for MainWindow {
                 .unwrap_or(super::tabs::SymbolCategoryId::Emoji);
             self.select_symbol_category(fallback, cx);
         }
-        let filter_count = self.selected_filters.len();
-        self.selected_filters
-            .retain(|filter| layout.is_visible(filter.layout_button()));
-        let mut filters_changed = self.selected_filters.len() != filter_count;
+        let mut filters_changed = self.filters.retain_visible(layout);
+        if is_blocked || !config_runtime::clipboard_config(cx).tab_bar_hover_switch {
+            self.cancel_tab_bar_hover();
+            filters_changed |= self.filters.clear_hovered();
+        }
+        if !window.is_window_hovered()
+            || self
+                .tab_bar_hover
+                .pending_button()
+                .is_some_and(|button| !layout.is_visible(button))
+        {
+            self.cancel_tab_bar_hover();
+        }
         if !layout.is_visible(crate::config::TabBarButton::Tags) {
             self.tags_panel_open = false;
             self.tags_button_bounds = None;

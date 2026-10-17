@@ -505,6 +505,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.hover_preview_enabled,
             warnings,
         ),
+        tab_bar_hover_switch: read_field(
+            object,
+            "tabBarHoverSwitch",
+            "clipboard.tabBarHoverSwitch",
+            default.tab_bar_hover_switch,
+            warnings,
+        ),
         move_pasted_to_first_in_clipboard: read_field(
             object,
             "movePastedToFirstInClipboard",
@@ -1264,6 +1271,18 @@ mod tests {
             loaded.config.clipboard.mouse_left_behavior,
             ClipboardMouseLeftBehavior::DoubleCopy
         );
+    }
+
+    #[test]
+    fn tab_bar_hover_switch_defaults_to_disabled_and_loads_enabled() {
+        let loaded = from_str(r#"{"clipboard":{}}"#).expect("应当可以加载旧剪贴板设置");
+        assert!(!loaded.config.clipboard.tab_bar_hover_switch);
+        assert!(loaded.warnings.is_empty());
+
+        let loaded = from_str(r#"{"clipboard":{"tabBarHoverSwitch":true}}"#)
+            .expect("应当可以加载悬停切换设置");
+        assert!(loaded.config.clipboard.tab_bar_hover_switch);
+        assert!(loaded.warnings.is_empty());
     }
 
     #[test]

@@ -1,5 +1,66 @@
 use crate::config::{TabBarButton, TabBarButtonGroup, TabBarLayout};
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
+
+pub const TAB_BAR_HOVER_DELAY: Duration = Duration::from_millis(40);
+
+#[derive(Default)]
+pub struct TabBarHover {
+    pointer_button: Option<TabBarButton>,
+    pending: Option<(TabBarButton, Instant)>,
+}
+
+impl TabBarHover {
+    pub fn pending_button(&self) -> Option<TabBarButton> {
+        self.pending.map(|(button, _)| button)
+    }
+
+    pub fn enter(&mut self, button: TabBarButton, now: Instant) -> bool {
+        if self.pointer_button == Some(button) {
+            return false;
+        }
+        self.pointer_button = Some(button);
+        self.pending = Some((button, now));
+        true
+    }
+
+    pub fn leave(&mut self, button: TabBarButton) -> bool {
+        if self.pointer_button != Some(button) {
+            return false;
+        }
+        self.cancel();
+        true
+    }
+
+    pub fn cancel(&mut self) {
+        self.pointer_button = None;
+        self.pending = None;
+    }
+
+    pub fn suppress(&mut self, button: TabBarButton) {
+        self.pointer_button = Some(button);
+        self.pending = None;
+    }
+
+    pub fn remaining(&self, button: TabBarButton, now: Instant) -> Option<Duration> {
+        self.pending
+            .filter(|(pending, _)| *pending == button)
+            .map(|(_, entered)| {
+                TAB_BAR_HOVER_DELAY.saturating_sub(now.saturating_duration_since(entered))
+            })
+    }
+
+    pub fn take_ready(&mut self, button: TabBarButton, now: Instant) -> bool {
+        if self.remaining(button, now) != Some(Duration::ZERO) {
+            return false;
+        }
+        self.pending = None;
+        true
+    }
+}
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -108,6 +169,73 @@ impl FilterId {
             Self::Unpasted => TabBarButton::Unpasted,
             Self::Pasted => TabBarButton::Pasted,
         }
+    }
+}
+
+#[derive(Default)]
+pub struct FilterSelection {
+    selected: HashSet<FilterId>,
+    hovered: Option<FilterId>,
+    pointer_filter: Option<FilterId>,
+}
+
+impl FilterSelection {
+    pub fn is_selected(&self, filter: FilterId) -> bool {
+        self.selected.contains(&filter)
+    }
+
+    pub fn is_hovered(&self, filter: FilterId) -> bool {
+        self.hovered == Some(filter)
+    }
+
+    pub fn toggle(&mut self, filter: FilterId) {
+        if !self.selected.insert(filter) {
+            self.selected.remove(&filter);
+        }
+        if self.hovered == Some(filter) {
+            self.hovered = None;
+        }
+    }
+
+    pub fn set_hovered(&mut self, filter: FilterId, hovered: bool) -> bool {
+        if !hovered {
+            if self.pointer_filter == Some(filter) {
+                self.pointer_filter = None;
+            }
+            return false;
+        }
+        // 点击取消后，重复的悬停通知必须等鼠标重新移入才允许激活。
+        if self.pointer_filter == Some(filter) {
+            return false;
+        }
+        self.pointer_filter = Some(filter);
+        self.hovered.replace(filter) != Some(filter)
+    }
+
+    pub fn clear_hovered(&mut self) -> bool {
+        self.pointer_filter = None;
+        self.hovered.take().is_some()
+    }
+
+    pub fn retain_visible(&mut self, layout: &TabBarLayout) -> bool {
+        let count = self.selected.len();
+        self.selected
+            .retain(|filter| layout.is_visible(filter.layout_button()));
+        self.pointer_filter = self
+            .pointer_filter
+            .filter(|filter| layout.is_visible(filter.layout_button()));
+        let hover_changed = self
+            .hovered
+            .is_some_and(|filter| !layout.is_visible(filter.layout_button()))
+            && self.clear_hovered();
+        self.selected.len() != count || hover_changed
+    }
+
+    pub fn active_filters(&self) -> impl Iterator<Item = FilterId> + '_ {
+        self.selected.iter().copied().chain(
+            self.hovered
+                .filter(|filter| !self.selected.contains(filter)),
+        )
     }
 }
 

@@ -228,6 +228,7 @@ impl MainWindow {
         if self.active_tab == tab_id {
             return;
         }
+        self.suppress_tab_bar_hover(tab_id.layout_button());
         if self.is_gallery_active() {
             self.clear_gallery_resources();
         }
@@ -241,6 +242,7 @@ impl MainWindow {
             self.selected_tag_ids.clear();
         }
         self.active_tab = tab_id;
+        self.filters.clear_hovered();
         self.persist_state(cx);
         self.refresh_history(cx);
     }
@@ -253,6 +255,7 @@ impl MainWindow {
         if self.symbol_category == category {
             return;
         }
+        self.suppress_tab_bar_hover(category.layout_button());
         if self.is_gallery_active() && category != SymbolCategoryId::Gallery {
             self.clear_gallery_resources();
         }

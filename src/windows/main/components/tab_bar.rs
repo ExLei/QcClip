@@ -30,6 +30,39 @@ const SIDEBAR_COLLAPSED_WIDTH: f32 = 56.0;
 const SIDEBAR_BUTTON_HEIGHT: f32 = TAB_BAR_HEIGHT;
 const TAB_SLOT_INSET: f32 = 2.0;
 
+fn hover_sensor(button: TabBarButton, cx: &Context<MainWindow>) -> impl IntoElement {
+    let view = cx.entity().downgrade();
+    gpui::canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
+        move |_, hitbox, window, cx| {
+            let view_for_paint = view.clone();
+            let hitbox_id = hitbox.id;
+            window.defer(cx, move |window, cx| {
+                let _ = view_for_paint.update(cx, |this, cx| {
+                    this.update_tab_bar_hover(button, Some(hitbox_id), window, cx);
+                });
+            });
+            let view_for_move = view.clone();
+            window.on_mouse_event(move |_: &gpui::MouseMoveEvent, phase, window, cx| {
+                if phase == gpui::DispatchPhase::Capture {
+                    let _ = view_for_move.update(cx, |this, cx| {
+                        this.update_tab_bar_hover(button, Some(hitbox_id), window, cx);
+                    });
+                }
+            });
+            window.on_mouse_event(move |_: &gpui::MouseExitEvent, phase, window, cx| {
+                if phase == gpui::DispatchPhase::Capture {
+                    let _ = view.update(cx, |this, cx| {
+                        this.update_tab_bar_hover(button, None, window, cx);
+                    });
+                }
+            });
+        },
+    )
+    .absolute()
+    .inset_0()
+}
+
 fn spring<T: gpui::SpringTarget>(target: T) -> SpringAnimation<T> {
     SpringAnimation::new(SpringConfig::new(420.0, 36.0, 1.0)).to(target)
 }
@@ -182,6 +215,7 @@ fn tab_button(
     let icon_group = format!("main-tab-{}", definition.id as u32);
     let mut button = div()
         .group(icon_group.clone())
+        .relative()
         .h(ui_rem(TAB_BUTTON_HEIGHT))
         .flex_1()
         .min_w_0()
@@ -221,13 +255,16 @@ fn tab_button(
         .id(("main-tab", definition.id as u32))
         .tooltip(move |window, cx| Tooltip::new(tooltip_label.clone()).build(window, cx))
         .on_click(cx.listener(move |this, _, _, cx| {
+            this.suppress_tab_bar_hover(tab_id.layout_button());
             this.select_tab(tab_id, cx);
         }))
+        .child(hover_sensor(tab_id.layout_button(), cx))
 }
 
 fn filter_button(
     definition: &FilterDefinition,
     active: bool,
+    hovered: bool,
     sidebar_layout: bool,
     show_label: bool,
     cx: &Context<MainWindow>,
@@ -239,6 +276,8 @@ fn filter_button(
         } else {
             theme.primary
         }
+    } else if hovered {
+        theme.primary
     } else {
         theme.foreground
     };
@@ -279,9 +318,26 @@ fn filter_button(
                     .bottom(px(0.0))
                     .h(ui_rem(2.0))
                     .rounded_full()
-                    .bg(theme.primary),
+                    .bg(color),
             );
         }
+    }
+
+    if hovered {
+        let indicator = div().absolute().rounded_full().bg(color);
+        button = button.child(if sidebar_layout {
+            indicator
+                .left(px(0.0))
+                .top(ui_rem(4.0))
+                .bottom(ui_rem(4.0))
+                .w(ui_rem(2.0))
+        } else {
+            indicator
+                .left(ui_rem(4.0))
+                .right(ui_rem(4.0))
+                .top(px(0.0))
+                .h(ui_rem(2.0))
+        });
     }
 
     if sidebar_layout {
@@ -309,11 +365,11 @@ fn filter_button(
         .id(("filter-button", definition.id as u32))
         .tooltip(move |window, cx| Tooltip::new(tooltip_label.clone()).build(window, cx))
         .on_click(cx.listener(move |this, _, _, cx| {
-            if !this.selected_filters.insert(filter_id) {
-                this.selected_filters.remove(&filter_id);
-            }
+            this.suppress_tab_bar_hover(filter_id.layout_button());
+            this.filters.toggle(filter_id);
             this.refresh_history(cx);
         }))
+        .child(hover_sensor(filter_id.layout_button(), cx))
 }
 
 fn symbol_category_button(
@@ -364,8 +420,10 @@ fn symbol_category_button(
         .id(("symbol-category", category as u32))
         .tooltip(move |window, cx| Tooltip::new(tooltip_label.clone()).build(window, cx))
         .on_click(cx.listener(move |this, _, _, cx| {
+            this.suppress_tab_bar_hover(category.layout_button());
             this.select_symbol_category(category, cx);
-        }));
+        }))
+        .child(hover_sensor(category.layout_button(), cx));
 
     if sidebar_layout {
         button = button
@@ -429,6 +487,7 @@ pub fn render(
     };
     let mut tags_button = div()
         .id("tags-toggle")
+        .relative()
         .group("main-tags-button")
         .w(ui_rem(60.0))
         .h(ui_rem(TAB_BUTTON_HEIGHT))
@@ -453,8 +512,10 @@ pub fn render(
             tags_button_color,
         ))
         .on_click(cx.listener(|this, _, window, cx| {
+            this.suppress_tab_bar_hover(TabBarButton::Tags);
             this.cancel_tags_panel_close();
-            let opening = !this.tags_panel_open;
+            let opening =
+                config_runtime::clipboard_config(cx).tab_bar_hover_switch || !this.tags_panel_open;
             this.tags_panel_open = opening;
             if opening {
                 if let Some(tags_search_input) = this.tags_search_input.clone() {
@@ -479,9 +540,7 @@ pub fn render(
                 }
             }),
         )
-        .on_hover(cx.listener(|this, _, window, cx| {
-            this.update_tags_panel_auto_close(window, cx);
-        }));
+        .child(hover_sensor(TabBarButton::Tags, cx));
 
     if sidebar_layout {
         tags_button = tags_button
@@ -652,7 +711,8 @@ pub fn render(
                             .children(filters.iter().map(|definition| {
                                 sidebar_button_item(filter_button(
                                     definition,
-                                    main.selected_filters.contains(&definition.id),
+                                    main.filters.is_selected(definition.id),
+                                    main.filters.is_hovered(definition.id),
                                     true,
                                     sidebar_show_label,
                                     cx,
@@ -794,7 +854,8 @@ pub fn render(
                         .children(filters.iter().map(|definition| {
                             filter_button(
                                 definition,
-                                main.selected_filters.contains(&definition.id),
+                                main.filters.is_selected(definition.id),
+                                main.filters.is_hovered(definition.id),
                                 false,
                                 true,
                                 cx,

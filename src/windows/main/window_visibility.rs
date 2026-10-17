@@ -566,6 +566,10 @@ pub(crate) fn set_visibility(
         if let Some(main_view) = main_view {
             let _ = window.update(cx, |_, window, cx| {
                 main_view.update(cx, |main, cx| {
+                    main.cancel_tab_bar_hover();
+                    if main.filters.clear_hovered() {
+                        main.refresh_history(cx);
+                    }
                     main.clear_gallery_animations();
                     main.cleanup_gallery_image_atlas(window);
                     cx.notify();

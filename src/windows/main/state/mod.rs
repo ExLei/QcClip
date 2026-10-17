@@ -4,6 +4,7 @@ mod heatmap;
 mod history;
 mod list;
 mod selection;
+mod tab_bar;
 mod tags_search;
 
 pub(crate) use heatmap::{HeatBucket, HeatScrollbarState, ListHeatmap};
@@ -29,7 +30,7 @@ use gpui_component::{
     input::{self, InputEvent, InputState},
 };
 
-use super::tabs::{FilterId, SymbolCategoryId, TabId};
+use super::tabs::{FilterId, FilterSelection, SymbolCategoryId, TabBarHover, TabId};
 use super::{MainWindowService, components::emoji_picker::EmojiRowsCache, file_list::FileListView};
 use crate::{
     config::{CardItemGap, ClipboardDisplayPriority, ListItemStyle},
@@ -228,7 +229,10 @@ pub struct MainWindow {
     pub(crate) search_input: Option<Entity<InputState>>,
     pub(super) search_input_locale: Option<Locale>,
     pub(super) search_input_vertical: Option<bool>,
-    pub selected_filters: HashSet<FilterId>,
+    pub filters: FilterSelection,
+    pub(super) tab_bar_hover: TabBarHover,
+    pub(super) tab_bar_hover_task: Option<Task<()>>,
+    pub(super) tab_bar_hover_hitbox: Option<(crate::config::TabBarButton, gpui::HitboxId)>,
     pub query_generation: u64,
     pub has_more_items: bool,
     pub is_loading_more: bool,
@@ -448,7 +452,10 @@ impl MainWindow {
             search_input: None,
             search_input_locale: None,
             search_input_vertical: None,
-            selected_filters: HashSet::new(),
+            filters: FilterSelection::default(),
+            tab_bar_hover: TabBarHover::default(),
+            tab_bar_hover_task: None,
+            tab_bar_hover_hitbox: None,
             query_generation: 0,
             has_more_items: false,
             is_loading_more: false,

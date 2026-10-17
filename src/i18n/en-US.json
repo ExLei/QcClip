@@ -616,6 +616,8 @@
   "settings.clipboard.edge_hide_description": "After moving the main window to a screen edge, hide it when the pointer leaves.",
   "settings.clipboard.edge_hide_show_edge": "Show edge when hidden",
   "settings.clipboard.edge_hide_show_edge_description": "Keep a small part of the window visible at the screen edge when it is hidden.",
+  "settings.clipboard.tab_bar_hover_switch": "Switch tabs on hover",
+  "settings.clipboard.tab_bar_hover_switch_description": "Pause over a button to switch; passing over it briefly has no effect. The last hovered filter stays active alongside clicked selections; click to select or deselect it. The tags panel closes on leave unless pinned.",
   "settings.clipboard.hover_preview": "Hover preview",
   "settings.clipboard.hover_preview_description": "Show a content preview when hovering over a clipboard item.",
   "settings.clipboard.move_pasted_to_first_in_clipboard": "Move pasted item to the top (Clipboard)",

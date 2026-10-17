@@ -1259,7 +1259,7 @@ impl MainWindow {
 
     pub(super) fn history_query(&self) -> HistoryQuery {
         let mut query =
-            HistoryQuery::from_filters(self.selected_filters.iter().map(|filter| match filter {
+            HistoryQuery::from_filters(self.filters.active_filters().map(|filter| match filter {
                 FilterId::Text => HistoryFilter::Text,
                 FilterId::Image => HistoryFilter::Image,
                 FilterId::File => HistoryFilter::File,

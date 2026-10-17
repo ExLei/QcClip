@@ -6,7 +6,257 @@ mod config;
 mod tabs;
 
 use config::{TabBarButton, TabBarLayout};
-use tabs::{FilterId, SymbolCategoryId, TabId};
+use std::time::{Duration, Instant};
+use tabs::{FilterId, FilterSelection, SymbolCategoryId, TAB_BAR_HOVER_DELAY, TabBarHover, TabId};
+
+#[test]
+fn quickly_crossing_a_tab_button_does_not_activate_it() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    assert!(hover.enter(TabBarButton::Favorites, start));
+    assert!(!hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY / 2));
+    assert!(hover.leave(TabBarButton::Favorites));
+    assert!(!hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY));
+}
+
+#[test]
+fn all_tab_button_groups_require_a_full_dwell_and_activate_only_once() {
+    for button in TabBarButton::ALL {
+        let mut hover = TabBarHover::default();
+        let start = Instant::now();
+        hover.enter(button, start);
+        assert!(!hover.take_ready(
+            button,
+            start + TAB_BAR_HOVER_DELAY - Duration::from_millis(1)
+        ));
+        assert!(!hover.enter(button, start + TAB_BAR_HOVER_DELAY / 2));
+        assert!(hover.take_ready(button, start + TAB_BAR_HOVER_DELAY));
+        assert!(!hover.take_ready(button, start + TAB_BAR_HOVER_DELAY));
+        assert!(!hover.enter(button, start + TAB_BAR_HOVER_DELAY * 2));
+    }
+}
+
+#[test]
+fn changing_hover_target_restarts_the_delay_and_ignores_old_leave_events() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Text, start);
+    hover.enter(TabBarButton::Image, start + Duration::from_millis(100));
+    assert!(!hover.leave(TabBarButton::Text));
+    assert!(!hover.take_ready(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.take_ready(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(hover.take_ready(
+        TabBarButton::Image,
+        start + Duration::from_millis(100) + TAB_BAR_HOVER_DELAY,
+    ));
+}
+
+#[test]
+fn leaving_and_reentering_the_same_button_requires_another_full_dwell() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Favorites, start);
+    hover.leave(TabBarButton::Favorites);
+    hover.enter(TabBarButton::Favorites, start + Duration::from_millis(100));
+    assert!(!hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY));
+    assert!(hover.take_ready(
+        TabBarButton::Favorites,
+        start + Duration::from_millis(100) + TAB_BAR_HOVER_DELAY,
+    ));
+}
+
+#[test]
+fn cancelling_pending_hover_preserves_the_last_active_filter() {
+    let mut filters = FilterSelection::default();
+    filters.set_hovered(FilterId::Text, true);
+    filters.set_hovered(FilterId::Text, false);
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Image, start);
+    hover.cancel();
+    assert!(!hover.take_ready(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(filters.is_hovered(FilterId::Text));
+    assert_eq!(
+        filters.active_filters().collect::<Vec<_>>(),
+        [FilterId::Text]
+    );
+}
+
+#[test]
+fn interrupted_hover_can_restart_without_leaving_the_button() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Image, start);
+    hover.cancel();
+    let restarted = start + TAB_BAR_HOVER_DELAY;
+    assert!(hover.enter(TabBarButton::Image, restarted));
+    assert!(hover.take_ready(TabBarButton::Image, restarted + TAB_BAR_HOVER_DELAY));
+}
+
+#[test]
+fn early_timer_wakeup_keeps_the_remaining_wait() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Favorites, start);
+    let early = start + TAB_BAR_HOVER_DELAY - Duration::from_millis(1);
+    assert!(!hover.take_ready(TabBarButton::Favorites, early));
+    assert_eq!(
+        hover.remaining(TabBarButton::Favorites, early),
+        Some(Duration::from_millis(1)),
+    );
+    assert!(hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY));
+    assert_eq!(hover.remaining(TabBarButton::Favorites, early), None);
+}
+
+#[test]
+fn clicking_during_the_delay_suppresses_hover_until_pointer_leaves() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Text, start);
+    hover.suppress(TabBarButton::Text);
+    assert!(!hover.take_ready(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.enter(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
+    assert!(hover.leave(TabBarButton::Text));
+    assert!(hover.enter(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
+}
+
+#[test]
+fn completed_hover_ignores_other_buttons_leave_and_rearms_after_its_own_leave() {
+    let mut hover = TabBarHover::default();
+    let start = Instant::now();
+    hover.enter(TabBarButton::Image, start);
+    assert!(hover.take_ready(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.leave(TabBarButton::Text));
+    assert!(!hover.enter(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(hover.leave(TabBarButton::Image));
+    assert!(hover.enter(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+}
+
+#[test]
+fn hover_switch_defaults_to_disabled_and_can_be_saved_as_enabled() {
+    let mut clipboard: config::ClipboardConfig = serde_json::from_str("{}").unwrap();
+    assert!(!clipboard.tab_bar_hover_switch);
+    clipboard.tab_bar_hover_switch = true;
+    let encoded = serde_json::to_string(&clipboard).unwrap();
+    assert!(encoded.contains("\"tabBarHoverSwitch\":true"));
+    assert!(
+        serde_json::from_str::<config::ClipboardConfig>(&encoded)
+            .unwrap()
+            .tab_bar_hover_switch
+    );
+}
+
+#[test]
+fn hovered_filter_combines_with_clicked_filters_and_stays_active_on_leave() {
+    let mut filters = FilterSelection::default();
+    filters.toggle(FilterId::Text);
+    filters.toggle(FilterId::Unpasted);
+    assert!(filters.set_hovered(FilterId::Image, true));
+    assert!(filters.is_selected(FilterId::Text));
+    assert!(!filters.is_selected(FilterId::Image));
+    assert!(filters.is_hovered(FilterId::Image));
+    let active = filters
+        .active_filters()
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        active,
+        [FilterId::Text, FilterId::Unpasted, FilterId::Image].into()
+    );
+    assert!(!filters.set_hovered(FilterId::Image, false));
+    assert!(filters.is_hovered(FilterId::Image));
+    assert_eq!(filters.active_filters().count(), 3);
+    assert!(filters.is_selected(FilterId::Text));
+}
+
+#[test]
+fn hovering_another_filter_replaces_only_the_last_hovered_filter() {
+    let mut filters = FilterSelection::default();
+    filters.toggle(FilterId::Text);
+    filters.set_hovered(FilterId::Image, true);
+    filters.set_hovered(FilterId::File, true);
+    assert!(!filters.set_hovered(FilterId::Image, false));
+    assert!(!filters.is_hovered(FilterId::Image));
+    assert!(filters.is_hovered(FilterId::File));
+    assert_eq!(filters.active_filters().count(), 2);
+    assert!(!filters.set_hovered(FilterId::File, false));
+    assert!(filters.is_hovered(FilterId::File));
+    assert_eq!(filters.active_filters().count(), 2);
+    filters.clear_hovered();
+    assert_eq!(
+        filters.active_filters().collect::<Vec<_>>(),
+        [FilterId::Text]
+    );
+}
+
+#[test]
+fn clicking_a_hovered_filter_converts_it_to_a_clicked_selection() {
+    let mut filters = FilterSelection::default();
+    filters.set_hovered(FilterId::Image, true);
+    filters.toggle(FilterId::Image);
+    assert!(filters.is_selected(FilterId::Image));
+    assert!(!filters.is_hovered(FilterId::Image));
+    assert_eq!(filters.active_filters().count(), 1);
+    filters.toggle(FilterId::Image);
+    assert!(!filters.is_selected(FilterId::Image));
+    assert!(!filters.is_hovered(FilterId::Image));
+    filters.set_hovered(FilterId::Image, false);
+    assert_eq!(filters.active_filters().count(), 0);
+}
+
+#[test]
+fn clicking_to_cancel_a_filter_does_not_reactivate_it_until_pointer_reenters() {
+    let mut filters = FilterSelection::default();
+    filters.toggle(FilterId::Text);
+    filters.set_hovered(FilterId::Text, true);
+    filters.toggle(FilterId::Text);
+    assert!(!filters.is_selected(FilterId::Text));
+    assert!(!filters.is_hovered(FilterId::Text));
+    assert!(!filters.set_hovered(FilterId::Text, true));
+    assert_eq!(filters.active_filters().count(), 0);
+
+    assert!(!filters.set_hovered(FilterId::Text, false));
+    assert!(filters.set_hovered(FilterId::Text, true));
+    assert!(filters.is_hovered(FilterId::Text));
+    assert!(!filters.is_selected(FilterId::Text));
+}
+
+#[test]
+fn changing_clicked_filters_preserves_a_different_latched_hover_filter() {
+    let mut filters = FilterSelection::default();
+    filters.set_hovered(FilterId::Image, true);
+    filters.set_hovered(FilterId::Image, false);
+    filters.toggle(FilterId::Text);
+    assert!(filters.is_hovered(FilterId::Image));
+    assert!(filters.is_selected(FilterId::Text));
+    assert_eq!(filters.active_filters().count(), 2);
+    filters.toggle(FilterId::Text);
+    assert_eq!(
+        filters.active_filters().collect::<Vec<_>>(),
+        [FilterId::Image]
+    );
+}
+
+#[test]
+fn hover_cleanup_and_hidden_buttons_preserve_visible_clicked_filters() {
+    let mut filters = FilterSelection::default();
+    filters.toggle(FilterId::Text);
+    filters.toggle(FilterId::Image);
+    filters.set_hovered(FilterId::File, true);
+    assert!(filters.clear_hovered());
+    assert!(!filters.clear_hovered());
+    assert_eq!(filters.active_filters().count(), 2);
+
+    let mut layout = TabBarLayout::default();
+    layout.toggle(TabBarButton::Image);
+    layout.toggle(TabBarButton::File);
+    filters.set_hovered(FilterId::File, true);
+    assert!(filters.retain_visible(&layout));
+    assert_eq!(
+        filters.active_filters().collect::<Vec<_>>(),
+        [FilterId::Text]
+    );
+    assert!(!filters.retain_visible(&layout));
+}
 
 #[test]
 fn main_window_uses_the_configured_order_and_visibility_for_each_group() {
