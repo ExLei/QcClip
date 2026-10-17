@@ -1756,6 +1756,16 @@ fn start_data_replacement(
     if !reset_application && !service.can_change_data_location() {
         return;
     }
+    if !crate::windows::main::MainWindowService::begin_blocking_operation(
+        if reset_application {
+            "settings.data_management.reset_application"
+        } else {
+            "settings.data_management.change_location"
+        },
+        cx,
+    ) {
+        return;
+    }
     let translator = crate::i18n::translator(cx);
     view.update(cx, |view, cx| {
         view.data_busy = true;
@@ -1893,6 +1903,7 @@ fn start_data_replacement(
                 });
             }
         }
+        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
     })
     .detach();
 }
@@ -1907,6 +1918,16 @@ fn start_history_cleanup(view: Entity<SettingsWindowView>, clear_all: bool, cx: 
     }
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
     let policy = config_runtime::history_config(cx);
+    if !crate::windows::main::MainWindowService::begin_blocking_operation(
+        if clear_all {
+            "settings.data_management.clear_all_history"
+        } else {
+            "settings.data_management.cleanup"
+        },
+        cx,
+    ) {
+        return;
+    }
     let translator = crate::i18n::translator(cx);
     view.update(cx, |view, cx| {
         view.data_busy = true;
@@ -1982,6 +2003,7 @@ fn start_history_cleanup(view: Entity<SettingsWindowView>, clear_all: bool, cx: 
         if clear_all {
             cx.update(crate::windows::main::MainWindowService::restart_clipboard_listener);
         }
+        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
     })
     .detach();
 }
@@ -1992,6 +2014,12 @@ fn start_export(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
     }
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
     let suggested = service.suggested_export_file_name();
+    if !crate::windows::main::MainWindowService::begin_blocking_operation(
+        "settings.data_management.export",
+        cx,
+    ) {
+        return;
+    }
     let translator = crate::i18n::translator(cx);
     let dialog = rfd::AsyncFileDialog::new()
         .set_title(translator.translate("settings.data_management.export_title"))
@@ -2040,6 +2068,7 @@ fn start_export(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
             view.data_error = notify_settings_error(SettingsPage::DataManagement, error, cx);
             cx.notify();
         });
+        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
     })
     .detach();
 }
@@ -2049,6 +2078,12 @@ fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
         return;
     }
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
+    if !crate::windows::main::MainWindowService::begin_blocking_operation(
+        "settings.data_management.import",
+        cx,
+    ) {
+        return;
+    }
     let translator = crate::i18n::translator(cx);
     let dialog = rfd::AsyncFileDialog::new()
         .set_title(translator.translate("settings.data_management.import_title"))
@@ -2163,6 +2198,7 @@ fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
                 });
             }
         }
+        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
     })
     .detach();
 }

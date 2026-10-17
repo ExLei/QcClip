@@ -473,6 +473,18 @@ impl MainWindow {
         source_tab: TabId,
         cx: &mut Context<Self>,
     ) {
+        if selected_ids.is_empty()
+            || !crate::windows::main::MainWindowService::begin_blocking_operation(
+                if source_tab == TabId::Favorites {
+                    "main.multi_selection.remove_favorites"
+                } else {
+                    "main.multi_selection.delete"
+                },
+                cx,
+            )
+        {
+            return;
+        }
         let history_repository = self.history_repository.clone();
         let favorite_repository = self.favorite_repository.clone();
         let expected_count = selected_ids.len();
@@ -496,23 +508,26 @@ impl MainWindow {
                 TabId::Emoji => Ok(0),
             }
         });
-        cx.spawn(async move |this, cx| match task.await {
-            Ok(removed_count) => {
-                if removed_count < expected_count {
-                    tracing::warn!(
-                        "{action}时部分所选内容已不存在：选择 {expected_count} 项，处理 {removed_count} 项"
-                    );
-                }
-                this.update(cx, |this, cx| {
-                    if this.active_tab == source_tab {
-                        if !this.apply_removed_list_items(&selected_ids_for_ui) {
-                            this.refresh_history(cx);
-                        }
+        cx.spawn(async move |this, cx| {
+            match task.await {
+                Ok(removed_count) => {
+                    if removed_count < expected_count {
+                        tracing::warn!(
+                            "{action}时部分所选内容已不存在：选择 {expected_count} 项，处理 {removed_count} 项"
+                        );
                     }
-                })
-                .ok();
+                    this.update(cx, |this, cx| {
+                        if this.active_tab == source_tab {
+                            if !this.apply_removed_list_items(&selected_ids_for_ui) {
+                                this.refresh_history(cx);
+                            }
+                        }
+                    })
+                    .ok();
+                }
+                Err(error) => tracing::error!("批量{action}失败：{error}"),
             }
-            Err(error) => tracing::error!("批量{action}失败：{error}"),
+            cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
         })
         .detach();
         cx.notify();

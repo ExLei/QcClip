@@ -196,8 +196,22 @@ impl NewGalleryGroupForm {
         self.submit_error = None;
         cx.notify();
         let image_library = self.image_library.clone();
+        let app = cx.to_async();
         cx.spawn_in(window, async move |this, cx| {
             if !matches!(answer.await, Ok(1)) {
+                this.update(cx, |this, cx| {
+                    this.is_deleting = false;
+                    cx.notify();
+                })
+                .ok();
+                return;
+            }
+            if !app.update(|cx| {
+                crate::windows::main::MainWindowService::begin_blocking_operation(
+                    "main.form.gallery_group.delete",
+                    cx,
+                )
+            }) {
                 this.update(cx, |this, cx| {
                     this.is_deleting = false;
                     cx.notify();
@@ -227,6 +241,7 @@ impl NewGalleryGroupForm {
                     .ok();
                 }
             }
+            app.update(crate::windows::main::MainWindowService::finish_blocking_operation);
         })
         .detach();
     }

@@ -242,6 +242,12 @@ impl MainWindow {
         else {
             return;
         };
+        if !crate::windows::main::MainWindowService::begin_blocking_operation(
+            "settings.data_management.import",
+            cx,
+        ) {
+            return;
+        }
         let total = paths.len();
         self.gallery_import_progress = Some(GalleryImportProgress {
             completed: 0,
@@ -284,6 +290,7 @@ impl MainWindow {
                     cx.notify();
                 });
             }
+            cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
         })
         .detach();
     }

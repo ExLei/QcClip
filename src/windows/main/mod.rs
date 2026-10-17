@@ -36,6 +36,7 @@ pub(crate) struct MainWindowService {
     window: Option<AnyWindowHandle>,
     main_view: Option<Entity<MainWindow>>,
     history_cleanup_pending: bool,
+    blocking_operation: Option<&'static str>,
     mouse_event_listener_id: Option<u64>,
     #[cfg(target_os = "windows")]
     pointer_check_sender: Option<async_channel::Sender<()>>,
@@ -142,6 +143,32 @@ impl MainWindowService {
         }
     }
 
+    pub(crate) fn blocking_operation(cx: &App) -> Option<&'static str> {
+        cx.try_global::<Self>()
+            .and_then(|service| service.blocking_operation)
+    }
+
+    pub(crate) fn begin_blocking_operation(title_key: &'static str, cx: &mut App) -> bool {
+        if Self::blocking_operation(cx).is_some() {
+            return false;
+        }
+        cx.update_global::<Self, _>(|service, _| service.blocking_operation = Some(title_key));
+        // 调用方可能正在更新主窗口，延后清理以避免重复借用同一实体。
+        cx.defer(|cx| {
+            crate::windows::menu::MenuService::close_all(cx);
+            Self::cancel_hover_preview(cx);
+            crate::windows::preview::PreviewWindowService::hide(cx);
+            crate::windows::quick_paste::QuickPasteWindowService::cancel(cx);
+        });
+        cx.refresh_windows();
+        true
+    }
+
+    pub(crate) fn finish_blocking_operation(cx: &mut App) {
+        cx.update_global::<Self, _>(|service, _| service.blocking_operation = None);
+        cx.refresh_windows();
+    }
+
     pub(crate) fn confirm_clear_history(keep_pinned: bool, cx: &mut App) {
         use crate::services::data_management::DataManagementService;
         use crate::windows::notification::{NotificationLevel, NotificationService};
@@ -149,7 +176,7 @@ impl MainWindowService {
         let Some(window) = Self::window_handle(cx) else {
             return;
         };
-        if cx.global::<Self>().history_cleanup_pending {
+        if cx.global::<Self>().history_cleanup_pending || Self::blocking_operation(cx).is_some() {
             return;
         }
         let translator = crate::i18n::translator(cx);
@@ -189,6 +216,20 @@ impl MainWindowService {
                         service.history_cleanup_pending = false
                     });
                 });
+                return;
+            }
+            let started = cx.update(|cx| {
+                if Self::begin_blocking_operation("settings.data_management.clear_all_history", cx)
+                {
+                    true
+                } else {
+                    cx.update_global::<Self, _>(|service, _| {
+                        service.history_cleanup_pending = false
+                    });
+                    false
+                }
+            });
+            if !started {
                 return;
             }
             let service = cx.update(|cx| {
@@ -232,6 +273,7 @@ impl MainWindowService {
                 };
                 Self::restart_clipboard_listener(cx);
                 NotificationService::show_message(title, detail, level, cx);
+                Self::finish_blocking_operation(cx);
             });
         })
         .detach();
@@ -283,6 +325,9 @@ impl MainWindowService {
     }
 
     pub(crate) fn toggle_clipboard_listener(cx: &mut App) {
+        if Self::blocking_operation(cx).is_some() {
+            return;
+        }
         let main_view = cx
             .try_global::<Self>()
             .and_then(|service| service.main_view.clone());
@@ -327,6 +372,9 @@ impl MainWindowService {
     }
 
     pub(crate) fn paste_plain_text_shortcut(cx: &mut App) {
+        if Self::blocking_operation(cx).is_some() {
+            return;
+        }
         let visible = Self::is_logically_visible(cx);
         let main_view = cx
             .try_global::<Self>()
@@ -347,6 +395,9 @@ impl MainWindowService {
     }
 
     pub(crate) fn paste_history_index(index: usize, cx: &mut App) {
+        if Self::blocking_operation(cx).is_some() {
+            return;
+        }
         let main_view = cx
             .try_global::<Self>()
             .and_then(|service| service.main_view.clone());
@@ -616,6 +667,9 @@ pub fn hide_main_window_explicitly(cx: &mut App) {
 }
 
 pub(crate) fn dispatch_session_shortcut(id: SessionShortcutId, cx: &mut App) {
+    if MainWindowService::blocking_operation(cx).is_some() {
+        return;
+    }
     if id == SessionShortcutId::HideWindow {
         hide_main_window_explicitly(cx);
         return;

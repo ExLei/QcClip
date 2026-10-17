@@ -463,6 +463,9 @@ fn start_migration(view: Entity<SettingsWindowView>, cx: &mut App) {
     };
     let options = view.read(cx).legacy_options;
     let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
+    if !crate::windows::main::MainWindowService::begin_blocking_operation("migration.title", cx) {
+        return;
+    }
     let translator = crate::i18n::translator(cx);
     let dialog = rfd::AsyncMessageDialog::new()
         .set_title(translator.translate("migration.title"))
@@ -483,6 +486,7 @@ fn start_migration(view: Entity<SettingsWindowView>, cx: &mut App) {
                 view.data_busy = false;
                 cx.notify();
             });
+            cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
             return;
         }
         let progress = Arc::new(AtomicUsize::new(0));
@@ -559,6 +563,7 @@ fn start_migration(view: Entity<SettingsWindowView>, cx: &mut App) {
             }
             cx.notify();
         });
+        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
     })
     .detach();
 }

@@ -1,4 +1,7 @@
-use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div};
+use gpui::{
+    AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, Render, Styled,
+    Window, div,
+};
 use gpui_component::ActiveTheme as _;
 
 use crate::{
@@ -7,6 +10,7 @@ use crate::{
 };
 
 use super::{
+    MainWindowService,
     components::{
         clipboard_list, emoji_picker, gallery_picker, multi_selection_bar, symbol_picker, tab_bar,
         tags_panel, title_bar,
@@ -24,6 +28,17 @@ fn is_sidebar_layout(window: &Window) -> bool {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let blocking_operation = MainWindowService::blocking_operation(cx);
+        let is_blocked = blocking_operation.is_some();
+        if is_blocked {
+            self.cancel_hover_preview(cx);
+            self.window_drag_start = None;
+            self.floating_toolbar_drag = None;
+            self.tags_panel_resize_start = None;
+            self.heat_scrollbar.drag_origin = None;
+            self.heat_scrollbar.dragging = false;
+            self.focus_handle.focus(window, cx);
+        }
         let appearance = config_runtime::appearance_config(cx);
         let layout = &appearance.tab_bar;
         let tabs = super::tabs::ordered_tabs(layout);
@@ -61,7 +76,11 @@ impl Render for MainWindow {
         self.cleanup_gallery_image_atlas(window);
         self.advance_scroll_animation(
             window,
-            config_runtime::animation_enabled(cx, crate::config::AnimationKind::SmoothScroll),
+            !is_blocked
+                && config_runtime::animation_enabled(
+                    cx,
+                    crate::config::AnimationKind::SmoothScroll,
+                ),
         );
         self.cleanup_image_cache(window);
         self.cleanup_file_list_cache(window, cx);
@@ -167,7 +186,9 @@ impl Render for MainWindow {
             .flex()
             .relative()
             .track_focus(&self.focus_handle);
-        root = root.child(super::window_drag::event_listener(clipboard.edge_hide, cx));
+        if !is_blocked {
+            root = root.child(super::window_drag::event_listener(clipboard.edge_hide, cx));
+        }
 
         root = match titlebar_position {
             TitlebarPosition::Top => root.flex_col().child(titlebar).child(workspace),
@@ -180,12 +201,79 @@ impl Render for MainWindow {
             root = root.child(tags_panel::render(self, window, cx, false));
         }
 
-        if self.gallery_import_progress.is_some() {
-            root = root.child(gallery_picker::render_gallery_import_overlay(self, cx));
+        if let Some(title_key) = blocking_operation {
+            root = root
+                .capture_any_mouse_down(|_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .capture_any_mouse_up(|_, _, cx| cx.stop_propagation())
+                .capture_key_down(|_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .capture_key_up(|_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .id("main-blocking-operation-overlay")
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                        .child(if self.gallery_import_progress.is_some() {
+                            gallery_picker::render_gallery_import_overlay(self, cx)
+                        } else {
+                            render_blocking_operation_overlay(title_key, cx)
+                        }),
+                );
         }
 
         root
     }
+}
+
+fn render_blocking_operation_overlay(title_key: &str, cx: &App) -> AnyElement {
+    use crate::ui::{icon, scale::ui_rem};
+
+    let theme = cx.theme().colors;
+    let translator = crate::i18n::translator(cx);
+    div()
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(gpui::ColorExt::opacity(&theme.background, 0.58))
+        .child(
+            div()
+                .w_full()
+                .max_w(ui_rem(320.0))
+                .mx(ui_rem(16.0))
+                .p(ui_rem(20.0))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(ui_rem(16.0))
+                .rounded_xl()
+                .bg(theme.background)
+                .shadow_lg()
+                .child(icon("refresh", 36.0, theme.primary))
+                .child(
+                    div()
+                        .text_center()
+                        .text_size(ui_rem(18.0))
+                        .text_color(theme.foreground)
+                        .child(translator.translate(title_key)),
+                )
+                .child(
+                    div()
+                        .text_center()
+                        .text_size(ui_rem(13.0))
+                        .text_color(theme.muted_foreground)
+                        .child(translator.translate("settings.data_management.busy")),
+                ),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]

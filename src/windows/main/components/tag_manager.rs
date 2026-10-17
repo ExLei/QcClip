@@ -554,32 +554,41 @@ impl TagManager {
         if tag_ids.is_empty() || self.deleting {
             return;
         }
+        if !crate::windows::main::MainWindowService::begin_blocking_operation(
+            "main.menu.delete",
+            cx,
+        ) {
+            return;
+        }
         self.deleting = true;
         self.error_message = None;
         let repository = self.repository.clone();
         let delete_ids = tag_ids.clone();
         let task = cx.background_spawn(async move { repository.delete_many(&delete_ids) });
-        cx.spawn(async move |this, cx| match task.await {
-            Ok(_) => {
-                this.update(cx, |this, cx| {
-                    this.tags.retain(|tag| !tag_ids.contains(&tag.id));
-                    this.selected_ids.retain(|tag_id| !tag_ids.contains(tag_id));
-                    this.deleting = false;
-                    this.main_window
-                        .update(cx, |main, cx| main.remove_tags(&tag_ids, cx));
-                    cx.notify();
-                })
-                .ok();
+        cx.spawn(async move |this, cx| {
+            match task.await {
+                Ok(_) => {
+                    this.update(cx, |this, cx| {
+                        this.tags.retain(|tag| !tag_ids.contains(&tag.id));
+                        this.selected_ids.retain(|tag_id| !tag_ids.contains(tag_id));
+                        this.deleting = false;
+                        this.main_window
+                            .update(cx, |main, cx| main.remove_tags(&tag_ids, cx));
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Err(error) => {
+                    this.update(cx, |this, cx| {
+                        this.deleting = false;
+                        this.error_message = Some(delete_error_message(&error, cx));
+                        tracing::error!("批量删除标签失败：{error}");
+                        cx.notify();
+                    })
+                    .ok();
+                }
             }
-            Err(error) => {
-                this.update(cx, |this, cx| {
-                    this.deleting = false;
-                    this.error_message = Some(delete_error_message(&error, cx));
-                    tracing::error!("批量删除标签失败：{error}");
-                    cx.notify();
-                })
-                .ok();
-            }
+            cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
         })
         .detach();
         cx.notify();
