@@ -556,6 +556,16 @@ pub(crate) fn set_visibility(
         // 隐藏动画期间仍可能收到列表 hover 事件；先使正在进行的预览查询失效，
         // 避免查询完成后重新创建预览窗口。
         MainWindowService::cancel_hover_preview(cx);
+        let main_view = cx.global::<MainWindowService>().main_view.clone();
+        if let Some(main_view) = main_view {
+            let _ = window.update(cx, |_, window, cx| {
+                main_view.update(cx, |main, cx| {
+                    main.clear_gallery_animations();
+                    main.cleanup_gallery_image_atlas(window);
+                    cx.notify();
+                });
+            });
+        }
     }
 
     let animation_enabled =

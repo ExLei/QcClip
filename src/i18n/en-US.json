@@ -689,6 +689,8 @@
   "settings.personalization.tab_bar.hidden": "Hidden",
   "settings.personalization.titlebar_position": "Title bar position",
   "settings.personalization.titlebar_position_description": "Choose whether the title bar appears at the top, bottom, left, or right of the window.",
+  "settings.personalization.gallery_gif_autoplay": "Autoplay GIFs in gallery",
+  "settings.personalization.gallery_gif_autoplay_description": "Loop GIFs in the visible gallery area automatically. When disabled, GIFs play only on hover.",
   "settings.personalization.animations": "Animations and effects",
   "settings.personalization.animations_description": "Manage each animation and interface effect in the application.",
   "settings.personalization.animations.enable_all": "Enable all",

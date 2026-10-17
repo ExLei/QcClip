@@ -39,6 +39,35 @@ const GALLERY_GRID_VERTICAL_PADDING: f32 = 4.0;
 const GALLERY_DRAG_PREVIEW_OPACITY: f32 = 0.7;
 const GALLERY_DRAG_PREVIEW_ACCEPT_SCALE: f32 = 0.72;
 
+#[derive(Default)]
+pub(crate) struct GalleryImagesCache {
+    key: Option<(u64, PersistedGallerySort, String)>,
+    images: Rc<Vec<ImageLibraryImage>>,
+}
+
+impl GalleryImagesCache {
+    fn get(
+        &mut self,
+        generation: u64,
+        images: &[ImageLibraryImage],
+        sort: PersistedGallerySort,
+        query: &str,
+    ) -> Rc<Vec<ImageLibraryImage>> {
+        let key = (generation, sort, query.trim().to_lowercase());
+        if self.key.as_ref() != Some(&key) {
+            let mut filtered = images
+                .iter()
+                .filter(|image| key.2.is_empty() || image.name.to_lowercase().contains(&key.2))
+                .cloned()
+                .collect::<Vec<_>>();
+            sort_gallery_images(&mut filtered, sort);
+            self.images = Rc::new(filtered);
+            self.key = Some(key);
+        }
+        self.images.clone()
+    }
+}
+
 #[derive(Clone)]
 struct GalleryImageDrag {
     path: PathBuf,
@@ -573,6 +602,11 @@ fn render_group_content(
     cx: &mut Context<MainWindow>,
     translator: &i18n::Translator,
 ) -> AnyElement {
+    if main.gallery_groups_loading || main.gallery_images_loading || main.gallery_images.is_empty()
+    {
+        main.ensure_gallery_thumbnails(&[], window, cx);
+        main.sync_gallery_animations(&[], window, cx);
+    }
     if main.gallery_groups_loading {
         return centered_message(
             translator.translate("main.gallery.loading_groups"),
@@ -594,17 +628,16 @@ fn render_group_content(
             cx.theme().colors.muted_foreground,
         )
     } else {
-        let query = main.symbol_search_query.trim().to_lowercase();
-        let mut filtered_images = main
-            .gallery_images
-            .iter()
-            .filter(|image| query.is_empty() || image.name.to_lowercase().contains(&query))
-            .cloned()
-            .collect::<Vec<_>>();
-        sort_gallery_images(&mut filtered_images, main.gallery_sort);
-        let images = Rc::new(filtered_images);
+        let images = main.gallery_images_cache.get(
+            main.gallery_images_generation,
+            &main.gallery_images,
+            main.gallery_sort,
+            &main.symbol_search_query,
+        );
         if images.is_empty() {
-            let has_query = !query.is_empty();
+            main.ensure_gallery_thumbnails(&[], window, cx);
+            main.sync_gallery_animations(&[], window, cx);
+            let has_query = !main.symbol_search_query.trim().is_empty();
             let title = if has_query {
                 translator.translate("main.gallery.search_empty")
             } else {
@@ -759,6 +792,48 @@ fn render_gallery_drop_target(
     target.into_any_element()
 }
 
+fn gallery_visible_rows(
+    scroll_top: f32,
+    viewport_height: f32,
+    row_height: f32,
+    padding: f32,
+    row_count: usize,
+) -> Range<usize> {
+    let first = (((scroll_top + padding) / row_height).floor().max(0.0) as usize).min(row_count);
+    if viewport_height <= 0.0 {
+        return first..first;
+    }
+    let end = (((scroll_top + viewport_height - padding) / row_height)
+        .ceil()
+        .max(0.0) as usize)
+        .clamp(first, row_count);
+    first..end
+}
+
+fn gallery_viewport_paths(
+    images: &[ImageLibraryImage],
+    columns: usize,
+    visible_rows: Range<usize>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let start = visible_rows.start.saturating_mul(columns).min(images.len());
+    let visible_end = visible_rows.end.saturating_mul(columns).min(images.len());
+    let cache_end = visible_rows
+        .end
+        .saturating_add(2)
+        .saturating_mul(columns)
+        .min(images.len());
+    let thumbnail_paths = images[start..cache_end]
+        .iter()
+        .map(|image| image.path.clone())
+        .collect();
+    let visible_gifs = images[start..visible_end]
+        .iter()
+        .filter(|image| image.is_gif)
+        .map(|image| image.path.clone())
+        .collect();
+    (thumbnail_paths, visible_gifs)
+}
+
 fn render_gallery_grid(
     main: &mut MainWindow,
     window: &mut Window,
@@ -771,25 +846,6 @@ fn render_gallery_grid(
     let rows = images.len().div_ceil(columns);
     let row_height =
         cell_size + GALLERY_GRID_VERTICAL_PADDING * 2.0 * crate::ui::scale::window_scale(window);
-    let total_height = row_height * rows as f32;
-    let max_offset = f32::from(main.gallery_scroll_handle.max_offset().y);
-    let viewport_height = if max_offset > 0.0 && max_offset < total_height {
-        total_height - max_offset
-    } else {
-        f32::from(window.viewport_size().height)
-    }
-    .clamp(row_height, total_height.max(row_height));
-    let scroll_top = (-f32::from(main.gallery_scroll_handle.offset().y)).max(0.0);
-    let first_visible_row = ((scroll_top / row_height).floor() as usize).min(rows - 1);
-    let last_visible_row = (((scroll_top + viewport_height) / row_height).ceil() as usize)
-        .clamp(first_visible_row + 1, rows);
-    let cache_start = first_visible_row * columns;
-    let cache_end = last_visible_row.saturating_mul(columns).min(images.len());
-    let cache_paths = images[cache_start.min(images.len())..cache_end]
-        .iter()
-        .map(|image| image.path.clone())
-        .collect::<Vec<_>>();
-    main.ensure_gallery_thumbnails(&cache_paths, window, cx);
 
     let image_sizes = Rc::new(
         (0..rows)
@@ -797,7 +853,9 @@ fn render_gallery_grid(
             .collect::<Vec<_>>(),
     );
     let scroll_handle = main.gallery_scroll_handle.clone();
-    symbol_list::render_sized_virtual_list(
+    let loading_images = images.clone();
+    let main_window = cx.weak_entity();
+    let list = symbol_list::render_sized_virtual_list(
         "gallery-image-list",
         image_sizes,
         scroll_handle,
@@ -821,7 +879,39 @@ fn render_gallery_grid(
                 .collect::<Vec<_>>()
         },
         cx,
-    )
+    );
+    div()
+        .flex_1()
+        .min_h_0()
+        .w_full()
+        .flex()
+        .flex_col()
+        .child(list)
+        .on_children_prepainted(move |_, window, cx| {
+            // 行回调也用于测量首行，资源调度必须等实际列表完成布局后再执行。
+            let _ = main_window.update(cx, |this, cx| {
+                let scroll_top = -f32::from(this.gallery_scroll_handle.offset().y);
+                let viewport_height = f32::from(
+                    this.gallery_scroll_handle
+                        .base_handle()
+                        .bounds()
+                        .size
+                        .height,
+                );
+                let visible_rows = gallery_visible_rows(
+                    scroll_top,
+                    viewport_height,
+                    row_height,
+                    GALLERY_GRID_VERTICAL_PADDING * crate::ui::scale::window_scale(window),
+                    rows,
+                );
+                let (thumbnail_paths, visible_gifs) =
+                    gallery_viewport_paths(&loading_images, columns, visible_rows);
+                this.ensure_gallery_thumbnails(&thumbnail_paths, window, cx);
+                this.sync_gallery_animations(&visible_gifs, window, cx);
+            });
+        })
+        .into_any_element()
 }
 
 fn render_gallery_row(
@@ -1417,4 +1507,99 @@ fn begin_external_file_drag(path: &PathBuf, window: &mut Window, cx: &mut App) {
     }
     #[cfg(not(target_os = "windows"))]
     let _ = (path, window, cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gif_visibility_excludes_overscan_and_counts_partial_tiles() {
+        assert_eq!(gallery_visible_rows(0.0, 210.0, 100.0, 10.0, 10), 0..2);
+        assert_eq!(gallery_visible_rows(90.0, 20.0, 100.0, 10.0, 10), 1..1);
+        assert_eq!(gallery_visible_rows(89.0, 22.0, 100.0, 10.0, 10), 0..2);
+        assert_eq!(gallery_visible_rows(0.0, 1000.0, 100.0, 10.0, 3), 0..3);
+        assert_eq!(gallery_visible_rows(100.0, 0.0, 100.0, 10.0, 10), 1..1);
+    }
+
+    fn image(name: &str) -> ImageLibraryImage {
+        ImageLibraryImage {
+            path: PathBuf::from(name),
+            name: name.to_owned(),
+            is_gif: true,
+            file_type: "gif".to_owned(),
+            modified_at: std::time::UNIX_EPOCH,
+            created_at: std::time::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn scrolled_viewport_loads_static_images_and_gifs_without_requesting_the_first_row() {
+        let images = (0..20)
+            .map(|index| {
+                let mut entry = image(&format!("{index}.png"));
+                entry.is_gif = index % 3 == 1;
+                entry
+            })
+            .collect::<Vec<_>>();
+        let visible_rows = gallery_visible_rows(300.0, 200.0, 100.0, 10.0, 10);
+        let (thumbnails, animations) = gallery_viewport_paths(&images, 2, visible_rows);
+        assert_eq!(
+            thumbnails,
+            images[6..14]
+                .iter()
+                .map(|image| image.path.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(animations, vec![images[7].path.clone()]);
+        assert!(thumbnails.contains(&images[6].path));
+        assert!(thumbnails.contains(&images[7].path));
+        assert!(!thumbnails.contains(&images[0].path));
+        assert!(!animations.contains(&images[10].path));
+    }
+
+    #[test]
+    fn initial_viewport_loads_all_static_rows_without_any_animated_images() {
+        let images = (0..12)
+            .map(|index| {
+                let mut entry = image(&format!("{index}.png"));
+                entry.is_gif = false;
+                entry
+            })
+            .collect::<Vec<_>>();
+        let visible_rows = gallery_visible_rows(0.0, 300.0, 100.0, 10.0, 6);
+        let (thumbnails, animations) = gallery_viewport_paths(&images, 2, visible_rows);
+        assert_eq!(
+            thumbnails,
+            images[..10]
+                .iter()
+                .map(|image| image.path.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(animations.is_empty());
+    }
+
+    #[test]
+    fn gallery_cache_reuses_frames_and_invalidates_for_search_sort_and_reload() {
+        let mut cache = GalleryImagesCache::default();
+        let mut images = vec![image("B.gif"), image("A.gif")];
+        let sort = PersistedGallerySort::default();
+        let first = cache.get(1, &images, sort, "");
+        assert_eq!(first[0].name, "A.gif");
+        assert!(Rc::ptr_eq(&first, &cache.get(1, &images, sort, "  ")));
+        let searched = cache.get(1, &images, sort, " b ");
+        assert_eq!(searched.len(), 1);
+        assert_eq!(searched[0].name, "B.gif");
+        assert!(Rc::ptr_eq(&searched, &cache.get(1, &images, sort, "B")));
+        let descending = PersistedGallerySort {
+            order: GallerySortOrder::Descending,
+            ..sort
+        };
+        let reordered = cache.get(1, &images, descending, "");
+        assert_eq!(reordered[0].name, "B.gif");
+        images.push(image("C.gif"));
+        let reloaded = cache.get(2, &images, descending, "");
+        assert_eq!(reloaded.len(), 3);
+        assert_eq!(reloaded[0].name, "C.gif");
+    }
 }

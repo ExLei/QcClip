@@ -2,7 +2,10 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use gpui::RenderImage;
@@ -179,16 +182,19 @@ impl ImagePreviewService {
         decode_image(&bytes, "", max_size)
     }
 
-    /// 仅在 GIF 图片悬停时解码动画帧，并将每帧缩小到缩略图尺寸。
+    /// 按需解码 GIF，每帧立即缩小，并在帧间检查取消状态。
     pub fn load_animated_gif(
         &self,
         path: &Path,
         max_size: (u32, u32),
+        max_frame_bytes: usize,
+        cancelled: &AtomicBool,
     ) -> Result<Option<Arc<RenderImage>>, ImagePreviewError> {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
         let _operation = crate::services::data_runtime::begin_operation()
             .map_err(|_| ImagePreviewError::DataSwitching)?;
-        use image::AnimationDecoder;
-
         let metadata = fs::metadata(path)?;
         if !metadata.is_file() {
             return Err(ImagePreviewError::NoImageFile);
@@ -197,33 +203,7 @@ impl ImagePreviewService {
             return Err(ImagePreviewError::FileTooLarge);
         }
         let bytes = fs::read(path)?;
-        if !has_gif_signature(&bytes) {
-            return Ok(None);
-        }
-        let mut decoder = image::codecs::gif::GifDecoder::new(Cursor::new(bytes))?;
-        decoder.set_limits(image_decode_limits())?;
-        let frames = decoder
-            .into_frames()
-            .take(60)
-            .filter_map(Result::ok)
-            .collect::<Vec<_>>();
-        let frames = frames
-            .into_iter()
-            .map(|frame| {
-                let delay = frame.delay();
-                let mut buffer = DynamicImage::ImageRgba8(frame.into_buffer())
-                    .thumbnail(max_size.0.max(1), max_size.1.max(1))
-                    .into_rgba8();
-                for pixel in buffer.chunks_exact_mut(4) {
-                    pixel.swap(0, 2);
-                }
-                image::Frame::from_parts(buffer, 0, 0, delay)
-            })
-            .collect::<Vec<_>>();
-        if frames.is_empty() {
-            return Err(ImagePreviewError::NoImageFile);
-        }
-        Ok(Some(Arc::new(RenderImage::new(frames))))
+        decode_animated_gif(&bytes, max_size, max_frame_bytes, cancelled)
     }
 
     fn load_file_list(
@@ -375,6 +355,60 @@ fn image_decode_limits() -> Limits {
     let mut limits = Limits::default();
     limits.max_alloc = Some(MAX_IMAGE_DECODE_BYTES);
     limits
+}
+
+fn decode_animated_gif(
+    bytes: &[u8],
+    max_size: (u32, u32),
+    max_frame_bytes: usize,
+    cancelled: &AtomicBool,
+) -> Result<Option<Arc<RenderImage>>, ImagePreviewError> {
+    use image::AnimationDecoder;
+
+    if cancelled.load(Ordering::Relaxed) || !has_gif_signature(bytes) {
+        return Ok(None);
+    }
+    let mut decoder = image::codecs::gif::GifDecoder::new(Cursor::new(bytes))?;
+    let mut limits = image_decode_limits();
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    decoder.set_limits(limits)?;
+    let mut frames = Vec::new();
+    let mut frame_bytes = 0;
+    let mut source_frames = decoder.into_frames();
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let Some(frame) = source_frames.next() else {
+            break;
+        };
+        let frame = frame?;
+        // 超限时保留静态缩略图，避免把截断动画当作完整循环播放。
+        if frames.len() >= 600 {
+            return Err(ImagePreviewError::AllocationLimit);
+        }
+        let delay =
+            if std::time::Duration::from(frame.delay()) < std::time::Duration::from_millis(20) {
+                image::Delay::from_numer_denom_ms(100, 1)
+            } else {
+                frame.delay()
+            };
+        let mut buffer = DynamicImage::ImageRgba8(frame.into_buffer())
+            .thumbnail(max_size.0.max(1), max_size.1.max(1))
+            .into_rgba8();
+        frame_bytes += buffer.len();
+        if frame_bytes > max_frame_bytes {
+            return Err(ImagePreviewError::AllocationLimit);
+        }
+        for pixel in buffer.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        frames.push(image::Frame::from_parts(buffer, 0, 0, delay));
+    }
+    if frames.is_empty() {
+        return Err(ImagePreviewError::NoImageFile);
+    }
+    Ok(Some(Arc::new(RenderImage::new(frames))))
 }
 
 fn has_gif_signature(bytes: &[u8]) -> bool {
@@ -940,5 +974,71 @@ mod tests {
             (160, 120)
         );
         assert_eq!(thumbnail_dimensions(100, 50, (4096, 120)), (100, 50));
+    }
+
+    fn animated_gif_bytes(frame_count: usize, delay_ms: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            for _ in 0..frame_count {
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        image::RgbaImage::from_pixel(4, 2, image::Rgba([255, 0, 0, 255])),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(delay_ms, 1),
+                    ))
+                    .expect("无法生成测试 GIF");
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn animated_gif_preserves_long_loops_and_frame_delays() {
+        let bytes = animated_gif_bytes(80, 50);
+        let image = decode_animated_gif(&bytes, (2, 2), 1024 * 1024, &AtomicBool::new(false))
+            .expect("GIF 解码失败")
+            .expect("缺少动画");
+        assert_eq!(image.frame_count(), 80);
+        assert_eq!(image.as_bytes(0).expect("缺少首帧").len(), 8);
+        assert_eq!(
+            std::time::Duration::from(image.delay(79)),
+            std::time::Duration::from_millis(50)
+        );
+        assert_eq!(
+            &image.as_bytes(0).expect("缺少首帧")[..4],
+            &[0, 0, 255, 255]
+        );
+    }
+
+    #[test]
+    fn animated_gif_respects_budget_without_returning_partial_loops() {
+        let bytes = animated_gif_bytes(3, 50);
+        assert!(matches!(
+            decode_animated_gif(&bytes, (4, 2), 64, &AtomicBool::new(false)),
+            Err(ImagePreviewError::AllocationLimit)
+        ));
+    }
+
+    #[test]
+    fn animated_gif_cancellation_skips_decoding() {
+        assert!(
+            decode_animated_gif(b"GIF89a", (4, 2), 1024, &AtomicBool::new(true))
+                .expect("取消解码不应报错")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn animated_gif_normalizes_zero_frame_delay() {
+        let bytes = animated_gif_bytes(2, 0);
+        let image = decode_animated_gif(&bytes, (4, 2), 1024, &AtomicBool::new(false))
+            .expect("GIF 解码失败")
+            .expect("缺少动画");
+        assert_eq!(
+            std::time::Duration::from(image.delay(0)),
+            std::time::Duration::from_millis(100)
+        );
     }
 }

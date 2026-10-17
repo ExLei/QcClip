@@ -208,6 +208,10 @@ pub(crate) fn appearance_config(cx: &App) -> AppearanceConfig {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.appearance.clone())
 }
 
+pub(crate) fn gallery_gif_autoplay(cx: &App) -> bool {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.appearance.gallery_gif_autoplay)
+}
+
 pub(crate) fn launch_at_login(cx: &App) -> bool {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.general.launch_at_login)
 }

@@ -545,6 +545,25 @@ impl SettingsWindowView {
                 }
             });
 
+        let gallery_gif_autoplay_switch = Switch::new("settings-gallery-gif-autoplay")
+            .checked(appearance.gallery_gif_autoplay)
+            .accessibility_label(
+                translator.translate("settings.personalization.gallery_gif_autoplay"),
+            )
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    persist_appearance_change(
+                        view.clone(),
+                        "图库 GIF 自动播放",
+                        move |appearance| appearance.gallery_gif_autoplay = *checked,
+                        save_error.clone(),
+                        cx,
+                    )
+                }
+            });
+
         let mut section = v_flex()
             .w_full()
             .min_w_0()
@@ -674,6 +693,18 @@ impl SettingsWindowView {
                             move |_, window, cx| open_animations_sheet(view.clone(), window, cx)
                         },
                     ),
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.gallery_gif_autoplay"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.gallery_gif_autoplay_description")
+                            .into(),
+                    ),
+                    gallery_gif_autoplay_switch,
                 ),
             )
             .child(

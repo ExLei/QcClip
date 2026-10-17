@@ -348,6 +348,13 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
             default.animations,
             warnings,
         ),
+        gallery_gif_autoplay: read_field(
+            object,
+            "galleryGifAutoplay",
+            "appearance.galleryGifAutoplay",
+            default.gallery_gif_autoplay,
+            warnings,
+        ),
         window_material,
         window_material_opacity,
         background_image_path: read_field(
@@ -833,6 +840,26 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gallery_gif_autoplay_round_trips_and_defaults_to_disabled() {
+        let old = super::from_str(r#"{"appearance":{"animations":{}}}"#).expect("无法读取已有配置");
+        assert!(!old.config.appearance.gallery_gif_autoplay);
+        let mut config = old.config;
+        config.appearance.gallery_gif_autoplay = true;
+        let encoded = serde_json::to_string(&config).expect("无法保存自动播放配置");
+        assert!(
+            super::from_str(&encoded)
+                .expect("无法读取自动播放配置")
+                .config
+                .appearance
+                .gallery_gif_autoplay
+        );
+        let invalid = super::from_str(r#"{"appearance":{"galleryGifAutoplay":"invalid"}}"#)
+            .expect("无法读取无效配置");
+        assert!(!invalid.config.appearance.gallery_gif_autoplay);
+        assert_eq!(invalid.warnings.len(), 1);
+    }
+
     #[test]
     fn note_display_setting_round_trips_and_defaults_to_disabled() {
         let mut config = super::super::AppConfig::default();

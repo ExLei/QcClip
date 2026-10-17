@@ -780,6 +780,12 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Personalization,
+            title_key: "settings.personalization.gallery_gif_autoplay",
+            description_key: Some("settings.personalization.gallery_gif_autoplay_description"),
+            ratio: 0.32,
+        },
+        SearchTargetSpec {
+            page: Personalization,
             title_key: "settings.personalization.window_material",
             description_key: Some("settings.personalization.window_material_description"),
             ratio: 0.32,

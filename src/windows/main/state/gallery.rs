@@ -1,5 +1,16 @@
 use super::*;
 
+const MAX_GALLERY_ANIMATION_LOADS: usize = 2;
+const MAX_GALLERY_ANIMATION_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_GALLERY_ANIMATION_BYTES: usize = 16 * 1024 * 1024;
+
+fn animation_bytes(image: &RenderImage) -> usize {
+    (0..image.frame_count())
+        .filter_map(|index| image.as_bytes(index))
+        .map(<[u8]>::len)
+        .sum()
+}
+
 impl MainWindow {
     pub(crate) fn set_gallery_sort(
         &mut self,
@@ -368,19 +379,6 @@ impl MainWindow {
         }
         self.gallery_image_load_failures
             .retain(|path| allowed.contains(path));
-        let stale_animations = self
-            .loaded_gallery_animations
-            .keys()
-            .filter(|path| !allowed.contains(path))
-            .cloned()
-            .collect::<Vec<_>>();
-        for path in stale_animations {
-            if let Some(image) = self.loaded_gallery_animations.remove(&path) {
-                if let Err(error) = window.drop_image(image) {
-                    tracing::warn!("释放图库 GIF 纹理失败：{error}");
-                }
-            }
-        }
     }
 
     pub(crate) fn cleanup_gallery_image_atlas(&mut self, window: &mut Window) {
@@ -411,15 +409,23 @@ impl MainWindow {
     }
 
     pub(super) fn clear_gallery_image_cache(&mut self) {
+        self.gallery_images_cache = Default::default();
         self.gallery_visible_image_paths.clear();
         self.gallery_image_queue.clear();
         self.gallery_image_loading.clear();
         self.gallery_image_load_failures.clear();
-        self.gallery_animation_loading.clear();
-        self.gallery_animation_failures.clear();
-        self.gallery_hovered_image = None;
+        self.clear_gallery_animations();
         self.pending_gallery_image_drops
             .extend(std::mem::take(&mut self.loaded_gallery_images).into_values());
+    }
+
+    pub(crate) fn clear_gallery_animations(&mut self) {
+        self.gallery_animation_targets.clear();
+        self.gallery_animation_failures.clear();
+        self.gallery_hovered_image = None;
+        for cancelled in self.gallery_animation_loading.values() {
+            cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.pending_gallery_image_drops
             .extend(std::mem::take(&mut self.loaded_gallery_animations).into_values());
     }
@@ -479,71 +485,137 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn ensure_gallery_animation(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        if !self.is_gallery_active() {
-            return;
-        }
-        self.gallery_hovered_image = Some(path.clone());
-        if self.gallery_animation_failures.contains(&path)
-            || self.loaded_gallery_animations.contains_key(&path)
-            || self.gallery_animation_loading.contains(&path)
+    pub(crate) fn sync_gallery_animations(
+        &mut self,
+        visible_gifs: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let autoplay = crate::config_runtime::gallery_gif_autoplay(cx);
+        let visible = self.is_gallery_active() && MainWindowService::is_logically_visible(cx);
+        if !visible
+            || !visible_gifs
+                .iter()
+                .any(|path| Some(path) == self.gallery_hovered_image.as_ref())
         {
-            cx.notify();
+            self.gallery_hovered_image = None;
+        }
+        let next_targets = visible_gifs
+            .iter()
+            .filter(|path| {
+                visible && (autoplay || Some(*path) == self.gallery_hovered_image.as_ref())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if next_targets == self.gallery_animation_targets {
             return;
         }
-        if !self.gallery_animation_loading.is_empty() {
+        self.gallery_animation_targets = next_targets;
+        let budget = (MAX_GALLERY_ANIMATION_CACHE_BYTES
+            / self.gallery_animation_targets.len().max(1))
+        .min(MAX_GALLERY_ANIMATION_BYTES);
+        if budget > self.gallery_animation_budget {
+            self.gallery_animation_failures.clear();
+        }
+        let targets = self
+            .gallery_animation_targets
+            .iter()
+            .collect::<HashSet<_>>();
+        for (path, cancelled) in &self.gallery_animation_loading {
+            if !targets.contains(path) || budget < self.gallery_animation_budget {
+                cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        self.gallery_animation_budget = budget;
+        let stale = self
+            .loaded_gallery_animations
+            .iter()
+            .filter(|(path, image)| !targets.contains(path) || animation_bytes(image) > budget)
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        for path in stale {
+            if let Some(image) = self.loaded_gallery_animations.remove(&path) {
+                self.pending_gallery_image_drops.push(image);
+            }
+        }
+        self.gallery_animation_failures
+            .retain(|path| targets.contains(path));
+        self.cleanup_gallery_image_atlas(window);
+        self.start_gallery_animation_loads(cx);
+    }
+
+    fn start_gallery_animation_loads(&mut self, cx: &mut Context<Self>) {
+        if !self.is_gallery_active() || !MainWindowService::is_logically_visible(cx) {
             return;
         }
-        self.gallery_animation_loading.insert(path.clone());
-        let generation = self.gallery_images_generation;
-        let service = self.image_preview_service.clone();
-        let load_path = path.clone();
-        let task =
-            cx.background_spawn(async move { service.load_animated_gif(&load_path, (256, 256)) });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if this.gallery_images_generation != generation {
-                        return;
-                    }
-                    this.gallery_animation_loading.remove(&path);
-                    if this.is_gallery_active()
-                        && this.gallery_hovered_image.as_ref() == Some(&path)
-                    {
-                        match result {
-                            Ok(Some(image)) => {
-                                this.loaded_gallery_animations.insert(path.clone(), image);
-                                cx.notify();
-                            }
-                            Ok(None) => {
-                                this.gallery_animation_failures.insert(path.clone());
-                            }
-                            Err(error) => {
-                                tracing::warn!("GIF 动画无法预览：{error}");
-                                this.gallery_animation_failures.insert(path.clone());
+        while self.gallery_animation_loading.len() < MAX_GALLERY_ANIMATION_LOADS {
+            let Some(path) = self
+                .gallery_animation_targets
+                .iter()
+                .find(|path| {
+                    !self.loaded_gallery_animations.contains_key(*path)
+                        && !self.gallery_animation_failures.contains(*path)
+                        && !self.gallery_animation_loading.contains_key(*path)
+                })
+                .cloned()
+            else {
+                break;
+            };
+            let cancelled = Arc::new(AtomicBool::new(false));
+            self.gallery_animation_loading
+                .insert(path.clone(), cancelled.clone());
+            let generation = self.gallery_images_generation;
+            let budget = self.gallery_animation_budget;
+            let service = self.image_preview_service.clone();
+            let load_path = path.clone();
+            let load_cancelled = cancelled.clone();
+            let task = cx.background_spawn(async move {
+                service.load_animated_gif(&load_path, (128, 128), budget, &load_cancelled)
+            });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        // 取消的任务完成前仍占用并发名额，避免快速滚动堆积解码任务。
+                        this.gallery_animation_loading.remove(&path);
+                        if this.gallery_images_generation == generation
+                            && !cancelled.load(std::sync::atomic::Ordering::Relaxed)
+                            && this.gallery_animation_targets.contains(&path)
+                            && this.is_gallery_active()
+                            && MainWindowService::is_logically_visible(cx)
+                        {
+                            match result {
+                                Ok(Some(image)) => {
+                                    this.loaded_gallery_animations.insert(path.clone(), image);
+                                    cx.notify();
+                                }
+                                Ok(None) => {
+                                    this.gallery_animation_failures.insert(path.clone());
+                                }
+                                Err(error) => {
+                                    tracing::warn!("GIF 动画无法预览：{error}");
+                                    this.gallery_animation_failures.insert(path.clone());
+                                }
                             }
                         }
-                    }
-                    if let Some(next_path) = this
-                        .gallery_hovered_image
-                        .clone()
-                        .filter(|next_path| next_path != &path)
-                    {
-                        this.ensure_gallery_animation(next_path, cx);
-                    }
-                });
-            }
-        })
-        .detach();
+                        this.start_gallery_animation_loads(cx);
+                    });
+                }
+            })
+            .detach();
+        }
+    }
+
+    pub(crate) fn ensure_gallery_animation(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.is_gallery_active() && self.gallery_hovered_image.as_ref() != Some(&path) {
+            self.gallery_hovered_image = Some(path);
+            cx.notify();
+        }
     }
 
     pub(crate) fn clear_gallery_hover(&mut self, path: &Path) {
         if self.gallery_hovered_image.as_deref() == Some(path) {
             self.gallery_hovered_image = None;
-            if let Some(image) = self.loaded_gallery_animations.remove(path) {
-                self.pending_gallery_image_drops.push(image);
-            }
         }
     }
 

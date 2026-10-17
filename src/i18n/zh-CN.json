@@ -689,6 +689,8 @@
   "settings.personalization.tab_bar.hidden": "隐藏",
   "settings.personalization.titlebar_position": "标题栏位置",
   "settings.personalization.titlebar_position_description": "选择标题栏显示在窗口的顶部、底部或左右两侧。",
+  "settings.personalization.gallery_gif_autoplay": "图库 GIF 自动播放",
+  "settings.personalization.gallery_gif_autoplay_description": "自动循环播放图库可见区域内的 GIF；关闭后仅在鼠标悬停时播放。",
   "settings.personalization.animations": "动画与动效",
   "settings.personalization.animations_description": "管理程序中各项动画与界面动效。",
   "settings.personalization.animations.enable_all": "全部启用",
