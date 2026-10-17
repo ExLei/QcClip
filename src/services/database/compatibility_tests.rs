@@ -35,6 +35,33 @@ fn future_database(connection: &Connection, minimum_read: i32, minimum_write: i3
 }
 
 #[test]
+fn future_database_does_not_install_current_capture_indexes() {
+    let directory = tempfile::tempdir().expect("无法创建临时目录");
+    let path = directory.path().join("future.sqlite3");
+    let database = Database::open(&path).expect("无法创建数据库");
+    let connection = database.connect_write().expect("无法连接数据库");
+    connection
+        .execute_batch(
+            "DROP INDEX ix_clipboard_formats_text_merge;
+         DROP INDEX ix_clipboard_formats_native_text_hash;",
+        )
+        .expect("无法准备新版数据库索引");
+    future_database(&connection, 1, 1);
+    drop(connection);
+    let database = Database::open(path).expect("无法打开兼容数据库");
+    let connection = database.connect().expect("无法连接兼容数据库");
+    let indexes: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN
+         ('ix_clipboard_formats_text_merge','ix_clipboard_formats_native_text_hash')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("无法检查新版数据库索引");
+    assert_eq!(indexes, 0);
+}
+
+#[test]
 fn first_release_starts_at_schema_one() {
     let directory = tempfile::tempdir().expect("无法创建临时目录");
     let database = Database::open(directory.path().join("test.sqlite3")).expect("无法创建数据库");

@@ -1112,12 +1112,20 @@ impl MainWindow {
 
         let item = record_to_list_item(record);
         let target_position = if item.is_pinned { 0 } else { pinned_count };
-        let mut order_changed = source_position.is_none();
+        let presentation_changed = self.loaded_items.get(&history_id).is_none_or(|previous| {
+            previous.preview_text != item.preview_text
+                || previous.preview_options != item.preview_options
+                || previous.all_format_options != item.all_format_options
+                || previous.content_kind != item.content_kind
+                || previous.note_text != item.note_text
+                || previous.tag_ids != item.tag_ids
+                || previous.source_app_name != item.source_app_name
+                || previous.source_app_icon != item.source_app_icon
+        });
         let destination_position;
         if let Some(source_position) = source_position {
             self.list_order_ids.remove(source_position);
             destination_position = target_position.min(self.list_order_ids.len());
-            order_changed |= source_position != destination_position;
             self.list_order_ids.insert(destination_position, history_id);
             self.list_heatmap.update(source_position, item.paste_count);
             self.list_heatmap
@@ -1150,8 +1158,8 @@ impl MainWindow {
             .retain(|existing| existing.history_id != history_id);
         insert_sorted_item(&mut self.items, item.clone());
         self.loaded_items.insert(history_id, item);
-        self.adaptive_item_heights.remove(&history_id);
-        if order_changed {
+        if presentation_changed || source_position != Some(destination_position) {
+            self.adaptive_item_heights.remove(&history_id);
             self.invalidate_list_layout_cache();
         }
         if let Some(source_position) = source_position {

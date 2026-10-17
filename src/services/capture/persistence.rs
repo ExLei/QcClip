@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -15,6 +15,7 @@ use crate::domain::{
 
 use super::{
     CaptureError, generate_preview, hash_clipboard, hash_format_set, select_default_preview,
+    text_merge::find_text_merge,
 };
 use crate::services::{
     application_icon::{ApplicationIconStore, upsert_application_icon},
@@ -80,10 +81,7 @@ impl CaptureService {
     ) -> Result<CaptureStoreResult, CaptureError> {
         validate_formats(captured)?;
         let hashed = hash_clipboard(captured)?;
-        let preview = generate_preview(captured)?;
-        let default_preview = select_default_preview(captured, &preview.formats)
-            .ok_or(CaptureError::NoCapturedFormats)?;
-        let primary_index = select_primary_format(captured)?;
+        select_primary_format(captured)?;
         let timestamp = current_timestamp_millis();
         let mut connection = self.database.connect_write()?;
         let prepared_icon = self
@@ -102,9 +100,41 @@ impl CaptureService {
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let existing = match exact_existing {
-            Some(existing) => Some(existing),
-            None => find_legacy_duplicate_item(&transaction, captured, &hashed, &self.blob_store)?,
+        let text_merge = find_text_merge(
+            &transaction,
+            captured,
+            &self.blob_store,
+            exact_existing.as_ref().map(|existing| existing.0),
+            &hashed,
+        )?;
+        let captured = text_merge
+            .as_ref()
+            .and_then(|merged| merged.captured.as_ref())
+            .unwrap_or(captured);
+        let hashed = text_merge
+            .as_ref()
+            .and_then(|merged| merged.hashed.as_ref())
+            .unwrap_or(&hashed);
+        let existing = if text_merge
+            .as_ref()
+            .is_some_and(|merged| merged.formats_changed)
+        {
+            None
+        } else if let Some(merged) = text_merge.as_ref() {
+            transaction
+                .query_row(
+                    "SELECT id, capture_state FROM clipboard_items WHERE id = ?1",
+                    [merged.item_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?
+        } else {
+            match exact_existing {
+                Some(existing) => Some(existing),
+                None => {
+                    find_legacy_duplicate_item(&transaction, captured, hashed, &self.blob_store)?
+                }
+            }
         };
         if let Some((item_id, state)) = existing {
             if state != "ready" {
@@ -120,11 +150,63 @@ impl CaptureService {
                 source_app_icon_id,
             )?;
             transaction.commit()?;
-            return Ok(CaptureStoreResult { history_id, is_new });
+            return Ok(CaptureStoreResult {
+                history_id,
+                is_new,
+                formats_changed: false,
+            });
         }
 
-        transaction.execute(
-            "INSERT INTO clipboard_items (
+        let preview = generate_preview(captured)?;
+        let default_preview = select_default_preview(captured, &preview.formats)
+            .ok_or(CaptureError::NoCapturedFormats)?;
+        let primary_index = select_primary_format(captured)?;
+        let mut replaced_blob_ids = Vec::new();
+        let mut reusable_blobs = HashMap::new();
+        let item_id = if let Some(merged) = text_merge.as_ref() {
+            let item_id = merged.item_id;
+            {
+                let mut statement = transaction.prepare(
+                    "SELECT DISTINCT b.id, b.sha256, b.storage_state FROM clipboard_formats f
+                     JOIN binary_blobs b ON b.id = f.blob_id
+                     WHERE f.item_id = ?1",
+                )?;
+                for row in statement.query_map([item_id], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })? {
+                    let (blob_id, hash, state) = row?;
+                    replaced_blob_ids.push(blob_id);
+                    if state == "ready" {
+                        reusable_blobs.insert(hash, blob_id);
+                    }
+                }
+            }
+            transaction.execute(
+                "UPDATE clipboard_items SET capture_state = 'pending', hash_version = ?1,
+                     content_hash = ?2, content_kind = ?3, preview_text = ?4,
+                     preview_char_count = ?5, updated_at = ?6 WHERE id = ?7",
+                params![
+                    hashed.hash_version,
+                    hashed.content_hash.as_slice(),
+                    preview.content_kind.as_str(),
+                    default_preview.text,
+                    default_preview.char_count as i64,
+                    timestamp,
+                    item_id
+                ],
+            )?;
+            transaction.execute(
+                "DELETE FROM clipboard_formats WHERE item_id = ?1",
+                [item_id],
+            )?;
+            item_id
+        } else {
+            transaction.execute(
+                "INSERT INTO clipboard_items (
                 uuid, origin_kind, hash_version, content_hash, content_kind,
                 capture_state, preview_text, preview_char_count, format_count,
                 total_bytes, created_at, updated_at
@@ -132,18 +214,20 @@ impl CaptureService {
                 ?1, 'captured', ?2, ?3, ?4,
                 'pending', ?5, ?6, 0, 0, ?7, ?7
              )",
-            params![
-                Uuid::new_v4().to_string(),
-                hashed.hash_version,
-                hashed.content_hash.as_slice(),
-                preview.content_kind.as_str(),
-                default_preview.text,
-                default_preview.char_count as i64,
-                timestamp,
-            ],
-        )?;
-        let item_id = transaction.last_insert_rowid();
+                params![
+                    Uuid::new_v4().to_string(),
+                    hashed.hash_version,
+                    hashed.content_hash.as_slice(),
+                    preview.content_kind.as_str(),
+                    default_preview.text,
+                    default_preview.char_count as i64,
+                    timestamp,
+                ],
+            )?;
+            transaction.last_insert_rowid()
+        };
         let mut total_bytes = 0_i64;
+        let mut retained_blob_ids = HashSet::new();
 
         for (index, format) in captured.formats.iter().enumerate() {
             let is_primary = index == primary_index;
@@ -178,6 +262,9 @@ impl CaptureService {
                 total_bytes = total_bytes.saturating_add(bytes.len() as i64);
                 if bytes.len() <= self.inline_threshold {
                     ("inline", Some(bytes), None, bytes.len() as i64)
+                } else if let Some(blob_id) = data_hash.and_then(|hash| reusable_blobs.get(hash)) {
+                    // 已在加载合并候选时校验过原文件，同一事务内直接复用，避免重新压缩和落盘。
+                    ("external", None, Some(*blob_id), bytes.len() as i64)
                 } else {
                     let pending = self.blob_store.write_pending(bytes)?;
                     let blob = self.blob_store.commit_pending(&pending)?;
@@ -187,6 +274,10 @@ impl CaptureService {
             } else {
                 ("none", None, None, 0)
             };
+
+            if let Some(blob_id) = blob_id {
+                retained_blob_ids.insert(blob_id);
+            }
 
             transaction.execute(
                 "INSERT INTO clipboard_formats (
@@ -257,7 +348,43 @@ impl CaptureService {
             source_app_icon_id,
         )?;
         transaction.commit()?;
-        Ok(CaptureStoreResult { history_id, is_new })
+        replaced_blob_ids.retain(|blob_id| !retained_blob_ids.contains(blob_id));
+        if !replaced_blob_ids.is_empty()
+            && let Err(error) = self.cleanup_replaced_blobs(&replaced_blob_ids)
+        {
+            tracing::warn!(%error, "合并后的旧格式文件清理失败，将由后续维护重试");
+        }
+        Ok(CaptureStoreResult {
+            history_id,
+            is_new,
+            formats_changed: text_merge.is_some(),
+        })
+    }
+
+    fn cleanup_replaced_blobs(&self, blob_ids: &[i64]) -> Result<(), CaptureError> {
+        let mut connection = self.database.connect_write()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for blob_id in blob_ids {
+            let record = transaction.query_row(
+                "SELECT sha256, byte_length, relative_path FROM binary_blobs b
+                 WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM clipboard_formats WHERE blob_id = b.id)",
+                [blob_id],
+                |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)),
+            ).optional()?;
+            let Some((hash, length, path)) = record else {
+                continue;
+            };
+            let hash = hash
+                .try_into()
+                .map_err(|_| CaptureError::InvalidFormat("旧格式文件哈希长度无效".to_owned()))?;
+            let length = u64::try_from(length)
+                .map_err(|_| CaptureError::InvalidFormat("旧格式文件长度无效".to_owned()))?;
+            self.blob_store
+                .delete_if_unreferenced(&RawBlob::from_record(hash, length, path), 0)?;
+            transaction.execute("DELETE FROM binary_blobs WHERE id = ?1", [blob_id])?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 }
 
@@ -265,6 +392,7 @@ impl CaptureService {
 pub struct CaptureStoreResult {
     pub history_id: HistoryItemId,
     pub is_new: bool,
+    pub formats_changed: bool,
 }
 
 fn find_legacy_duplicate_item(
@@ -273,7 +401,7 @@ fn find_legacy_duplicate_item(
     hashed: &super::HashedClipboard,
     blob_store: &RawBlobStore,
 ) -> Result<Option<(i64, String)>, CaptureError> {
-    let Some((unicode_format, unicode_hash)) = captured
+    let Some(unicode_hash) = captured
         .formats
         .iter()
         .enumerate()
@@ -282,10 +410,10 @@ fn find_legacy_duplicate_item(
                 && format.format_key == "CF_UNICODETEXT"
                 && format.capture_state.has_data()
         })
-        .and_then(|(index, format)| {
+        .and_then(|(index, _)| {
             hashed.format_hashes[index]
                 .as_ref()
-                .map(|hash| (format, hash.as_slice()))
+                .map(|hash| hash.as_slice())
         })
     else {
         return Ok(None);
@@ -298,22 +426,16 @@ fn find_legacy_duplicate_item(
              JOIN clipboard_formats AS f ON f.item_id = i.id
              WHERE i.hash_version = ?1
                AND i.capture_state = 'ready'
-               AND f.format_namespace = ?2
-               AND f.format_key = ?3
-               AND f.data_hash = ?4
+               AND f.format_namespace = 'windows'
+               AND f.format_key = 'CF_UNICODETEXT'
+               AND f.data_hash = ?2
                AND f.capture_state IN ('captured', 'generated')
              ORDER BY i.id DESC",
         )?;
         statement
-            .query_map(
-                params![
-                    hashed.hash_version,
-                    unicode_format.format_namespace,
-                    unicode_format.format_key,
-                    unicode_hash,
-                ],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-            )?
+            .query_map(params![hashed.hash_version, unicode_hash], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?
     };
 

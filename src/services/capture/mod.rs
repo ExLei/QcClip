@@ -1,6 +1,13 @@
 mod hash;
 mod persistence;
 mod preview;
+mod text_merge;
+
+#[cfg(test)]
+mod merge_tests;
+
+#[cfg(test)]
+mod perf_tests;
 
 #[cfg(test)]
 pub(crate) mod mock;

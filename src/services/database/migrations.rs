@@ -10,6 +10,12 @@ use super::{
 
 pub(super) const INITIAL_SCHEMA: &str = include_str!("schema.sql");
 
+pub(super) fn ensure_capture_indexes(connection: &Connection) -> Result<(), DatabaseError> {
+    connection
+        .execute_batch(include_str!("capture_indexes.sql"))
+        .map_err(|source| DatabaseError::Configure { source })
+}
+
 const REQUIRED_TABLES: &[&str] = &[
     "database_compatibility",
     "binary_blobs",
@@ -70,6 +76,7 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<(), DatabaseError> 
         transaction
             .execute_batch(INITIAL_SCHEMA)
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
+        ensure_capture_indexes(&transaction)?;
         transaction
             .pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
@@ -355,6 +362,48 @@ mod tests {
             )
             .expect("无法插入测试收藏");
         (history_id, connection.last_insert_rowid())
+    }
+
+    #[test]
+    fn existing_database_installs_capture_indexes_once_without_changing_records() {
+        let directory = tempfile::tempdir().expect("无法创建测试目录");
+        let path = directory.path().join("existing.sqlite3");
+        let database = Database::open(&path).expect("无法创建数据库");
+        let connection = database.connect_write().expect("无法连接数据库");
+        insert_item(&connection, "保留内容", 1);
+        connection
+            .execute_batch(
+                "DROP INDEX ix_clipboard_formats_text_merge;
+             DROP INDEX ix_clipboard_formats_native_text_hash;",
+            )
+            .expect("无法准备缺少索引的旧数据库");
+        drop(connection);
+        let reopened = Database::open(&path).expect("无法打开现有数据库");
+        let connection = reopened.connect().expect("无法连接现有数据库");
+        let indexes: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN
+             ('ix_clipboard_formats_text_merge','ix_clipboard_formats_native_text_hash')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("无法检查新增索引");
+        assert_eq!(indexes, 2);
+        assert_eq!(
+            connection
+                .query_row("SELECT uuid FROM clipboard_items", [], |row| row
+                    .get::<_, String>(0))
+                .expect("无法读取原记录"),
+            "保留内容"
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+                .expect("无法读取数据库版本"),
+            1
+        );
+        drop(connection);
+        Database::open(path).expect("索引应支持重复初始化");
     }
 
     #[test]

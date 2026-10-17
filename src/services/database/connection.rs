@@ -116,8 +116,17 @@ impl Database {
         } else {
             let connection = database.open_connection(true, false)?;
             database.validate_connection(&connection)?;
-            if let Err(error) = migrations::validate_write_schema(&connection) {
-                tracing::warn!("数据库已按只读兼容模式打开：{error}");
+            match migrations::validate_write_schema(&connection) {
+                Ok(()) => {
+                    let version: i32 = connection
+                        .query_row("PRAGMA user_version", [], |row| row.get(0))
+                        .map_err(|source| DatabaseError::Inspect { source })?;
+                    if version == CURRENT_SCHEMA_VERSION {
+                        let writable = database.open_connection(false, false)?;
+                        migrations::ensure_capture_indexes(&writable)?;
+                    }
+                }
+                Err(error) => tracing::warn!("数据库已按只读兼容模式打开：{error}"),
             }
         }
         Ok(database)

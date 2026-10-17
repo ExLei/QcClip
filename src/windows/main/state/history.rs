@@ -109,6 +109,10 @@ impl MainWindow {
                                     } else {
                                         this.refresh_new_list_item(history_id, cx);
                                     }
+                                } else if this.active_tab == TabId::Favorites
+                                    && store_result.formats_changed
+                                {
+                                    this.refresh_history(cx);
                                 }
                             });
                         } else {

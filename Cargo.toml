@@ -28,6 +28,7 @@ gpui_platform = { git = "https://github.com/gpui-ce/gpui-ce", rev = "8e36ac09214
 gpui-component = { path = "vendor/gpui-component/crates/ui", package = "gpui_ce_components" }
 html5ever = "0.27.0"
 markup5ever_rcdom = "0.3.0"
+roxmltree = "0.20"
 csscolorparser = "0.8.4"
 chrono = "0.4.38"
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "backup"] }

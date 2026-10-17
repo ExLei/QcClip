@@ -28,6 +28,7 @@ dependencies = [
  "regex",
  "rfd",
  "rodio",
+ "roxmltree 0.20.0",
  "rusqlite",
  "rust-embed",
  "semver",
