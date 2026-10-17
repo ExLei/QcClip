@@ -12,7 +12,9 @@ use gpui::{
 };
 
 use crate::{
-    config::{ClipboardDisplayPriority, NotificationKind},
+    config::{
+        ClipboardDisplayPriority, NotificationConfig, NotificationKind, NotificationPosition,
+    },
     config_runtime,
     domain::{
         capture::FormatRole,
@@ -30,7 +32,8 @@ use crate::{
 use gpui_component::ActiveTheme as _;
 use gpui_component::{Sizable as _, h_flex};
 
-const DEFAULT_DURATION: Duration = Duration::from_millis(4200);
+const DEFAULT_DURATION: Duration =
+    Duration::from_millis(NotificationConfig::DEFAULT_DURATION_MS as u64);
 const ANIMATION_DURATION: Duration = Duration::from_millis(220);
 const NOTIFICATION_MARGIN: f32 = 16.0;
 const NOTIFICATION_WIDTH: f32 = 380.0;
@@ -84,20 +87,6 @@ fn image_notification_layout(
         image_display_width,
         image_display_height,
     )
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum NotificationPosition {
-    TopLeft,
-    Top,
-    TopRight,
-    Left,
-    Center,
-    Right,
-    BottomLeft,
-    Bottom,
-    #[default]
-    BottomRight,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -269,7 +258,6 @@ fn notification_bounds(
         NotificationPosition::Top => (center_x, top),
         NotificationPosition::TopRight => (right, top),
         NotificationPosition::Left => (left, center_y),
-        NotificationPosition::Center => (center_x, center_y),
         NotificationPosition::Right => (right, center_y),
         NotificationPosition::BottomLeft => (left, bottom),
         NotificationPosition::Bottom => (center_x, bottom),
@@ -289,7 +277,6 @@ fn animation_offset(position: NotificationPosition) -> (f32, f32) {
         NotificationPosition::Top => (0.0, -ANIMATION_OFFSET),
         NotificationPosition::TopRight => (ANIMATION_OFFSET, -ANIMATION_OFFSET),
         NotificationPosition::Left => (-ANIMATION_OFFSET, 0.0),
-        NotificationPosition::Center => (0.0, -ANIMATION_OFFSET),
         NotificationPosition::Right => (ANIMATION_OFFSET, 0.0),
         NotificationPosition::BottomLeft => (-ANIMATION_OFFSET, ANIMATION_OFFSET),
         NotificationPosition::Bottom => (0.0, ANIMATION_OFFSET),
@@ -943,11 +930,14 @@ impl NotificationService {
         }
     }
 
-    fn open(&mut self, request: NotificationRequest, cx: &mut App) {
+    fn open(&mut self, mut request: NotificationRequest, cx: &mut App) {
         let kind = request.preference_kind();
         if !config_runtime::notification_enabled(kind, cx) {
             return;
         }
+        let notifications = config_runtime::notification_config(cx);
+        request.position = notifications.position;
+        request.duration = Duration::from_millis(u64::from(notifications.duration_ms));
         let cursor = input::pointer_snapshot()
             .map(|snapshot| snapshot.position)
             .or_else(platform_window::physical_cursor_position);
@@ -1092,7 +1082,7 @@ mod tests {
     #[test]
     fn oversized_notification_is_clamped_to_the_work_area() {
         let bounds = notification_bounds(
-            NotificationPosition::Center,
+            NotificationPosition::TopLeft,
             PhysicalDisplayBounds {
                 x: 20.0,
                 y: 40.0,
@@ -1110,12 +1100,27 @@ mod tests {
 
     #[test]
     fn animation_direction_follows_the_selected_edge() {
-        assert_eq!(animation_offset(NotificationPosition::Top), (0.0, -36.0));
-        assert_eq!(animation_offset(NotificationPosition::Left), (-36.0, 0.0));
-        assert_eq!(
-            animation_offset(NotificationPosition::BottomRight),
-            (36.0, 36.0)
-        );
+        let area = PhysicalDisplayBounds {
+            x: 100.0,
+            y: 50.0,
+            width: 1200.0,
+            height: 800.0,
+        };
+        let expected = [
+            ((116.0, 66.0), (-36.0, -36.0)),
+            ((510.0, 66.0), (0.0, -36.0)),
+            ((904.0, 66.0), (36.0, -36.0)),
+            ((116.0, 390.0), (-36.0, 0.0)),
+            ((904.0, 390.0), (36.0, 0.0)),
+            ((116.0, 714.0), (-36.0, 36.0)),
+            ((510.0, 714.0), (0.0, 36.0)),
+            ((904.0, 714.0), (36.0, 36.0)),
+        ];
+        for (position, (origin, offset)) in NotificationPosition::ALL.into_iter().zip(expected) {
+            let bounds = notification_bounds(position, area, 380.0, 120.0);
+            assert_eq!((bounds.x, bounds.y), origin, "{position:?}");
+            assert_eq!(animation_offset(position), offset, "{position:?}");
+        }
     }
 
     #[test]

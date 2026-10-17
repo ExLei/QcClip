@@ -11,7 +11,10 @@ use std::{cell::Cell, rc::Rc};
 
 use super::super::{SETTINGS_DROPDOWN_HEIGHT, SETTINGS_DROPDOWN_WIDTH};
 use crate::{
-    config::{InterfaceLanguage, NotificationKind, WindowMaterial},
+    config::{
+        InterfaceLanguage, NotificationConfig, NotificationKind, NotificationPosition,
+        WindowMaterial,
+    },
     config_runtime, i18n,
     platform::elevation,
     platform::window as platform_window,
@@ -21,8 +24,11 @@ use crate::{
 use gpui::{Bounds, FontWeight, Pixels, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::ScrollableElement as _;
+use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::switch::Switch;
-use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, v_flex};
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
+};
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_general(
@@ -320,16 +326,64 @@ impl SettingsWindowView {
     }
 }
 
+fn notification_duration_slider(duration_ms: u32) -> SliderState {
+    SliderState::new()
+        // 范围设置会立即计算滑块位置，先增大上限，避免下限超过默认上限。
+        .max(NotificationConfig::MAX_DURATION_MS as f32)
+        .min(NotificationConfig::MIN_DURATION_MS as f32)
+        .step(100.0)
+        .default_value(duration_ms as f32)
+}
+
 fn open_notification_preferences(
     view: Entity<SettingsWindowView>,
     window: &mut Window,
     cx: &mut App,
 ) {
+    let duration_ms = config_runtime::notification_config(cx).duration_ms;
+    let (duration_slider, duration_subscription) = view.update(cx, |_, cx| {
+        let slider = cx.new(|_| notification_duration_slider(duration_ms));
+        let subscription =
+            cx.subscribe_in(
+                &slider,
+                window,
+                |view, slider, event, window, cx| match event {
+                    SliderEvent::Change(_) => cx.notify(),
+                    SliderEvent::Release(value) => {
+                        if !config_runtime::global_notification_enabled(cx) {
+                            return;
+                        }
+                        let config = config_runtime::notification_config(cx);
+                        let error = config_runtime::set_notification_presentation(
+                            config.position,
+                            value.end().round() as u32,
+                            cx,
+                        )
+                        .err()
+                        .map(|error| {
+                            tracing::error!("保存通知显示时长失败：{error}");
+                            slider.update(cx, |slider, cx| {
+                                slider.set_value(config.duration_ms as f32, window, cx);
+                            });
+                            i18n::translator(cx)
+                                .translate("settings.general.notification_save_error")
+                        });
+                        view.language_error =
+                            notify_settings_error(SettingsPage::General, error, cx);
+                        cx.notify();
+                    }
+                },
+            );
+        (slider, Rc::new(subscription))
+    });
     window.open_sheet(cx, move |sheet, _, cx| {
+        // 订阅随偏好面板释放，避免重复打开时累积监听器。
+        let _ = &duration_subscription;
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let enabled = config_runtime::global_notification_enabled(cx);
         let preferences = config_runtime::notification_preferences(cx);
+        let notifications = config_runtime::notification_config(cx);
         let appearance = config_runtime::appearance_config(cx);
         let background = gpui::ColorExt::opacity(
             &crate::window_material::excluded_window_theme(cx).background,
@@ -346,6 +400,96 @@ fn open_notification_preferences(
                     .child(translator.translate("settings.notifications.paused")),
             );
         }
+        let mut position_grid = v_flex().gap_2().w_full();
+        let mut positions = NotificationPosition::ALL.into_iter();
+        for row_index in 0..3 {
+            let mut row = h_flex().w_full().gap_2();
+            for column_index in 0..3 {
+                if row_index == 1 && column_index == 1 {
+                    row = row.child(div().flex_1());
+                    continue;
+                }
+                let position = positions.next().expect("通知方向布局应包含八个位置");
+                let label = translator.translate(position.label_key());
+                row = row.child(
+                    Button::new(format!(
+                        "settings-notification-position-{row_index}-{column_index}"
+                    ))
+                    .small()
+                    .flex_1()
+                    .label(label)
+                    .when(position == notifications.position, |button| {
+                        button.primary()
+                    })
+                    .disabled(!enabled)
+                    .on_click({
+                        let view = view.clone();
+                        move |_, _, cx| {
+                            let duration_ms = config_runtime::notification_config(cx).duration_ms;
+                            let error = config_runtime::set_notification_presentation(
+                                position,
+                                duration_ms,
+                                cx,
+                            )
+                            .err()
+                            .map(|error| {
+                                tracing::error!("保存通知显示位置失败：{error}");
+                                i18n::translator(cx)
+                                    .translate("settings.general.notification_save_error")
+                            });
+                            view.update(cx, |view, cx| {
+                                view.language_error =
+                                    notify_settings_error(SettingsPage::General, error, cx);
+                                cx.notify();
+                            });
+                        }
+                    }),
+                );
+            }
+            position_grid = position_grid.child(row);
+        }
+        content = content
+            .child(
+                v_flex()
+                    .flex_shrink_0()
+                    .gap_3()
+                    .px_4()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(translator.translate("settings.notifications.position")),
+                    )
+                    .child(position_grid),
+            )
+            .child(
+                v_flex()
+                    .flex_shrink_0()
+                    .gap_3()
+                    .px_4()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .text_sm()
+                            .child(translator.translate("settings.notifications.duration"))
+                            .child(translator.translate_with_args(
+                                "settings.notifications.duration_seconds",
+                                &[(
+                                    "seconds",
+                                    format!(
+                                        "{:.1}",
+                                        duration_slider.read(cx).value().end() / 1000.0
+                                    ),
+                                )],
+                            )),
+                    )
+                    .child(Slider::new(&duration_slider).disabled(!enabled).w_full()),
+            );
         for (kind, checked) in preferences {
             let group = match kind {
                 NotificationKind::Startup => Some("settings.notifications.group.daily"),
@@ -412,6 +556,32 @@ fn open_notification_preferences(
             )
             .child(content)
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NotificationConfig, notification_duration_slider};
+
+    #[test]
+    fn notification_duration_slider_initializes_without_panicking() {
+        for duration_ms in [
+            NotificationConfig::MIN_DURATION_MS,
+            NotificationConfig::DEFAULT_DURATION_MS,
+            NotificationConfig::MAX_DURATION_MS,
+        ] {
+            let slider = notification_duration_slider(duration_ms);
+            assert_eq!(
+                slider.min_value(),
+                NotificationConfig::MIN_DURATION_MS as f32
+            );
+            assert_eq!(
+                slider.max_value(),
+                NotificationConfig::MAX_DURATION_MS as f32
+            );
+            assert_eq!(slider.step_value(), 100.0);
+            assert_eq!(slider.value().end(), duration_ms as f32);
+        }
+    }
 }
 
 fn handle_run_as_administrator_switch(

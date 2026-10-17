@@ -2,9 +2,51 @@ use serde::{Deserialize, Serialize};
 
 use super::AppConfig;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationPosition {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Right,
+    BottomLeft,
+    Bottom,
+    #[default]
+    BottomRight,
+}
+
+impl NotificationPosition {
+    pub const ALL: [Self; 8] = [
+        Self::TopLeft,
+        Self::Top,
+        Self::TopRight,
+        Self::Left,
+        Self::Right,
+        Self::BottomLeft,
+        Self::Bottom,
+        Self::BottomRight,
+    ];
+
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::TopLeft => "settings.notifications.position.top_left",
+            Self::Top => "settings.notifications.position.top",
+            Self::TopRight => "settings.notifications.position.top_right",
+            Self::Left => "settings.notifications.position.left",
+            Self::Right => "settings.notifications.position.right",
+            Self::BottomLeft => "settings.notifications.position.bottom_left",
+            Self::Bottom => "settings.notifications.position.bottom",
+            Self::BottomRight => "settings.notifications.position.bottom_right",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct NotificationConfig {
+    pub position: NotificationPosition,
+    pub duration_ms: u32,
     pub startup: bool,
     pub clipboard_preview: bool,
     pub feature_status: bool,
@@ -15,12 +57,27 @@ pub struct NotificationConfig {
 impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
+            position: NotificationPosition::default(),
+            duration_ms: Self::DEFAULT_DURATION_MS,
             startup: true,
             clipboard_preview: true,
             feature_status: true,
             operation_result: true,
             attention: true,
         }
+    }
+}
+
+impl NotificationConfig {
+    pub const DEFAULT_DURATION_MS: u32 = 4200;
+    pub const MIN_DURATION_MS: u32 = 1000;
+    pub const MAX_DURATION_MS: u32 = 15000;
+
+    pub fn normalized(mut self) -> Self {
+        self.duration_ms = self
+            .duration_ms
+            .clamp(Self::MIN_DURATION_MS, Self::MAX_DURATION_MS);
+        self
     }
 }
 

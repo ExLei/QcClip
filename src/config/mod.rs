@@ -8,7 +8,7 @@ mod tab_bar;
 pub use item_display::{
     ItemDisplayConfig, ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility,
 };
-pub use notification::{NotificationConfig, NotificationKind};
+pub use notification::{NotificationConfig, NotificationKind, NotificationPosition};
 pub use tab_bar::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -154,6 +154,7 @@ impl Default for ApplicationFilterApplication {
 impl AppConfig {
     pub fn normalized(mut self) -> Self {
         self.schema_version = CURRENT_SCHEMA_VERSION;
+        self.general.notifications = self.general.notifications.normalized();
         self.shortcuts.middle_mouse = self.shortcuts.middle_mouse.normalized();
         self.quick_paste = self.quick_paste.normalized();
         self.sound = self.sound.normalized();

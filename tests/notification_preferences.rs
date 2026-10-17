@@ -3,7 +3,89 @@
 #[path = "../src/config/mod.rs"]
 mod config;
 
-use config::{AppConfig, NotificationKind};
+use config::{AppConfig, NotificationConfig, NotificationKind, NotificationPosition};
+
+#[test]
+fn released_notification_config_keeps_presentation_defaults() {
+    let loaded = config::load::from_str(
+        r#"{"general":{"notifications":{"startup":false,"attention":false}}}"#,
+    )
+    .expect("无法读取已发布的通知配置");
+    assert_eq!(
+        loaded.config.general.notifications.position,
+        NotificationPosition::BottomRight
+    );
+    assert_eq!(loaded.config.general.notifications.duration_ms, 4200);
+    assert!(!loaded.config.general.notifications.startup);
+    assert!(!loaded.config.general.notifications.attention);
+    assert!(loaded.warnings.is_empty());
+}
+
+#[test]
+fn all_eight_positions_and_custom_duration_round_trip() {
+    assert_eq!(NotificationPosition::ALL.len(), 8);
+    for position in NotificationPosition::ALL {
+        let mut config = AppConfig::default();
+        config.general.notifications.position = position;
+        config.general.notifications.duration_ms = 7300;
+        config.general.notifications.clipboard_preview = false;
+        let json = serde_json::to_string(&config).expect("无法保存通知显示配置");
+        let loaded = config::load::from_str(&json).expect("无法读取通知显示配置");
+        assert_eq!(loaded.config, config);
+        assert!(loaded.warnings.is_empty());
+    }
+}
+
+#[test]
+fn invalid_presentation_fields_preserve_other_preferences() {
+    let loaded = config::load::from_str(
+        r#"{"general":{"notifications":{"position":"unknown","durationMs":"invalid","clipboardPreview":false}}}"#,
+    )
+    .expect("无法读取有无效显示字段的通知配置");
+    assert_eq!(
+        loaded.config.general.notifications.position,
+        NotificationPosition::BottomRight
+    );
+    assert_eq!(loaded.config.general.notifications.duration_ms, 4200);
+    assert!(!loaded.config.general.notifications.clipboard_preview);
+    assert_eq!(loaded.warnings.len(), 2);
+    assert!(
+        loaded
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("general.notifications.position"))
+    );
+    assert!(
+        loaded
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("general.notifications.durationMs"))
+    );
+}
+
+#[test]
+fn notification_duration_is_clamped_when_loading_or_normalizing() {
+    for (input, expected) in [
+        (0, 1000),
+        (999, 1000),
+        (4200, 4200),
+        (15000, 15000),
+        (u32::MAX, 15000),
+    ] {
+        let loaded = config::load::from_str(&format!(
+            r#"{{"general":{{"notifications":{{"durationMs":{input}}}}}}}"#,
+        ))
+        .expect("无法读取通知显示时长");
+        assert_eq!(loaded.config.general.notifications.duration_ms, expected);
+        let mut config = AppConfig::default();
+        config.general.notifications.duration_ms = input;
+        assert_eq!(
+            config.normalized().general.notifications.duration_ms,
+            expected
+        );
+    }
+    assert_eq!(NotificationConfig::default().duration_ms, 4200);
+}
 
 #[test]
 fn notification_defaults_and_released_update_preference_are_preserved() {

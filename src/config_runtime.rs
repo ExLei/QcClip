@@ -12,8 +12,9 @@ use tracing::warn;
 use crate::{
     config::{
         AnimationKind, AppConfig, AppearanceConfig, ApplicationFilterConfig, ClipboardConfig,
-        HistoryConfig, InterfaceLanguage, NotificationKind, QuickPasteConfig, ShortcutBinding,
-        ShortcutsConfig, SoundConfig, WindowMaterial, default_window_material_opacity,
+        HistoryConfig, InterfaceLanguage, NotificationConfig, NotificationKind,
+        NotificationPosition, QuickPasteConfig, ShortcutBinding, ShortcutsConfig, SoundConfig,
+        WindowMaterial, default_window_material_opacity,
     },
     i18n::{self, Locale},
 };
@@ -181,6 +182,32 @@ pub(crate) fn notification_preferences(cx: &App) -> [(NotificationKind, bool); 6
     cx.read_global::<ConfigRuntime, _>(|runtime, _| {
         NotificationKind::ALL.map(|kind| (kind, runtime.config.notification_preference(kind)))
     })
+}
+
+pub(crate) fn notification_config(cx: &App) -> NotificationConfig {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.general.notifications.clone())
+}
+
+pub(crate) fn set_notification_presentation(
+    position: NotificationPosition,
+    duration_ms: u32,
+    cx: &mut App,
+) -> Result<bool, ConfigError> {
+    let (path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
+        (runtime.path.clone(), runtime.config.clone())
+    });
+    let previous = next.general.notifications.clone();
+    let notifications = &mut next.general.notifications;
+    notifications.position = position;
+    notifications.duration_ms = duration_ms;
+    *notifications = notifications.clone().normalized();
+    if *notifications == previous {
+        return Ok(false);
+    }
+    persist_config(&path, &next)?;
+    cx.update_global::<ConfigRuntime, _>(|runtime, _| runtime.config = next);
+    cx.refresh_windows();
+    Ok(true)
 }
 
 pub(crate) fn set_notification_preference(

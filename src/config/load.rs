@@ -246,6 +246,20 @@ fn read_notifications(
 ) -> NotificationConfig {
     let default = NotificationConfig::default();
     NotificationConfig {
+        position: read_field(
+            object,
+            "position",
+            "general.notifications.position",
+            default.position,
+            warnings,
+        ),
+        duration_ms: read_field(
+            object,
+            "durationMs",
+            "general.notifications.durationMs",
+            default.duration_ms,
+            warnings,
+        ),
         startup: read_field(
             object,
             "startup",
