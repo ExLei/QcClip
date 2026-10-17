@@ -35,6 +35,7 @@ pub(crate) fn uses_sidebar_layout(logical_width: f32) -> bool {
 pub(crate) struct MainWindowService {
     window: Option<AnyWindowHandle>,
     main_view: Option<Entity<MainWindow>>,
+    history_cleanup_pending: bool,
     mouse_event_listener_id: Option<u64>,
     #[cfg(target_os = "windows")]
     pointer_check_sender: Option<async_channel::Sender<()>>,
@@ -139,6 +140,101 @@ impl MainWindowService {
         if let Some(main_view) = main_view {
             main_view.update(cx, |view, cx| view.refresh_history(cx));
         }
+    }
+
+    pub(crate) fn confirm_clear_history(keep_pinned: bool, cx: &mut App) {
+        use crate::services::data_management::DataManagementService;
+        use crate::windows::notification::{NotificationLevel, NotificationService};
+
+        let Some(window) = Self::window_handle(cx) else {
+            return;
+        };
+        if cx.global::<Self>().history_cleanup_pending {
+            return;
+        }
+        let translator = crate::i18n::translator(cx);
+        let title = translator.translate(if keep_pinned {
+            "main.menu.clear_history_keep_pinned"
+        } else {
+            "main.menu.clear_history_all"
+        });
+        let detail = translator.translate(if keep_pinned {
+            "main.confirm.clear_history_keep_pinned.detail"
+        } else {
+            "settings.data_management.clear_all_history_confirm_detail"
+        });
+        let answer = match window.update(cx, |_, window, cx| {
+            window.prompt(
+                gpui::PromptLevel::Warning,
+                &title,
+                Some(&detail),
+                &[
+                    gpui::PromptButton::cancel(translator.translate("main.form.cancel")),
+                    gpui::PromptButton::ok(translator.translate("main.form.confirm")),
+                ],
+                cx,
+            )
+        }) {
+            Ok(answer) => answer,
+            Err(error) => {
+                tracing::error!("打开清理剪贴板历史确认提示失败：{error}");
+                return;
+            }
+        };
+        cx.update_global::<Self, _>(|service, _| service.history_cleanup_pending = true);
+        cx.spawn(async move |cx| {
+            if !matches!(answer.await, Ok(1)) {
+                cx.update(|cx| {
+                    cx.update_global::<Self, _>(|service, _| {
+                        service.history_cleanup_pending = false
+                    });
+                });
+                return;
+            }
+            let service = cx.update(|cx| {
+                crate::windows::quick_paste::QuickPasteWindowService::cancel(cx);
+                Self::cancel_hover_preview(cx);
+                crate::windows::preview::PreviewWindowService::destroy(cx);
+                Self::stop_clipboard_listener(cx);
+                cx.global::<DataManagementService>().clone()
+            });
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    if keep_pinned {
+                        service.clear_unpinned_history()
+                    } else {
+                        service.clear_all_history()
+                    }
+                })
+                .await;
+            cx.update(|cx| {
+                cx.update_global::<Self, _>(|service, _| service.history_cleanup_pending = false);
+                let (detail, level) = match result {
+                    Ok(report) => {
+                        Self::refresh_history(cx);
+                        (
+                            translator.translate_with_args(
+                                "settings.data_management.clear_all_history_success",
+                                &[("history_count", report.history_items_removed.to_string())],
+                            ),
+                            NotificationLevel::Success,
+                        )
+                    }
+                    Err(error) => {
+                        tracing::error!("清理剪贴板历史失败：{error}");
+                        (
+                            translator
+                                .translate("settings.data_management.clear_all_history_error"),
+                            NotificationLevel::Error,
+                        )
+                    }
+                };
+                Self::restart_clipboard_listener(cx);
+                NotificationService::show_message(title, detail, level, cx);
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn reload_after_data_import(cx: &mut App) {

@@ -623,12 +623,26 @@ impl HistoryRepository {
     }
 
     pub fn clear_all(&self) -> Result<HistoryCleanupReport, HistoryCleanupError> {
+        self.clear_history(false)
+    }
+
+    pub fn clear_unpinned(&self) -> Result<HistoryCleanupReport, HistoryCleanupError> {
+        self.clear_history(true)
+    }
+
+    fn clear_history(
+        &self,
+        keep_pinned: bool,
+    ) -> Result<HistoryCleanupReport, HistoryCleanupError> {
         let mut connection = self.database.connect_write()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !Database::maintenance_supported(&transaction)? {
             return Err(super::DatabaseError::UnsupportedRewrite.into());
         }
-        let removed = transaction.execute("DELETE FROM clipboard_history", [])?;
+        let removed = transaction.execute(
+            "DELETE FROM clipboard_history WHERE ?1 = 0 OR is_pinned = 0",
+            [keep_pinned],
+        )?;
         let mut report = cleanup_orphaned_in_transaction(&transaction, &self.blob_store, None)?;
         report.history_items_removed = removed;
         transaction.commit()?;
@@ -1535,6 +1549,88 @@ mod tests {
             preview_candidate: Some("1 个文件 · test.txt".to_owned()),
             source_application: SourceApplication::default(),
         }
+    }
+
+    #[test]
+    fn clear_unpinned_removes_regular_and_pending_history_but_preserves_pins_and_favorites() {
+        let mut services = TestServices::new();
+        services.capture = CaptureService::with_inline_threshold(
+            services.database.clone(),
+            services.repository.blob_store.clone(),
+            0,
+        );
+        let pinned_id = services.store(MockClipboardSource::text("保留的置顶记录").capture());
+        let favorite_id = services.store(MockClipboardSource::text("保留的收藏内容").capture());
+        services.store(MockClipboardSource::text("删除的普通记录").capture());
+        let pending_id = services.store(MockClipboardSource::text("删除的待清理记录").capture());
+        services
+            .repository
+            .set_pinned(pinned_id, true)
+            .expect("置顶测试记录失败");
+        let connection = services.database.connect().expect("连接测试数据库失败");
+        connection
+            .execute(
+                "UPDATE clipboard_history SET first_seen_at = 0, last_seen_at = 0 WHERE id = ?1",
+                [pending_id],
+            )
+            .expect("设置待清理历史失败");
+        let favorite_item_id: i64 = connection
+            .query_row(
+                "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                [favorite_id],
+                |row| row.get(0),
+            )
+            .expect("读取收藏内容失败");
+        drop(connection);
+        super::super::FavoriteRepository::new(services.database.clone())
+            .add_to_favorites(favorite_item_id)
+            .expect("添加测试收藏失败");
+
+        let report = services
+            .repository
+            .clear_unpinned()
+            .expect("清理非置顶历史失败");
+
+        assert_eq!(report.history_items_removed, 3);
+        assert_eq!(report.orphan_items_removed, 2);
+        assert_eq!(report.orphan_blob_files_removed, 2);
+        let records = services
+            .repository
+            .query(&HistoryQuery::default())
+            .expect("读取历史失败");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].history_id, pinned_id);
+        let connection = services.database.connect().expect("连接测试数据库失败");
+        let counts: (i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM favorites), (SELECT COUNT(*) FROM clipboard_items)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("核验保留内容失败");
+        assert_eq!(counts, (1, 2));
+        let paths = connection
+            .prepare("SELECT relative_path FROM binary_blobs")
+            .expect("读取原始数据路径失败")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("查询原始数据路径失败")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("解析原始数据路径失败");
+        assert_eq!(paths.len(), 2);
+        assert!(
+            paths
+                .iter()
+                .all(|path| services._directory.path().join(path).exists())
+        );
+        drop(connection);
+        assert_eq!(
+            services
+                .repository
+                .clear_unpinned()
+                .expect("重复清理失败")
+                .history_items_removed,
+            0
+        );
     }
 
     #[test]

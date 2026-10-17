@@ -377,9 +377,24 @@ impl DataManagementService {
     }
 
     pub fn clear_all_history(&self) -> Result<HistoryCleanupReport, DataManagementError> {
+        self.clear_history(false)
+    }
+
+    pub fn clear_unpinned_history(&self) -> Result<HistoryCleanupReport, DataManagementError> {
+        self.clear_history(true)
+    }
+
+    fn clear_history(
+        &self,
+        keep_pinned: bool,
+    ) -> Result<HistoryCleanupReport, DataManagementError> {
         super::data_runtime::with_exclusive_operation(|| {
             let repository = HistoryRepository::new(self.database.clone(), self.blob_store.clone());
-            Ok(repository.clear_all()?)
+            Ok(if keep_pinned {
+                repository.clear_unpinned()?
+            } else {
+                repository.clear_all()?
+            })
         })
     }
 

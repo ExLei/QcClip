@@ -19,6 +19,8 @@ const TITLEBAR_HEIGHT: f32 = 36.0;
 const TITLEBAR_SIDE_WIDTH: f32 = 36.0;
 const NEW_TEXT_ACTION: &str = "main.more.new_text";
 const SETTINGS_ACTION: &str = "main.more.settings";
+const CLEAR_UNPINNED_HISTORY_ACTION: &str = "main.more.clear-unpinned-history";
+const CLEAR_ALL_HISTORY_ACTION: &str = "main.more.clear-all-history";
 const TITLEBAR_POSITION_ACTION_PREFIX: &str = "main.more.titlebar-position.";
 const DISPLAY_PRIORITY_ACTION_PREFIX: &str = "main.more.display-priority.";
 const PREVIEW_PRIORITY_ACTION_PREFIX: &str = "main.more.preview-priority.";
@@ -485,6 +487,21 @@ fn build_more_menu(cx: &gpui::App) -> MenuModel {
         )
         .with_icon(MenuIcon::svg("sort-ascending.svg")),
         MenuItem::separator(),
+        MenuItem::submenu(
+            translator.translate("main.menu.clear_clipboard"),
+            vec![
+                MenuItem::action(
+                    MenuActionId::new(CLEAR_UNPINNED_HISTORY_ACTION),
+                    translator.translate("main.menu.clear_history_keep_pinned"),
+                ),
+                MenuItem::action(
+                    MenuActionId::new(CLEAR_ALL_HISTORY_ACTION),
+                    translator.translate("main.menu.clear_history_all"),
+                ),
+            ],
+        )
+        .with_icon(MenuIcon::svg("clipboard-x.svg")),
+        MenuItem::separator(),
         MenuItem::action(
             MenuActionId::new(SETTINGS_ACTION),
             translator.translate("tray.menu.settings"),
@@ -494,6 +511,16 @@ fn build_more_menu(cx: &gpui::App) -> MenuModel {
 }
 
 fn handle_more_menu_action(action: MenuActionId, cx: &mut gpui::App) {
+    if matches!(
+        action.as_str(),
+        CLEAR_UNPINNED_HISTORY_ACTION | CLEAR_ALL_HISTORY_ACTION
+    ) {
+        crate::windows::main::MainWindowService::confirm_clear_history(
+            action.as_str() == CLEAR_UNPINNED_HISTORY_ACTION,
+            cx,
+        );
+        return;
+    }
     if action.as_str() == NEW_TEXT_ACTION {
         crate::windows::main::MainWindowService::open_new_text_editor(cx);
         return;
