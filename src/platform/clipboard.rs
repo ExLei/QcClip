@@ -681,8 +681,13 @@ mod windows_clipboard {
 
         fn read_buffer(&self, format_id: u32) -> Result<Vec<u8>, String> {
             // SAFETY: 剪贴板在守卫的整个生命周期内保持打开，句柄仅在此期间读取。
-            let handle =
-                unsafe { GetClipboardData(format_id) }.map_err(|error| error.to_string())?;
+            let handle = unsafe { GetClipboardData(format_id) }.map_err(|error| {
+                if error.code().0 == 0 {
+                    "该剪贴板格式没有可读取的数据（系统未提供错误码）".to_owned()
+                } else {
+                    format!("获取剪贴板数据失败：{error}")
+                }
+            })?;
             let memory = HGLOBAL(handle.0);
             let byte_length = unsafe { GlobalSize(memory) };
             if byte_length == 0 {

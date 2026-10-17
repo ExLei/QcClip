@@ -87,6 +87,8 @@ pub fn classify_format_role(kind: FormatKind, key: &str, name: &str) -> FormatRo
 fn is_internal_format_name(key: &str, name: &str) -> bool {
     matches!(key, "cf_locale" | "cf_palette" | "cf_ownerdisplay")
         || matches!(name, "cf_locale" | "cf_palette" | "cf_ownerdisplay")
+        || key == "enterprisedataprotectionid"
+        || name == "enterprisedataprotectionid"
         || key.starts_with("cf_dsp")
         || name.starts_with("cf_dsp")
         || name.contains("chromium internal")

@@ -102,19 +102,15 @@ impl MainWindow {
                             );
                         });
                         if let Some(this) = this.upgrade() {
-                            if store_result.is_new {
-                                this.update(cx, |this, cx| {
-                                    if this.active_tab == TabId::Clipboard {
-                                        if policy.retention_days.is_some()
-                                            || policy.max_items.is_some()
-                                        {
-                                            this.refresh_list_item(history_id, cx);
-                                        } else {
-                                            this.refresh_new_list_item(history_id, cx);
-                                        }
+                            this.update(cx, |this, cx| {
+                                if this.active_tab == TabId::Clipboard {
+                                    if policy.retention_days.is_some() || policy.max_items.is_some() {
+                                        this.refresh_list_item(history_id, cx);
+                                    } else {
+                                        this.refresh_new_list_item(history_id, cx);
                                     }
-                                });
-                            }
+                                }
+                            });
                         } else {
                             tracing::debug!("主窗口已关闭，停止处理剪贴板事件");
                             break;
