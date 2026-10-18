@@ -12,6 +12,42 @@ pub(crate) struct PointerSnapshot {
     pub(crate) mouse_move_sequence: u64,
 }
 
+pub(crate) struct PointerRegionWatch {
+    region: Option<gpui::Bounds<f32>>,
+    was_inside: bool,
+}
+
+impl PointerRegionWatch {
+    pub(crate) fn new(
+        region: Option<gpui::Bounds<f32>>,
+        position: Option<gpui::Point<f32>>,
+    ) -> Self {
+        Self {
+            region,
+            was_inside: region
+                .zip(position)
+                .is_some_and(|(region, position)| Self::contains(region, position)),
+        }
+    }
+
+    pub(crate) fn contains(region: gpui::Bounds<f32>, position: gpui::Point<f32>) -> bool {
+        position.x >= region.origin.x
+            && position.x < region.origin.x + region.size.width
+            && position.y >= region.origin.y
+            && position.y < region.origin.y + region.size.height
+    }
+
+    pub(crate) fn should_notify(&mut self, position: gpui::Point<f32>) -> bool {
+        let Some(region) = self.region else {
+            return true;
+        };
+        let inside = Self::contains(region, position);
+        let changed = inside != self.was_inside;
+        self.was_inside = inside;
+        changed
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum GlobalMouseEvent {
     MouseDown {
@@ -36,7 +72,7 @@ mod windows_input {
     use raw_input::{Display, Event, Listen, MouseButton, Simulate, SubscriptionHandle};
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
-    use super::{GlobalMouseEvent, PointerButtons, PointerSnapshot};
+    use super::{GlobalMouseEvent, PointerButtons, PointerRegionWatch, PointerSnapshot};
 
     static INPUT_STATE: OnceLock<Arc<Mutex<InputState>>> = OnceLock::new();
     static CURRENT_TRIGGER_KEY: Mutex<Option<TriggerKey>> = Mutex::new(None);
@@ -55,6 +91,7 @@ mod windows_input {
         mouse_down_sequence: u64,
         mouse_event_senders: Vec<(u64, async_channel::Sender<GlobalMouseEvent>)>,
         pointer_change_sender: Option<async_channel::Sender<()>>,
+        pointer_region_watch: PointerRegionWatch,
         next_mouse_event_subscription: u64,
     }
 
@@ -70,6 +107,7 @@ mod windows_input {
                 mouse_down_sequence: 0,
                 mouse_event_senders: Vec::new(),
                 pointer_change_sender: None,
+                pointer_region_watch: PointerRegionWatch::new(None, None),
                 next_mouse_event_subscription: 0,
             }
         }
@@ -150,9 +188,14 @@ mod windows_input {
         }
     }
 
-    pub(crate) fn set_pointer_change_notifier(sender: Option<async_channel::Sender<()>>) {
+    pub(crate) fn set_pointer_change_notifier(
+        sender: Option<async_channel::Sender<()>>,
+        region: Option<gpui::Bounds<f32>>,
+    ) {
         if let Some(state) = INPUT_STATE.get() {
-            lock_state(state).pointer_change_sender = sender;
+            let mut state = lock_state(state);
+            state.pointer_change_sender = sender;
+            state.pointer_region_watch = PointerRegionWatch::new(region, cursor_position());
         }
     }
 
@@ -198,6 +241,17 @@ mod windows_input {
         let senders;
         {
             let mut state = lock_state(state);
+            if matches!(event, Event::MouseMove { .. }) {
+                state.mouse_move_sequence = state.mouse_move_sequence.wrapping_add(1);
+                let sequence = state.mouse_move_sequence;
+                if let Some(snapshot) = state.snapshot.as_mut() {
+                    snapshot.mouse_move_sequence = sequence;
+                }
+                // 普通隐藏时只维护移动序号，不读取坐标或唤醒界面。
+                if state.pointer_change_sender.is_none() {
+                    return;
+                }
+            }
             let position = match event {
                 Event::MouseMove { .. } | Event::MouseDown { .. } | Event::MouseUp { .. } => {
                     cursor_position()
@@ -217,13 +271,7 @@ mod windows_input {
             }
 
             match event {
-                Event::MouseMove { .. } => {
-                    state.mouse_move_sequence = state.mouse_move_sequence.wrapping_add(1);
-                    let sequence = state.mouse_move_sequence;
-                    if let Some(snapshot) = state.snapshot.as_mut() {
-                        snapshot.mouse_move_sequence = sequence;
-                    }
-                }
+                Event::MouseMove { .. } => {}
                 Event::MouseDown { button } => {
                     state.mouse_down_sequence = state.mouse_down_sequence.wrapping_add(1);
                     let sequence = state.mouse_down_sequence;
@@ -253,8 +301,14 @@ mod windows_input {
                 }),
                 _ => global_event,
             };
-            senders = state.mouse_event_senders.clone();
-            if let Some(sender) = &state.pointer_change_sender {
+            senders = if global_event.is_some() {
+                state.mouse_event_senders.clone()
+            } else {
+                Vec::new()
+            };
+            let should_notify =
+                position.is_some_and(|position| state.pointer_region_watch.should_notify(position));
+            if should_notify && let Some(sender) = &state.pointer_change_sender {
                 // 通道容量为 1，合并高频移动，仅在输入变化时唤醒窗口检查。
                 let _ = sender.try_send(());
             }
@@ -569,6 +623,75 @@ mod windows_input {
             Code::Pause => raw_input::Key::Pause,
             _ => return None,
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn normal_hidden_mouse_moves_keep_sequence_without_reading_position_or_sending_events() {
+            let state = Arc::new(Mutex::new(InputState::new()));
+            let position = gpui::Point {
+                x: -100000.0,
+                y: -100000.0,
+            };
+            let (sender, receiver) = async_channel::unbounded();
+            {
+                let mut state = lock_state(&state);
+                state.snapshot = Some(PointerSnapshot {
+                    position,
+                    buttons: PointerButtons::default(),
+                    mouse_move_sequence: 0,
+                });
+                state.mouse_event_senders.push((0, sender));
+            }
+            for _ in 0..1000 {
+                handle_event(
+                    &state,
+                    Event::MouseMove {
+                        delta: raw_input::Point { x: 1.0, y: 1.0 },
+                    },
+                );
+            }
+            let state = lock_state(&state);
+            let snapshot = state.snapshot.unwrap();
+            assert_eq!(snapshot.position, position);
+            assert_eq!(snapshot.mouse_move_sequence, 1000);
+            assert!(receiver.try_recv().is_err());
+        }
+
+        #[test]
+        fn normal_hidden_mouse_buttons_still_update_and_reach_subscribers() {
+            let state = Arc::new(Mutex::new(InputState::new()));
+            let (sender, receiver) = async_channel::unbounded();
+            lock_state(&state).mouse_event_senders.push((0, sender));
+            handle_event(
+                &state,
+                Event::MouseDown {
+                    button: MouseButton::Left,
+                },
+            );
+            assert!(lock_state(&state).snapshot.unwrap().buttons.left);
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(GlobalMouseEvent::MouseDown { sequence: 1, .. })
+            ));
+            handle_event(
+                &state,
+                Event::MouseUp {
+                    button: MouseButton::Left,
+                },
+            );
+            assert!(!lock_state(&state).snapshot.unwrap().buttons.left);
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(GlobalMouseEvent::MouseUp {
+                    left_pressed: false,
+                    ..
+                })
+            ));
+        }
     }
 }
 

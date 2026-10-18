@@ -1672,35 +1672,65 @@ fn point_in_edge_trigger_region(
     attachment: window_state::EdgeAttachment,
     trigger_size: i32,
 ) -> bool {
+    input::PointerRegionWatch::contains(edge_trigger_region(attachment, trigger_size), position)
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn hidden_edge_trigger_region(
+    attachment: window_state::EdgeAttachment,
+    cx: &App,
+) -> gpui::Bounds<f32> {
+    let screen = attachment.screen_bounds;
+    let center = Point {
+        x: screen.x + screen.width / 2.0,
+        y: screen.y + screen.height / 2.0,
+    };
+    let scale_factor = platform_window::display_for_physical_point(cx, center)
+        .map_or(1.0, |display| display.scale_factor);
+    edge_trigger_region(attachment, physical_edge_trigger_size(scale_factor))
+}
+
+fn edge_trigger_region(
+    attachment: window_state::EdgeAttachment,
+    trigger_size: i32,
+) -> gpui::Bounds<f32> {
     let screen_left = attachment.screen_bounds.x;
     let screen_top = attachment.screen_bounds.y;
     let screen_right = screen_left + attachment.screen_bounds.width;
     let screen_bottom = screen_top + attachment.screen_bounds.height;
-    match attachment.side {
-        window_state::EdgeSide::Left => {
-            position.x >= screen_left
-                && position.x < screen_left + trigger_size as f32
-                && position.y >= attachment.client_bounds.top as f32
-                && position.y < attachment.client_bounds.bottom as f32
-        }
-        window_state::EdgeSide::Right => {
-            position.x >= screen_right - trigger_size as f32
-                && position.x < screen_right
-                && position.y >= attachment.client_bounds.top as f32
-                && position.y < attachment.client_bounds.bottom as f32
-        }
-        window_state::EdgeSide::Top => {
-            position.y >= screen_top
-                && position.y < screen_top + trigger_size as f32
-                && position.x >= attachment.client_bounds.left as f32
-                && position.x < attachment.client_bounds.right as f32
-        }
-        window_state::EdgeSide::Bottom => {
-            position.y >= screen_bottom - trigger_size as f32
-                && position.y < screen_bottom
-                && position.x >= attachment.client_bounds.left as f32
-                && position.x < attachment.client_bounds.right as f32
-        }
+    let bounds = attachment.client_bounds;
+    let (left, top, right, bottom) = match attachment.side {
+        window_state::EdgeSide::Left => (
+            screen_left,
+            bounds.top as f32,
+            screen_left + trigger_size as f32,
+            bounds.bottom as f32,
+        ),
+        window_state::EdgeSide::Right => (
+            screen_right - trigger_size as f32,
+            bounds.top as f32,
+            screen_right,
+            bounds.bottom as f32,
+        ),
+        window_state::EdgeSide::Top => (
+            bounds.left as f32,
+            screen_top,
+            bounds.right as f32,
+            screen_top + trigger_size as f32,
+        ),
+        window_state::EdgeSide::Bottom => (
+            bounds.left as f32,
+            screen_bottom - trigger_size as f32,
+            bounds.right as f32,
+            screen_bottom,
+        ),
+    };
+    gpui::Bounds {
+        origin: Point { x: left, y: top },
+        size: Size {
+            width: right - left,
+            height: bottom - top,
+        },
     }
 }
 

@@ -1,4 +1,5 @@
 mod client;
+mod schedule;
 
 use std::{
     fs,
@@ -8,7 +9,7 @@ use std::{
 };
 
 use atomic_write_file::AtomicWriteFile;
-use gpui::{App, AppContext, BorrowAppContext, Global};
+use gpui::{App, AppContext, BorrowAppContext, Global, Task};
 use serde::{Deserialize, Serialize};
 
 use crate::windows::notification::{NotificationLevel, NotificationRequest, NotificationService};
@@ -33,6 +34,7 @@ pub(crate) struct UpdateService {
     record: CheckRecord,
     path: PathBuf,
     retry_after: u64,
+    scheduled_check: Option<Task<()>>,
 }
 
 impl Global for UpdateService {}
@@ -57,35 +59,39 @@ impl UpdateService {
             record,
             path,
             retry_after: 0,
+            scheduled_check: None,
         });
         cx.refresh_windows();
-        cx.spawn(async move |cx| {
-            loop {
-                cx.update(|cx| {
-                    let service = cx.global::<Self>();
-                    if service.checking {
-                        return;
-                    }
-                    // “永不更新”只停止自动检查
-                    let frequency = config_runtime::update_config(cx).frequency;
-                    let Some(interval) = frequency.seconds() else {
-                        return;
-                    };
-                    let now = unix_time();
-                    if now >= service.retry_after
-                        && (service.record.checked_at > now
-                            || service.record.checked_at == 0
-                            || now.saturating_sub(service.record.checked_at) >= interval)
-                    {
-                        Self::check(false, cx);
-                    }
-                });
-                cx.background_executor()
-                    .timer(Duration::from_secs(60))
-                    .await;
+        cx.observe_global::<config_runtime::ConfigRuntime>(Self::schedule)
+            .detach();
+        Self::schedule(cx);
+    }
+
+    fn schedule(cx: &mut App) {
+        let delay = {
+            let service = cx.global::<Self>();
+            if service.checking {
+                return;
             }
+            schedule::next_check_delay(
+                config_runtime::update_config(cx).frequency.seconds(),
+                service.record.checked_at,
+                service.retry_after,
+                unix_time(),
+            )
+        };
+        // 只保留下一次到期任务；“永不更新”不创建定时器。
+        cx.update_global::<Self, _>(|service, _| service.scheduled_check = None);
+        let Some(delay) = delay else {
+            return;
+        };
+        let task = cx.spawn(async move |cx| {
+            cx.background_executor().timer(delay).await;
+            cx.update(|cx| Self::check(false, cx));
+        });
+        cx.update_global::<Self, _>(|service, _| {
+            service.scheduled_check = Some(task);
         })
-        .detach();
     }
 
     pub(crate) fn available(cx: &App) -> Option<Release> {
@@ -107,6 +113,7 @@ impl UpdateService {
             return;
         }
         cx.update_global::<Self, _>(|service, _| {
+            service.scheduled_check = None;
             service.checking = true;
             service.error = None;
             service.status_key = "updates.status.checking";
@@ -160,6 +167,7 @@ impl UpdateService {
                 }
             }
         });
+        Self::schedule(cx);
         cx.refresh_windows();
         let translator = i18n::translator(cx);
         if let Some(release) = notify_release {

@@ -584,15 +584,20 @@ impl MainWindowService {
 
     #[cfg(target_os = "windows")]
     pub(crate) fn sync_pointer_change_notifier(cx: &App) {
-        let notifier = cx.read_global::<Self, _>(|service, _| {
+        let (notifier, hidden_attachment) = cx.read_global::<Self, _>(|service, _| {
+            let visible = service.window_state.is_logically_visible();
             let needs_pointer_checks = service.window.is_some()
-                && (service.window_state.is_logically_visible()
-                    || service.window_state.edge_attachment().is_some());
-            needs_pointer_checks
-                .then(|| service.pointer_check_sender.as_ref().cloned())
-                .flatten()
+                && (visible || service.window_state.edge_attachment().is_some());
+            (
+                needs_pointer_checks
+                    .then(|| service.pointer_check_sender.as_ref().cloned())
+                    .flatten(),
+                service.window_state.edge_attachment().filter(|_| !visible),
+            )
         });
-        input::set_pointer_change_notifier(notifier);
+        let region = hidden_attachment
+            .map(|attachment| window_visibility::hidden_edge_trigger_region(attachment, cx));
+        input::set_pointer_change_notifier(notifier, region);
     }
 
     pub(crate) fn session_shortcut_scope(cx: &mut App) -> (bool, bool) {
