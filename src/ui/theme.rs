@@ -421,13 +421,22 @@ pub fn attach_system_appearance_watch(window: &mut Window, cx: &mut App) {
         return;
     }
 
-    apply_system_theme(Some(window), cx);
+    sync_system_theme(window, cx);
     let subscription = window.observe_window_appearance(|window, cx| {
-        apply_system_theme(Some(window), cx);
+        sync_system_theme(window, cx);
     });
     cx.update_global::<SystemAppearanceWatchService, _>(|service, _| {
         service.watches.insert(window_id, subscription);
     });
+}
+
+fn sync_system_theme(window: &mut Window, cx: &mut App) {
+    let configured_mode = config_runtime::appearance_config(cx).mode;
+    let mode = effective_theme_mode(configured_mode, ThemeMode::from(window.appearance()));
+    // 新窗口复用已初始化的主题，避免重复下发所有窗口的亚克力材质。
+    if mode != Theme::global(cx).mode {
+        apply_system_theme(Some(window), cx);
+    }
 }
 
 fn apply_system_theme(window: Option<&mut Window>, cx: &mut App) {
