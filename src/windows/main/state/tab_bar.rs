@@ -2,9 +2,7 @@ use super::*;
 use crate::{
     config::TabBarButton,
     config_runtime,
-    windows::main::tabs::{
-        CONTENT_FILTERS, MAIN_TABS, PASTE_FILTERS, SYMBOL_CATEGORIES, TAB_BAR_HOVER_DELAY,
-    },
+    windows::main::tabs::{CONTENT_FILTERS, MAIN_TABS, PASTE_FILTERS, SYMBOL_CATEGORIES},
 };
 
 impl MainWindow {
@@ -29,9 +27,11 @@ impl MainWindow {
         if button == TabBarButton::Tags {
             self.update_tags_panel_auto_close(window, cx);
         }
+        let clipboard = config_runtime::clipboard_config(cx);
+        let hover_delay = Duration::from_millis(u64::from(clipboard.hover_delay_ms(button)));
         let hovered = window.is_window_hovered()
             && !cx.has_active_drag()
-            && config_runtime::clipboard_config(cx).tab_bar_hover_switch
+            && clipboard.hover_switch_enabled(button)
             && hitbox.is_some_and(|hitbox| hitbox.is_hovered(window));
         if !hovered {
             if self.tab_bar_hover.leave(button) {
@@ -52,15 +52,18 @@ impl MainWindow {
             return;
         }
         self.tab_bar_hover_task = Some(cx.spawn_in(window, async move |this, cx| {
-            let mut delay = TAB_BAR_HOVER_DELAY;
+            let mut delay = hover_delay;
             loop {
                 cx.background_executor().timer(delay).await;
                 let next_delay = this
                     .update_in(cx, |this, window, cx| {
-                        let remaining = this.tab_bar_hover.remaining(button, Instant::now())?;
+                        let clipboard = config_runtime::clipboard_config(cx);
+                        let remaining =
+                            this.tab_bar_hover
+                                .remaining(button, Instant::now(), hover_delay)?;
                         if !window.is_window_hovered()
                             || cx.has_active_drag()
-                            || !config_runtime::clipboard_config(cx).tab_bar_hover_switch
+                            || !clipboard.hover_switch_enabled(button)
                             || !config_runtime::appearance_config(cx)
                                 .tab_bar
                                 .is_visible(button)
@@ -74,7 +77,8 @@ impl MainWindow {
                         if !remaining.is_zero() {
                             return Some(remaining);
                         }
-                        this.tab_bar_hover.take_ready(button, Instant::now());
+                        this.tab_bar_hover
+                            .take_ready(button, Instant::now(), hover_delay);
                         this.tab_bar_hover_task = None;
                         if let Some(tab) = MAIN_TABS
                             .iter()

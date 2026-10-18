@@ -7,16 +7,45 @@ mod tabs;
 
 use config::{TabBarButton, TabBarLayout};
 use std::time::{Duration, Instant};
-use tabs::{FilterId, FilterSelection, SymbolCategoryId, TAB_BAR_HOVER_DELAY, TabBarHover, TabId};
+use tabs::{FilterId, FilterSelection, SymbolCategoryId, TabBarHover, TabId};
+
+const TAB_BAR_HOVER_DELAY: Duration =
+    Duration::from_millis(config::ClipboardConfig::TAB_BAR_HOVER_DELAY_DEFAULT_MS as u64);
 
 #[test]
 fn quickly_crossing_a_tab_button_does_not_activate_it() {
     let mut hover = TabBarHover::default();
     let start = Instant::now();
     assert!(hover.enter(TabBarButton::Favorites, start));
-    assert!(!hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY / 2));
+    assert!(!hover.take_ready(
+        TabBarButton::Favorites,
+        start + TAB_BAR_HOVER_DELAY / 2,
+        TAB_BAR_HOVER_DELAY,
+    ));
     assert!(hover.leave(TabBarButton::Favorites));
-    assert!(!hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.take_ready(
+        TabBarButton::Favorites,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
+}
+
+#[test]
+fn hover_dwell_delay_can_be_configured() {
+    let mut hover = TabBarHover::default();
+    let delay = Duration::from_millis(200);
+    let start = Instant::now();
+    assert!(hover.enter(TabBarButton::Favorites, start));
+    assert!(!hover.take_ready(
+        TabBarButton::Favorites,
+        start + Duration::from_millis(199),
+        delay
+    ));
+    assert!(hover.take_ready(
+        TabBarButton::Favorites,
+        start + Duration::from_millis(200),
+        delay
+    ));
 }
 
 #[test]
@@ -27,11 +56,12 @@ fn all_tab_button_groups_require_a_full_dwell_and_activate_only_once() {
         hover.enter(button, start);
         assert!(!hover.take_ready(
             button,
-            start + TAB_BAR_HOVER_DELAY - Duration::from_millis(1)
+            start + TAB_BAR_HOVER_DELAY - Duration::from_millis(1),
+            TAB_BAR_HOVER_DELAY,
         ));
         assert!(!hover.enter(button, start + TAB_BAR_HOVER_DELAY / 2));
-        assert!(hover.take_ready(button, start + TAB_BAR_HOVER_DELAY));
-        assert!(!hover.take_ready(button, start + TAB_BAR_HOVER_DELAY));
+        assert!(hover.take_ready(button, start + TAB_BAR_HOVER_DELAY, TAB_BAR_HOVER_DELAY,));
+        assert!(!hover.take_ready(button, start + TAB_BAR_HOVER_DELAY, TAB_BAR_HOVER_DELAY,));
         assert!(!hover.enter(button, start + TAB_BAR_HOVER_DELAY * 2));
     }
 }
@@ -43,11 +73,20 @@ fn changing_hover_target_restarts_the_delay_and_ignores_old_leave_events() {
     hover.enter(TabBarButton::Text, start);
     hover.enter(TabBarButton::Image, start + Duration::from_millis(100));
     assert!(!hover.leave(TabBarButton::Text));
-    assert!(!hover.take_ready(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
-    assert!(!hover.take_ready(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.take_ready(
+        TabBarButton::Text,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
+    assert!(!hover.take_ready(
+        TabBarButton::Image,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
     assert!(hover.take_ready(
         TabBarButton::Image,
         start + Duration::from_millis(100) + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
     ));
 }
 
@@ -58,10 +97,15 @@ fn leaving_and_reentering_the_same_button_requires_another_full_dwell() {
     hover.enter(TabBarButton::Favorites, start);
     hover.leave(TabBarButton::Favorites);
     hover.enter(TabBarButton::Favorites, start + Duration::from_millis(100));
-    assert!(!hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.take_ready(
+        TabBarButton::Favorites,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
     assert!(hover.take_ready(
         TabBarButton::Favorites,
         start + Duration::from_millis(100) + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
     ));
 }
 
@@ -74,7 +118,11 @@ fn cancelling_pending_hover_preserves_the_last_active_filter() {
     let start = Instant::now();
     hover.enter(TabBarButton::Image, start);
     hover.cancel();
-    assert!(!hover.take_ready(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.take_ready(
+        TabBarButton::Image,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
     assert!(filters.is_hovered(FilterId::Text));
     assert_eq!(
         filters.active_filters().collect::<Vec<_>>(),
@@ -90,7 +138,11 @@ fn interrupted_hover_can_restart_without_leaving_the_button() {
     hover.cancel();
     let restarted = start + TAB_BAR_HOVER_DELAY;
     assert!(hover.enter(TabBarButton::Image, restarted));
-    assert!(hover.take_ready(TabBarButton::Image, restarted + TAB_BAR_HOVER_DELAY));
+    assert!(hover.take_ready(
+        TabBarButton::Image,
+        restarted + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
 }
 
 #[test]
@@ -99,13 +151,20 @@ fn early_timer_wakeup_keeps_the_remaining_wait() {
     let start = Instant::now();
     hover.enter(TabBarButton::Favorites, start);
     let early = start + TAB_BAR_HOVER_DELAY - Duration::from_millis(1);
-    assert!(!hover.take_ready(TabBarButton::Favorites, early));
+    assert!(!hover.take_ready(TabBarButton::Favorites, early, TAB_BAR_HOVER_DELAY,));
     assert_eq!(
-        hover.remaining(TabBarButton::Favorites, early),
+        hover.remaining(TabBarButton::Favorites, early, TAB_BAR_HOVER_DELAY),
         Some(Duration::from_millis(1)),
     );
-    assert!(hover.take_ready(TabBarButton::Favorites, start + TAB_BAR_HOVER_DELAY));
-    assert_eq!(hover.remaining(TabBarButton::Favorites, early), None);
+    assert!(hover.take_ready(
+        TabBarButton::Favorites,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
+    assert_eq!(
+        hover.remaining(TabBarButton::Favorites, early, TAB_BAR_HOVER_DELAY),
+        None
+    );
 }
 
 #[test]
@@ -114,7 +173,11 @@ fn clicking_during_the_delay_suppresses_hover_until_pointer_leaves() {
     let start = Instant::now();
     hover.enter(TabBarButton::Text, start);
     hover.suppress(TabBarButton::Text);
-    assert!(!hover.take_ready(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
+    assert!(!hover.take_ready(
+        TabBarButton::Text,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
     assert!(!hover.enter(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
     assert!(hover.leave(TabBarButton::Text));
     assert!(hover.enter(TabBarButton::Text, start + TAB_BAR_HOVER_DELAY));
@@ -125,7 +188,11 @@ fn completed_hover_ignores_other_buttons_leave_and_rearms_after_its_own_leave() 
     let mut hover = TabBarHover::default();
     let start = Instant::now();
     hover.enter(TabBarButton::Image, start);
-    assert!(hover.take_ready(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
+    assert!(hover.take_ready(
+        TabBarButton::Image,
+        start + TAB_BAR_HOVER_DELAY,
+        TAB_BAR_HOVER_DELAY,
+    ));
     assert!(!hover.leave(TabBarButton::Text));
     assert!(!hover.enter(TabBarButton::Image, start + TAB_BAR_HOVER_DELAY));
     assert!(hover.leave(TabBarButton::Image));
@@ -133,17 +200,52 @@ fn completed_hover_ignores_other_buttons_leave_and_rearms_after_its_own_leave() 
 }
 
 #[test]
-fn hover_switch_defaults_to_disabled_and_can_be_saved_as_enabled() {
+fn hover_switches_default_to_disabled_and_can_be_saved_independently() {
     let mut clipboard: config::ClipboardConfig = serde_json::from_str("{}").unwrap();
-    assert!(!clipboard.tab_bar_hover_switch);
-    clipboard.tab_bar_hover_switch = true;
+    assert!(!clipboard.page_hover_switch);
+    assert!(!clipboard.filter_hover_switch);
+    assert_eq!(clipboard.page_hover_delay_ms, 40);
+    assert_eq!(clipboard.filter_hover_delay_ms, 40);
+    clipboard.page_hover_switch = true;
+    clipboard.filter_hover_switch = true;
+    clipboard.page_hover_delay_ms = 300;
+    clipboard.filter_hover_delay_ms = 500;
     let encoded = serde_json::to_string(&clipboard).unwrap();
-    assert!(encoded.contains("\"tabBarHoverSwitch\":true"));
-    assert!(
-        serde_json::from_str::<config::ClipboardConfig>(&encoded)
-            .unwrap()
-            .tab_bar_hover_switch
-    );
+    assert!(encoded.contains("\"pageHoverSwitch\":true"));
+    assert!(encoded.contains("\"filterHoverSwitch\":true"));
+    assert!(encoded.contains("\"pageHoverDelayMs\":300"));
+    assert!(encoded.contains("\"filterHoverDelayMs\":500"));
+    let reloaded: config::ClipboardConfig = serde_json::from_str(&encoded).unwrap();
+    assert!(reloaded.page_hover_switch);
+    assert!(reloaded.filter_hover_switch);
+    assert_eq!(reloaded.page_hover_delay_ms, 300);
+    assert_eq!(reloaded.filter_hover_delay_ms, 500);
+}
+
+#[test]
+fn hover_switches_control_their_own_button_groups() {
+    let mut clipboard = config::ClipboardConfig::default();
+    clipboard.page_hover_switch = true;
+    assert!(clipboard.hover_switch_enabled(TabBarButton::Favorites));
+    assert!(!clipboard.hover_switch_enabled(TabBarButton::Symbols));
+    assert!(!clipboard.hover_switch_enabled(TabBarButton::Tags));
+    assert!(!clipboard.hover_switch_enabled(TabBarButton::Image));
+    assert!(!clipboard.hover_switch_enabled(TabBarButton::Unpasted));
+
+    clipboard.page_hover_switch = false;
+    clipboard.filter_hover_switch = true;
+    assert!(!clipboard.hover_switch_enabled(TabBarButton::Favorites));
+    assert!(clipboard.hover_switch_enabled(TabBarButton::Symbols));
+    assert!(clipboard.hover_switch_enabled(TabBarButton::Tags));
+    assert!(clipboard.hover_switch_enabled(TabBarButton::Image));
+    assert!(clipboard.hover_switch_enabled(TabBarButton::Unpasted));
+
+    clipboard.page_hover_delay_ms = 120;
+    clipboard.filter_hover_delay_ms = 260;
+    assert_eq!(clipboard.hover_delay_ms(TabBarButton::Favorites), 120);
+    assert_eq!(clipboard.hover_delay_ms(TabBarButton::Symbols), 260);
+    assert_eq!(clipboard.hover_delay_ms(TabBarButton::Tags), 260);
+    assert_eq!(clipboard.hover_delay_ms(TabBarButton::Image), 260);
 }
 
 #[test]

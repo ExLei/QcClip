@@ -515,7 +515,7 @@ pub fn render(
             this.suppress_tab_bar_hover(TabBarButton::Tags);
             this.cancel_tags_panel_close();
             let opening =
-                config_runtime::clipboard_config(cx).tab_bar_hover_switch || !this.tags_panel_open;
+                config_runtime::clipboard_config(cx).filter_hover_switch || !this.tags_panel_open;
             this.tags_panel_open = opening;
             if opening {
                 if let Some(tags_search_input) = this.tags_search_input.clone() {

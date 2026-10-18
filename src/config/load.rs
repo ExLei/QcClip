@@ -483,6 +483,13 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
 
 fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> ClipboardConfig {
     let default = ClipboardConfig::default();
+    let legacy_hover_switch = read_field(
+        object,
+        "tabBarHoverSwitch",
+        "clipboard.tabBarHoverSwitch",
+        default.page_hover_switch,
+        warnings,
+    );
     ClipboardConfig {
         mouse_left_behavior: read_field(
             object,
@@ -519,11 +526,32 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.hover_preview_enabled,
             warnings,
         ),
-        tab_bar_hover_switch: read_field(
+        page_hover_switch: read_field(
             object,
-            "tabBarHoverSwitch",
-            "clipboard.tabBarHoverSwitch",
-            default.tab_bar_hover_switch,
+            "pageHoverSwitch",
+            "clipboard.pageHoverSwitch",
+            legacy_hover_switch,
+            warnings,
+        ),
+        filter_hover_switch: read_field(
+            object,
+            "filterHoverSwitch",
+            "clipboard.filterHoverSwitch",
+            legacy_hover_switch,
+            warnings,
+        ),
+        page_hover_delay_ms: read_field(
+            object,
+            "pageHoverDelayMs",
+            "clipboard.pageHoverDelayMs",
+            default.page_hover_delay_ms,
+            warnings,
+        ),
+        filter_hover_delay_ms: read_field(
+            object,
+            "filterHoverDelayMs",
+            "clipboard.filterHoverDelayMs",
+            default.filter_hover_delay_ms,
             warnings,
         ),
         move_pasted_to_first_in_clipboard: read_field(
@@ -1305,15 +1333,59 @@ mod tests {
     }
 
     #[test]
-    fn tab_bar_hover_switch_defaults_to_disabled_and_loads_enabled() {
+    fn hover_switches_default_to_disabled_and_load_independently() {
         let loaded = from_str(r#"{"clipboard":{}}"#).expect("应当可以加载旧剪贴板设置");
-        assert!(!loaded.config.clipboard.tab_bar_hover_switch);
+        assert!(!loaded.config.clipboard.page_hover_switch);
+        assert!(!loaded.config.clipboard.filter_hover_switch);
         assert!(loaded.warnings.is_empty());
 
-        let loaded = from_str(r#"{"clipboard":{"tabBarHoverSwitch":true}}"#)
-            .expect("应当可以加载悬停切换设置");
-        assert!(loaded.config.clipboard.tab_bar_hover_switch);
+        let loaded = from_str(r#"{"clipboard":{"pageHoverSwitch":true}}"#)
+            .expect("应当可以加载页面栏悬停切换设置");
+        assert!(loaded.config.clipboard.page_hover_switch);
+        assert!(!loaded.config.clipboard.filter_hover_switch);
         assert!(loaded.warnings.is_empty());
+
+        let loaded = from_str(r#"{"clipboard":{"filterHoverSwitch":true}}"#)
+            .expect("应当可以加载筛选栏悬停切换设置");
+        assert!(!loaded.config.clipboard.page_hover_switch);
+        assert!(loaded.config.clipboard.filter_hover_switch);
+        assert!(loaded.warnings.is_empty());
+    }
+
+    #[test]
+    fn hover_delays_default_load_independently_and_clamp() {
+        let loaded = from_str(r#"{"clipboard":{}}"#).expect("应当可以加载默认悬停停留时间");
+        assert_eq!(loaded.config.clipboard.page_hover_delay_ms, 40);
+        assert_eq!(loaded.config.clipboard.filter_hover_delay_ms, 40);
+
+        let loaded = from_str(r#"{"clipboard":{"pageHoverDelayMs":500}}"#)
+            .expect("应当可以加载页面栏悬停停留时间");
+        assert_eq!(loaded.config.clipboard.page_hover_delay_ms, 500);
+        assert_eq!(loaded.config.clipboard.filter_hover_delay_ms, 40);
+
+        let loaded = from_str(r#"{"clipboard":{"filterHoverDelayMs":300}}"#)
+            .expect("应当可以加载筛选栏悬停停留时间");
+        assert_eq!(loaded.config.clipboard.page_hover_delay_ms, 40);
+        assert_eq!(loaded.config.clipboard.filter_hover_delay_ms, 300);
+
+        let loaded =
+            from_str(r#"{"clipboard":{"pageHoverDelayMs":5000,"filterHoverDelayMs":5000}}"#)
+                .expect("超范围悬停停留时间应当被归一化");
+        assert_eq!(loaded.config.clipboard.page_hover_delay_ms, 1000);
+        assert_eq!(loaded.config.clipboard.filter_hover_delay_ms, 1000);
+    }
+
+    #[test]
+    fn legacy_tab_bar_hover_switch_enables_both_bars() {
+        let loaded = from_str(r#"{"clipboard":{"tabBarHoverSwitch":true}}"#)
+            .expect("应当可以加载旧版悬停切换设置");
+        assert!(loaded.config.clipboard.page_hover_switch);
+        assert!(loaded.config.clipboard.filter_hover_switch);
+        assert!(loaded.warnings.is_empty());
+
+        let saved = serde_json::to_value(&loaded.config).expect("无法保存拆分的悬停切换设置");
+        assert_eq!(saved["clipboard"]["pageHoverSwitch"], true);
+        assert_eq!(saved["clipboard"]["filterHoverSwitch"], true);
     }
 
     #[test]

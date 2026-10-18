@@ -19,8 +19,9 @@ use crate::windows::notification::{NotificationLevel, NotificationService};
 use crate::{
     config::{
         ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, BACKGROUND_IMAGE_BLUR_MAX,
-        BACKGROUND_IMAGE_BLUR_MIN, HistoryConfig, SOUND_VOLUME_MAX, WINDOW_MATERIAL_BRIGHTNESS_MAX,
-        WINDOW_MATERIAL_BRIGHTNESS_MIN, WINDOW_MATERIAL_OPACITY_MAX, WINDOW_MATERIAL_OPACITY_MIN,
+        BACKGROUND_IMAGE_BLUR_MIN, ClipboardConfig, HistoryConfig, SOUND_VOLUME_MAX,
+        WINDOW_MATERIAL_BRIGHTNESS_MAX, WINDOW_MATERIAL_BRIGHTNESS_MIN,
+        WINDOW_MATERIAL_OPACITY_MAX, WINDOW_MATERIAL_OPACITY_MIN,
     },
     config_runtime, hotkey, i18n,
     services::data_management::DataManagementStats,
@@ -335,6 +336,41 @@ fn notify_settings_error(
     cx: &mut App,
 ) -> Option<String> {
     notify_settings_status(page, error, NotificationLevel::Error, cx)
+}
+
+fn clipboard_hover_delay_subscription(
+    slider: &Entity<SliderState>,
+    window: &mut Window,
+    cx: &mut Context<SettingsWindowView>,
+    apply: fn(&mut ClipboardConfig, u16),
+) -> Subscription {
+    cx.subscribe_in(
+        slider,
+        window,
+        move |view, _, event: &SliderEvent, _, cx| {
+            let SliderEvent::Change(value) = event else {
+                return;
+            };
+            let delay = value.end().round().clamp(
+                f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_MIN_MS),
+                f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_MAX_MS),
+            ) as u16;
+            let current = config_runtime::clipboard_config(cx);
+            let mut clipboard = current.clone();
+            apply(&mut clipboard, delay);
+            if clipboard == current {
+                return;
+            }
+            let error = config_runtime::set_clipboard_config(clipboard, cx)
+                .err()
+                .map(|error| {
+                    tracing::error!("保存悬停停留时间失败：{error}");
+                    i18n::translator(cx).translate("settings.clipboard.save_error")
+                });
+            view.clipboard_error = notify_settings_error(SettingsPage::Clipboard, error, cx);
+            cx.notify();
+        },
+    )
 }
 
 fn open_settings_directory(path: std::path::PathBuf, title_key: &'static str, cx: &mut App) {
@@ -1020,6 +1056,8 @@ struct SettingsWindowView {
     /// 搜索引擎管理区是否展开（折叠时只显示标题行节省空间）。
     search_engines_expanded: bool,
     copy_volume_slider: Entity<SliderState>,
+    page_hover_delay_slider: Entity<SliderState>,
+    filter_hover_delay_slider: Entity<SliderState>,
     _adaptive_max_lines_subscription: Subscription,
     _middle_mouse_threshold_subscription: Subscription,
     _window_material_opacity_subscription: Subscription,
@@ -1028,6 +1066,8 @@ struct SettingsWindowView {
     _paste_volume_subscription: Subscription,
     _quick_paste_scroll_volume_subscription: Subscription,
     _copy_volume_subscription: Subscription,
+    _page_hover_delay_subscription: Subscription,
+    _filter_hover_delay_subscription: Subscription,
     _history_retention_subscription: Subscription,
     _history_max_items_subscription: Subscription,
     _shortcut_recording_blur_subscription: Subscription,
@@ -1122,6 +1162,21 @@ impl SettingsWindowView {
                 .max(f32::from(SOUND_VOLUME_MAX))
                 .step(1.0)
                 .default_value(f32::from(sound_config.copy.volume))
+        });
+        let clipboard_config = config_runtime::clipboard_config(cx);
+        let page_hover_delay_slider = cx.new(|_| {
+            SliderState::new()
+                .max(f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_MAX_MS))
+                .min(f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_MIN_MS))
+                .step(10.0)
+                .default_value(f32::from(clipboard_config.page_hover_delay_ms))
+        });
+        let filter_hover_delay_slider = cx.new(|_| {
+            SliderState::new()
+                .max(f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_MAX_MS))
+                .min(f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_MIN_MS))
+                .step(10.0)
+                .default_value(f32::from(clipboard_config.filter_hover_delay_ms))
         });
         let history_config = config_runtime::history_config(cx);
         let unlimited_placeholder =
@@ -1383,6 +1438,18 @@ impl SettingsWindowView {
                 );
             },
         );
+        let page_hover_delay_subscription = clipboard_hover_delay_subscription(
+            &page_hover_delay_slider,
+            window,
+            cx,
+            |clipboard, delay| clipboard.page_hover_delay_ms = delay,
+        );
+        let filter_hover_delay_subscription = clipboard_hover_delay_subscription(
+            &filter_hover_delay_slider,
+            window,
+            cx,
+            |clipboard, delay| clipboard.filter_hover_delay_ms = delay,
+        );
         let search_engine_name_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(
                 i18n::translator(cx).translate("settings.clipboard.search_engine_name_placeholder"),
@@ -1486,6 +1553,8 @@ impl SettingsWindowView {
             paste_volume_slider,
             quick_paste_scroll_volume_slider,
             copy_volume_slider,
+            page_hover_delay_slider,
+            filter_hover_delay_slider,
             search_engine_name_input,
             search_engine_url_input,
             pending_search_engine_icon: None,
@@ -1498,6 +1567,8 @@ impl SettingsWindowView {
             _paste_volume_subscription: paste_volume_subscription,
             _quick_paste_scroll_volume_subscription: quick_paste_scroll_volume_subscription,
             _copy_volume_subscription: copy_volume_subscription,
+            _page_hover_delay_subscription: page_hover_delay_subscription,
+            _filter_hover_delay_subscription: filter_hover_delay_subscription,
             _history_retention_subscription: history_retention_subscription,
             _history_max_items_subscription: history_max_items_subscription,
             _shortcut_recording_blur_subscription: shortcut_recording_blur_subscription,

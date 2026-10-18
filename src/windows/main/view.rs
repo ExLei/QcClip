@@ -54,12 +54,13 @@ impl Render for MainWindow {
                 .unwrap_or(super::tabs::SymbolCategoryId::Emoji);
             self.select_symbol_category(fallback, cx);
         }
+        let clipboard = config_runtime::clipboard_config(cx);
         let mut filters_changed = self.filters.retain_visible(layout);
-        if is_blocked || !config_runtime::clipboard_config(cx).tab_bar_hover_switch {
-            self.cancel_tab_bar_hover();
+        if is_blocked || !clipboard.filter_hover_switch {
             filters_changed |= self.filters.clear_hovered();
         }
-        if !window.is_window_hovered()
+        if is_blocked
+            || !window.is_window_hovered()
             || self
                 .tab_bar_hover
                 .pending_button()
@@ -98,7 +99,6 @@ impl Render for MainWindow {
         self.ensure_search_input(window, cx);
         self.sync_search_placeholder(window, cx);
         let theme = cx.theme().colors;
-        let clipboard = config_runtime::clipboard_config(cx);
         self.prepare_adaptive_height_cache(
             AdaptiveHeightCacheKey {
                 viewport_width: window.viewport_size().width,
