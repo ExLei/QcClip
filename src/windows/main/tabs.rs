@@ -5,8 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const TAB_BAR_HOVER_DELAY: Duration = Duration::from_millis(40);
-
 #[derive(Default)]
 pub struct TabBarHover {
     pointer_button: Option<TabBarButton>,
@@ -45,16 +43,19 @@ impl TabBarHover {
         self.pending = None;
     }
 
-    pub fn remaining(&self, button: TabBarButton, now: Instant) -> Option<Duration> {
+    pub fn remaining(
+        &self,
+        button: TabBarButton,
+        now: Instant,
+        delay: Duration,
+    ) -> Option<Duration> {
         self.pending
             .filter(|(pending, _)| *pending == button)
-            .map(|(_, entered)| {
-                TAB_BAR_HOVER_DELAY.saturating_sub(now.saturating_duration_since(entered))
-            })
+            .map(|(_, entered)| delay.saturating_sub(now.saturating_duration_since(entered)))
     }
 
-    pub fn take_ready(&mut self, button: TabBarButton, now: Instant) -> bool {
-        if self.remaining(button, now) != Some(Duration::ZERO) {
+    pub fn take_ready(&mut self, button: TabBarButton, now: Instant, delay: Duration) -> bool {
+        if self.remaining(button, now, delay) != Some(Duration::ZERO) {
             return false;
         }
         self.pending = None;

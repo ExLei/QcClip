@@ -154,6 +154,7 @@ impl Default for ApplicationFilterApplication {
 impl AppConfig {
     pub fn normalized(mut self) -> Self {
         self.schema_version = CURRENT_SCHEMA_VERSION;
+        self.clipboard = self.clipboard.normalized();
         self.general.notifications = self.general.notifications.normalized();
         self.shortcuts.middle_mouse = self.shortcuts.middle_mouse.normalized();
         self.quick_paste = self.quick_paste.normalized();
@@ -699,7 +700,10 @@ pub struct ClipboardConfig {
     pub display_priority: ClipboardDisplayPriority,
     pub preview_priority: ClipboardPreviewPriority,
     pub hover_preview_enabled: bool,
-    pub tab_bar_hover_switch: bool,
+    pub page_hover_switch: bool,
+    pub filter_hover_switch: bool,
+    pub page_hover_delay_ms: u16,
+    pub filter_hover_delay_ms: u16,
     pub move_pasted_to_first_in_clipboard: bool,
     pub move_pasted_to_first_in_favorites: bool,
     pub auto_scroll_to_top: bool,
@@ -949,7 +953,10 @@ impl Default for ClipboardConfig {
             display_priority: ClipboardDisplayPriority::default(),
             preview_priority: ClipboardPreviewPriority::default(),
             hover_preview_enabled: true,
-            tab_bar_hover_switch: false,
+            page_hover_switch: false,
+            filter_hover_switch: false,
+            page_hover_delay_ms: Self::TAB_BAR_HOVER_DELAY_DEFAULT_MS,
+            filter_hover_delay_ms: Self::TAB_BAR_HOVER_DELAY_DEFAULT_MS,
             move_pasted_to_first_in_clipboard: false,
             move_pasted_to_first_in_favorites: false,
             auto_scroll_to_top: false,
@@ -966,6 +973,44 @@ impl Default for ClipboardConfig {
 }
 
 impl ClipboardConfig {
+    pub const TAB_BAR_HOVER_DELAY_MIN_MS: u16 = 0;
+    pub const TAB_BAR_HOVER_DELAY_MAX_MS: u16 = 1000;
+    pub const TAB_BAR_HOVER_DELAY_DEFAULT_MS: u16 = 40;
+
+    pub(crate) fn normalized(mut self) -> Self {
+        self.page_hover_delay_ms = self.page_hover_delay_ms.clamp(
+            Self::TAB_BAR_HOVER_DELAY_MIN_MS,
+            Self::TAB_BAR_HOVER_DELAY_MAX_MS,
+        );
+        self.filter_hover_delay_ms = self.filter_hover_delay_ms.clamp(
+            Self::TAB_BAR_HOVER_DELAY_MIN_MS,
+            Self::TAB_BAR_HOVER_DELAY_MAX_MS,
+        );
+        self
+    }
+
+    const fn is_page_button(button: TabBarButton) -> bool {
+        matches!(button.group(), TabBarButtonGroup::Pages)
+    }
+
+    /// 按钮所属的栏是否启用了悬停切换。页面按钮归页面栏，筛选、符号分类和标签面板归筛选栏。
+    pub const fn hover_switch_enabled(&self, button: TabBarButton) -> bool {
+        if Self::is_page_button(button) {
+            self.page_hover_switch
+        } else {
+            self.filter_hover_switch
+        }
+    }
+
+    /// 按钮所属栏的悬停停留时间。
+    pub const fn hover_delay_ms(&self, button: TabBarButton) -> u16 {
+        if Self::is_page_button(button) {
+            self.page_hover_delay_ms
+        } else {
+            self.filter_hover_delay_ms
+        }
+    }
+
     /// 搜索引擎为空时回落到内置默认列表。
     pub fn search_engines_or_default(&self) -> Vec<SearchEngine> {
         if self.search_engines.is_empty() {
@@ -1770,6 +1815,8 @@ mod tests {
         assert_eq!(value["general"]["globalNotificationEnabled"], true);
         assert_eq!(value["clipboard"]["displayPriority"], "text-html-image");
         assert_eq!(value["clipboard"]["mouseLeftBehavior"], "single-paste");
+        assert_eq!(value["clipboard"]["pageHoverDelayMs"], 40);
+        assert_eq!(value["clipboard"]["filterHoverDelayMs"], 40);
         assert_eq!(value["clipboard"]["edgeHide"], false);
         assert_eq!(value["quickPaste"]["visibleItems"], 7);
         assert_eq!(value["sound"]["enabled"], true);

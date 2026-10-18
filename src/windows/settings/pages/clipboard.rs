@@ -20,8 +20,16 @@ use crate::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
+use gpui_component::slider::Slider;
 use gpui_component::switch::Switch;
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme as _, Sizable as _, collapsible::Collapsible, h_flex, v_flex};
+
+#[derive(Clone, Copy)]
+enum HoverBar {
+    Page,
+    Filter,
+}
 
 impl SettingsWindowView {
     pub(in crate::windows::settings) fn render_clipboard(
@@ -34,16 +42,27 @@ impl SettingsWindowView {
         let view = cx.entity().clone();
         let reset_error = translator.translate("settings.clipboard.reset_error");
         let reset_view = view.clone();
+        let reset_page_hover_delay_slider = self.page_hover_delay_slider.clone();
+        let reset_filter_hover_delay_slider = self.filter_hover_delay_slider.clone();
         let reset_button = Button::new("settings-clipboard-reset")
             .warning()
             .small()
             .label(translator.translate("settings.action.reset_page"))
-            .on_click(move |_, _, cx| {
+            .on_click(move |_, window, cx| {
                 let result = config_runtime::reset_clipboard_config(cx);
                 let error_message = result.as_ref().err().map(|error| {
                     tracing::error!("重置剪贴板设置失败：{error}");
                     reset_error.clone()
                 });
+                if result.is_ok() {
+                    let default_delay = f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_DEFAULT_MS);
+                    reset_page_hover_delay_slider.update(cx, |slider, cx| {
+                        slider.set_value(default_delay, window, cx);
+                    });
+                    reset_filter_hover_delay_slider.update(cx, |slider, cx| {
+                        slider.set_value(default_delay, window, cx);
+                    });
+                }
                 reset_view.update(cx, |view, cx| {
                     view.clipboard_error =
                         notify_settings_error(SettingsPage::Clipboard, error_message, cx);
@@ -254,17 +273,33 @@ impl SettingsWindowView {
                     );
                 }
             });
-        let tab_bar_hover_switch = Switch::new("settings-clipboard-tab-bar-hover-switch")
+        let page_hover_switch = Switch::new("settings-clipboard-page-hover-switch")
             .large()
-            .checked(clipboard.tab_bar_hover_switch)
-            .accessibility_label(translator.translate("settings.clipboard.tab_bar_hover_switch"))
+            .checked(clipboard.page_hover_switch)
+            .accessibility_label(translator.translate("settings.clipboard.page_hover_switch"))
             .on_click({
                 let view = view.clone();
                 let save_error = save_error.clone();
                 move |checked, _, cx| {
                     persist_clipboard_change(
                         view.clone(),
-                        move |clipboard| clipboard.tab_bar_hover_switch = *checked,
+                        move |clipboard| clipboard.page_hover_switch = *checked,
+                        save_error.clone(),
+                        cx,
+                    );
+                }
+            });
+        let filter_hover_switch = Switch::new("settings-clipboard-filter-hover-switch")
+            .large()
+            .checked(clipboard.filter_hover_switch)
+            .accessibility_label(translator.translate("settings.clipboard.filter_hover_switch"))
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    persist_clipboard_change(
+                        view.clone(),
+                        move |clipboard| clipboard.filter_hover_switch = *checked,
                         save_error.clone(),
                         cx,
                     );
@@ -506,15 +541,29 @@ impl SettingsWindowView {
             .child(
                 self.setting_row(
                     theme,
-                    translator.translate("settings.clipboard.tab_bar_hover_switch"),
+                    translator.translate("settings.clipboard.page_hover_switch"),
                     Some(
                         translator
-                            .translate("settings.clipboard.tab_bar_hover_switch_description")
+                            .translate("settings.clipboard.page_hover_switch_description")
                             .into(),
                     ),
-                    tab_bar_hover_switch,
+                    page_hover_switch,
                 ),
             )
+            .child(self.hover_delay_row(theme, HoverBar::Page, &clipboard, &translator))
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.filter_hover_switch"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.filter_hover_switch_description")
+                            .into(),
+                    ),
+                    filter_hover_switch,
+                ),
+            )
+            .child(self.hover_delay_row(theme, HoverBar::Filter, &clipboard, &translator))
             .child(
                 self.setting_row(
                     theme,
@@ -871,6 +920,78 @@ impl SettingsWindowView {
                     .child(form_row),
             )
             .into_any_element()
+    }
+
+    fn hover_delay_row(
+        &self,
+        theme: gpui_component::ThemeColor,
+        bar: HoverBar,
+        clipboard: &ClipboardConfig,
+        translator: &i18n::Translator,
+    ) -> AnyElement {
+        let (title_key, delay_ms, enabled, slider) = match bar {
+            HoverBar::Page => (
+                "settings.clipboard.page_hover_delay",
+                clipboard.page_hover_delay_ms,
+                clipboard.page_hover_switch,
+                &self.page_hover_delay_slider,
+            ),
+            HoverBar::Filter => (
+                "settings.clipboard.filter_hover_delay",
+                clipboard.filter_hover_delay_ms,
+                clipboard.filter_hover_switch,
+                &self.filter_hover_delay_slider,
+            ),
+        };
+        let title = translator.translate(title_key);
+        let description = translator.translate("settings.clipboard.hover_delay_description");
+        self.highlight_element(
+            theme,
+            title.clone(),
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .min_h(ui_rem(36.0))
+                .flex_shrink_0()
+                .flex_wrap()
+                .justify_between()
+                .gap_4()
+                .px_4()
+                .py_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .child(
+                    h_flex()
+                        .id(format!("settings-clipboard-hover-delay-{title}"))
+                        .min_w(ui_rem(180.0))
+                        .flex_1()
+                        .pl_2()
+                        .gap_2()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(title)
+                        .child(div().opacity(0.7).child("0–1000 ms"))
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(description.clone()).build(window, cx)
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .w(ui_rem(248.0))
+                        .flex_shrink_0()
+                        .gap_3()
+                        .when(!enabled, |this| this.opacity(0.5))
+                        .child(Slider::new(slider).disabled(!enabled).flex_1())
+                        .child(
+                            div()
+                                .w(ui_rem(62.0))
+                                .text_xs()
+                                .text_right()
+                                .text_color(theme.muted_foreground)
+                                .child(format!("{delay_ms} ms")),
+                        ),
+                ),
+        )
     }
 }
 

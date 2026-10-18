@@ -641,6 +641,7 @@ pub(crate) fn set_clipboard_config(
     clipboard: ClipboardConfig,
     cx: &mut App,
 ) -> Result<bool, ConfigError> {
+    let clipboard = clipboard.normalized();
     let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
         (
             runtime.config.clipboard.clone(),
