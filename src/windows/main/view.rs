@@ -252,7 +252,7 @@ fn render_blocking_operation_overlay(title_key: &str, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .justify_center()
-        .bg(gpui::ColorExt::opacity(&theme.background, 0.58))
+        .bg(gpui::ColorExt::opacity(&theme.popover, 0.58))
         .child(
             div()
                 .w_full()
@@ -264,7 +264,7 @@ fn render_blocking_operation_overlay(title_key: &str, cx: &App) -> AnyElement {
                 .items_center()
                 .gap(ui_rem(16.0))
                 .rounded_xl()
-                .bg(theme.background)
+                .bg(theme.popover)
                 .shadow_lg()
                 .child(icon("refresh", 36.0, theme.primary))
                 .child(

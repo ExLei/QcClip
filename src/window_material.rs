@@ -64,7 +64,7 @@ pub(crate) fn new_root(
     window: &mut Window,
     cx: &mut Context<Root>,
 ) -> Root {
-    // 窗口材质由业务根容器绘制，Root 只负责叠加层，避免半透明背景重复覆盖桌面。
+    // 材质主遮罩由统一背景层绘制，Root 自身保持透明，避免重复覆盖。
     let background_view = cx.new(|_| BackgroundRoot { view: view.into() });
     Root::new(background_view, window, cx).bg(gpui::transparent_black())
 }
@@ -139,6 +139,25 @@ pub(crate) fn window_frame() -> impl IntoElement {
 }
 
 pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement {
+    let background = backdrop_element(window, cx);
+    let appearance = crate::config_runtime::appearance_config(cx);
+    if supported_material(appearance.window_material) == WindowMaterial::Disabled {
+        return background;
+    }
+
+    let base = excluded_window_theme(cx);
+    let tint = material_window_color(base.background, appearance.window_material_opacity);
+    // 色相跟随主题过渡，主遮罩的 Alpha 则独立于内部表面色。
+    let tint = with_alpha(cx.theme().background, tint.alpha);
+    div()
+        .absolute()
+        .inset_0()
+        .child(background)
+        .child(div().absolute().inset_0().bg(tint))
+        .into_any_element()
+}
+
+fn backdrop_element(window: &Window, cx: &App) -> gpui::AnyElement {
     let appearance = crate::config_runtime::appearance_config(cx);
     let custom_image = uses_custom_image_background(cx);
     let blur_radius = if appearance.background_image_blur.is_finite() {
@@ -344,6 +363,19 @@ pub(crate) fn excluded_window_theme(cx: &impl gpui::AppContext) -> ThemeColor {
     })
 }
 
+pub(crate) fn menu_window_colors(cx: &App) -> ThemeColor {
+    let material = supported_material(crate::config_runtime::appearance_config(cx).window_material);
+    menu_colors(cx.theme().colors, material)
+}
+
+fn menu_colors(mut colors: ThemeColor, material: WindowMaterial) -> ThemeColor {
+    if material != WindowMaterial::Disabled {
+        // 独立菜单已有窗口主遮罩，只沿用普通表面的 Alpha，保留菜单自己的色相。
+        colors.popover = with_alpha(colors.popover, colors.background.alpha);
+    }
+    colors
+}
+
 /// 当前系统可选的窗口材质，用于设置页下拉选项。
 pub(crate) fn available_materials() -> Vec<WindowMaterial> {
     let version = os_version::current();
@@ -432,7 +464,7 @@ fn apply_theme_colors(cx: &mut App) {
     let colors = if material == WindowMaterial::Disabled {
         base_colors
     } else {
-        material_colors(base_colors, appearance.window_material_opacity)
+        material_colors(base_colors)
     };
 
     cx.update_global::<Theme, _>(|theme, _| {
@@ -442,62 +474,62 @@ fn apply_theme_colors(cx: &mut App) {
     Theme::sync_base(cx);
 }
 
-/// 将界面不透明度直接乘到主题表面原有的 Alpha 上，保留主题各角色的颜色和层次。
-fn material_colors(base: ThemeColor, window_opacity: f32) -> ThemeColor {
-    let window_alpha =
-        window_opacity.clamp(WINDOW_MATERIAL_OPACITY_MIN, WINDOW_MATERIAL_OPACITY_MAX);
+fn material_window_color(base: Hsla, window_opacity: f32) -> Hsla {
+    let opacity = window_opacity.clamp(WINDOW_MATERIAL_OPACITY_MIN, WINDOW_MATERIAL_OPACITY_MAX);
+    with_alpha(base, base.alpha * opacity)
+}
+
+/// 普通表面轻覆盖，交互状态保留辨识度，浮层独立保证可读性。
+fn material_colors(base: ThemeColor) -> ThemeColor {
     let mut colors = base;
 
-    // 界面不透明度直接作用于主题表面原色的 Alpha，不再先生成另一套材质色再缩放。
-    // 边框和输入框边界保留主题自身的 Alpha，避免低透明度时失去轮廓。
-    let scale_alpha = |color: Hsla| with_alpha(color, color.alpha * window_alpha);
-    // 菜单和下拉菜单的悬停背景使用 accent，也属于窗口表面的一部分。
-    colors.accent = scale_alpha(base.accent);
-    colors.background = scale_alpha(base.background);
-    colors.title_bar = scale_alpha(base.title_bar);
-    colors.sidebar = scale_alpha(base.sidebar);
-    colors.tab_bar = scale_alpha(base.tab_bar);
-    colors.popover = scale_alpha(base.popover);
-    colors.secondary = scale_alpha(base.secondary);
-    colors.input = base.input;
-    colors.secondary_hover = scale_alpha(base.secondary_hover);
-    colors.secondary_active = scale_alpha(base.secondary_active);
-    colors.button = scale_alpha(base.button);
-    colors.button_hover = scale_alpha(base.button_hover);
-    colors.button_active = scale_alpha(base.button_active);
-    colors.button_secondary = scale_alpha(base.button_secondary);
-    colors.button_secondary_hover = scale_alpha(base.button_secondary_hover);
-    colors.button_secondary_active = scale_alpha(base.button_secondary_active);
-    colors.list = scale_alpha(base.list);
-    colors.list_even = scale_alpha(base.list_even);
-    colors.list_head = scale_alpha(base.list_head);
-    colors.list_hover = scale_alpha(base.list_hover);
-    colors.list_active = scale_alpha(base.list_active);
-    colors.table = scale_alpha(base.table);
-    colors.table_even = scale_alpha(base.table_even);
-    colors.table_head = scale_alpha(base.table_head);
-    colors.table_foot = scale_alpha(base.table_foot);
-    colors.table_hover = scale_alpha(base.table_hover);
-    colors.table_active = scale_alpha(base.table_active);
-    colors.tab = scale_alpha(base.tab);
-    colors.tab_active = scale_alpha(base.tab_active);
-    colors.tab_bar_segmented = scale_alpha(base.tab_bar_segmented);
-    colors.accordion = scale_alpha(base.accordion);
-    colors.group_box = scale_alpha(base.group_box);
-    colors.skeleton = scale_alpha(base.skeleton);
-    colors.progress_bar = scale_alpha(base.progress_bar);
-    colors.slider_bar = scale_alpha(base.slider_bar);
-    colors.switch = scale_alpha(base.switch);
-    colors.scrollbar = scale_alpha(base.scrollbar);
-    colors.scrollbar_thumb = scale_alpha(base.scrollbar_thumb);
-    colors.scrollbar_thumb_hover = scale_alpha(base.scrollbar_thumb_hover);
-    colors.border = base.border;
-    colors.window_border = base.window_border;
-    colors.title_bar_border = base.title_bar_border;
-    colors.sidebar_border = base.sidebar_border;
-    colors.table_row_border = base.table_row_border;
-    colors.table_active_border = base.table_active_border;
-    colors.list_active_border = base.list_active_border;
+    let surface = |color: Hsla, opacity| with_alpha(color, color.alpha * opacity);
+    let hover = |color: Hsla| with_alpha(color, color.alpha.min(0.20));
+    let active = |color: Hsla| with_alpha(color, color.alpha.min(0.28));
+
+    colors.background = surface(base.background, 0.06);
+    colors.title_bar = surface(base.title_bar, 0.08);
+    colors.sidebar = surface(base.sidebar, 0.08);
+    colors.tab_bar = surface(base.tab_bar, 0.08);
+    colors.secondary = surface(base.secondary, 0.08);
+    colors.muted = surface(base.muted, 0.08);
+    colors.list = surface(base.list, 0.04);
+    colors.list_even = surface(base.list_even, 0.06);
+    colors.list_head = surface(base.list_head, 0.08);
+    colors.table = surface(base.table, 0.04);
+    colors.table_even = surface(base.table_even, 0.06);
+    colors.table_head = surface(base.table_head, 0.08);
+    colors.table_foot = surface(base.table_foot, 0.08);
+    colors.tab = surface(base.tab, 0.06);
+    colors.tab_bar_segmented = surface(base.tab_bar_segmented, 0.08);
+    colors.accordion = surface(base.accordion, 0.06);
+    colors.group_box = surface(base.group_box, 0.06);
+    colors.description_list_label = surface(base.description_list_label, 0.06);
+    colors.status_bar = surface(base.status_bar, 0.08);
+    colors.tiles = surface(base.tiles, 0.06);
+    colors.button = surface(base.button, 0.12);
+    colors.button_secondary = surface(base.button_secondary, 0.12);
+    colors.skeleton = surface(base.skeleton, 0.12);
+    colors.progress_bar = surface(base.progress_bar, 0.24);
+    colors.slider_bar = surface(base.slider_bar, 0.24);
+
+    // 已有低 Alpha 的交互色不再缩淡，防止悬停与选中反馈消失。
+    colors.accent = hover(base.accent);
+    colors.sidebar_accent = hover(base.sidebar_accent);
+    colors.secondary_hover = hover(base.secondary_hover);
+    colors.secondary_active = active(base.secondary_active);
+    colors.button_hover = hover(base.button_hover);
+    colors.button_active = active(base.button_active);
+    colors.button_secondary_hover = hover(base.button_secondary_hover);
+    colors.button_secondary_active = active(base.button_secondary_active);
+    colors.list_hover = hover(base.list_hover);
+    colors.list_active = active(base.list_active);
+    colors.table_hover = hover(base.table_hover);
+    colors.table_active = active(base.table_active);
+    colors.tab_active = active(base.tab_active);
+
+    // 弹出层会覆盖窗口内的文字，不能与普通表面一起变淡。
+    colors.popover = with_alpha(base.popover, 0.92);
 
     colors
 }
@@ -526,7 +558,6 @@ fn with_alpha(mut color: Hsla, alpha: f32) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::WINDOW_MATERIAL_OPACITY_DEFAULT;
 
     #[test]
     fn disabled_material_keeps_a_transparent_gpui_window() {
@@ -545,53 +576,121 @@ mod tests {
     }
 
     #[test]
-    fn material_colors_derive_surfaces_from_base_theme() {
-        let base = ThemeColor::default();
-        let colors = material_colors(base, WINDOW_MATERIAL_OPACITY_DEFAULT);
+    fn material_surfaces_preserve_theme_hues_and_existing_transparency() {
+        let base = ThemeColor {
+            background: gpui::hsla(0.6, 0.4, 0.3, 0.8),
+            secondary: gpui::hsla(0.2, 0.5, 0.6, 0.5),
+            tab: gpui::transparent_black(),
+            ..ThemeColor::default()
+        };
+        let colors = material_colors(base);
 
-        assert_eq!(colors.background.alpha, WINDOW_MATERIAL_OPACITY_DEFAULT);
-        assert_eq!(colors.title_bar.alpha, WINDOW_MATERIAL_OPACITY_DEFAULT);
-        assert_eq!(colors.popover.alpha, WINDOW_MATERIAL_OPACITY_DEFAULT);
-        assert_eq!(colors.input.alpha, base.input.alpha);
-        assert_eq!(colors.border.alpha, base.border.alpha);
-        assert_eq!(colors.window_border.alpha, base.window_border.alpha);
+        assert_eq!(colors.background, with_alpha(base.background, 0.8 * 0.06));
+        assert_eq!(colors.secondary, with_alpha(base.secondary, 0.5 * 0.08));
+        assert_eq!(colors.tab.alpha, 0.0);
     }
 
     #[test]
-    fn material_opacity_preserves_border_alpha() {
+    fn nested_material_surfaces_keep_the_backdrop_visible() {
         let base = ThemeColor::default();
-        let colors = material_colors(base, WINDOW_MATERIAL_OPACITY_DEFAULT);
-        assert_eq!(colors.border.alpha, base.border.alpha);
-        assert_eq!(colors.input.alpha, base.input.alpha);
+        let colors = material_colors(base);
+        let window = material_window_color(base.background, 0.5);
+        let combined_alpha = 1.0
+            - (1.0 - window.alpha)
+                * (1.0 - colors.background.alpha)
+                * (1.0 - colors.secondary.alpha)
+                * (1.0 - colors.background.alpha);
+
+        assert!((0.5..0.6).contains(&combined_alpha));
+        assert!(colors.popover.alpha >= 0.9);
     }
 
     #[test]
-    fn material_opacity_is_the_window_surface_alpha() {
-        let base = ThemeColor::default();
-        let half = material_colors(base, 0.5);
+    fn standalone_menus_do_not_stack_a_dense_popover_over_the_window_tint() {
+        let base = ThemeColor {
+            popover: gpui::hsla(0.6, 0.4, 0.3, 1.0),
+            ..ThemeColor::default()
+        };
+        let colors = material_colors(base);
+        for material in [
+            WindowMaterial::Transparent,
+            WindowMaterial::Acrylic,
+            WindowMaterial::Blur,
+            WindowMaterial::CustomImage,
+        ] {
+            let menu = menu_colors(colors, material);
+            let window = material_window_color(base.background, 0.5);
+            let combined_alpha = 1.0 - (1.0 - window.alpha) * (1.0 - menu.popover.alpha);
 
-        assert_eq!(half.background.alpha, 0.5);
-        // 其余表面按同一比例缩放，保持各表面之间的层次关系。
-        assert_eq!(half.title_bar.alpha, 0.5);
-        assert_eq!(half.popover.alpha, 0.5);
-        assert_eq!(half.input.alpha, base.input.alpha);
-        assert_eq!(half.border.alpha, base.border.alpha);
+            assert!((0.5..0.6).contains(&combined_alpha));
+            assert_eq!(
+                menu.popover,
+                with_alpha(base.popover, menu.background.alpha)
+            );
+            assert_eq!(menu.popover_foreground, colors.popover_foreground);
+        }
+        assert!(colors.popover.alpha >= 0.9);
     }
 
     #[test]
-    fn full_material_opacity_makes_the_window_surface_opaque() {
-        let colors = material_colors(ThemeColor::default(), 1.0);
-        assert_eq!(colors.background.alpha, 1.0);
+    fn standalone_menus_preserve_the_original_surface_when_material_is_disabled() {
+        let base = ThemeColor {
+            background: gpui::hsla(0.1, 0.2, 0.3, 0.8),
+            popover: gpui::hsla(0.6, 0.4, 0.3, 0.7),
+            ..ThemeColor::default()
+        };
+        let menu = menu_colors(base, WindowMaterial::Disabled);
+
+        assert_eq!(menu.popover, base.popover);
+        assert_eq!(menu.background, base.background);
+    }
+
+    #[test]
+    fn material_preserves_text_borders_and_semantic_controls() {
+        let base = ThemeColor::default();
+        let colors = material_colors(base);
+
+        assert_eq!(colors.foreground, base.foreground);
+        assert_eq!(colors.muted_foreground, base.muted_foreground);
+        assert_eq!(colors.input, base.input);
+        assert_eq!(colors.border, base.border);
+        assert_eq!(colors.window_border, base.window_border);
+        assert_eq!(colors.primary, base.primary);
+        assert_eq!(colors.button_primary, base.button_primary);
+        assert_eq!(colors.switch, base.switch);
+        assert_eq!(colors.scrollbar_thumb, base.scrollbar_thumb);
+    }
+
+    #[test]
+    fn material_interaction_states_keep_authored_low_alpha() {
+        let base = ThemeColor {
+            list_hover: gpui::hsla(0.6, 0.5, 0.5, 0.16),
+            list_active: gpui::hsla(0.6, 0.5, 0.5, 0.12),
+            ..ThemeColor::default()
+        };
+        let colors = material_colors(base);
+
+        assert_eq!(colors.list_hover, base.list_hover);
+        assert_eq!(colors.list_active, base.list_active);
+        assert!(colors.button_active.alpha > colors.button_hover.alpha);
+        assert!(colors.button_hover.alpha > colors.button.alpha);
+    }
+
+    #[test]
+    fn window_opacity_only_controls_the_main_tint() {
+        let base = gpui::hsla(0.6, 0.4, 0.3, 1.0);
+        assert_eq!(material_window_color(base, 0.5), with_alpha(base, 0.5));
+        assert_eq!(material_window_color(base, 1.0), base);
+        assert_eq!(material_window_color(with_alpha(base, 0.8), 0.5).alpha, 0.4);
     }
 
     #[test]
     fn material_opacity_is_clamped_to_the_configured_range() {
-        let base = ThemeColor::default();
+        let base = gpui::hsla(0.6, 0.4, 0.3, 1.0);
+        let lowest = material_window_color(base, 0.0);
+        assert_eq!(lowest.alpha, WINDOW_MATERIAL_OPACITY_MIN);
 
-        let lowest = material_colors(base, 0.0);
-        assert_eq!(lowest.background.alpha, WINDOW_MATERIAL_OPACITY_MIN);
-
-        let highest = material_colors(base, 10.0);
-        assert_eq!(highest.background.alpha, WINDOW_MATERIAL_OPACITY_MAX);
+        let highest = material_window_color(base, 10.0);
+        assert_eq!(highest.alpha, WINDOW_MATERIAL_OPACITY_MAX);
     }
 }

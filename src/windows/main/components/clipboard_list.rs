@@ -1007,7 +1007,7 @@ fn render_tag_indicator(
         .rounded_sm()
         .border_1()
         .border_color(theme.border)
-        .bg(theme.background)
+        .bg(theme.popover)
         .text_size(ui_rem(10.0))
         .text_color(theme.foreground)
         .whitespace_nowrap()
@@ -1675,7 +1675,7 @@ fn render_item_surface<T>(
     let info_bar_background = if drag_preview {
         gpui::transparent_black()
     } else {
-        theme.secondary
+        theme.popover
     };
     let (hover_actions, action_count) = hover_actions
         .map(|(actions, count)| (Some(actions), count))
@@ -2978,7 +2978,7 @@ fn render_tag_item_drop_overlay(
         .items_center()
         .justify_center()
         .px(ui_rem(8.0))
-        .bg(gpui::ColorExt::opacity(&theme.background, 0.78))
+        .bg(gpui::ColorExt::opacity(&theme.popover, 0.78))
         .text_size(ui_rem(13.0))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(theme.foreground)

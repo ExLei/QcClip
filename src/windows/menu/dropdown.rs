@@ -105,7 +105,7 @@ impl DropdownMenuView {
         let max_height = logical_dropdown_max_height(window, cx, scale_factor, self.target_display);
         let measured_size = dropdown_shell(
             self.render_measurement_items(),
-            cx.theme().colors,
+            crate::window_material::menu_window_colors(cx),
             max_height,
             &self.scroll_handle,
             1.0,
@@ -292,7 +292,7 @@ impl Render for DropdownMenuView {
                     .child(
                         dropdown_shell(
                             self.render_items(cx),
-                            cx.theme().colors,
+                            crate::window_material::menu_window_colors(cx),
                             max_height,
                             &self.scroll_handle,
                             width,

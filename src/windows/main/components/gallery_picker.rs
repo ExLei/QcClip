@@ -200,7 +200,7 @@ pub(crate) fn render_gallery_import_overlay(
         .flex()
         .items_center()
         .justify_center()
-        .bg(gpui::ColorExt::opacity(&theme.background, 0.58))
+        .bg(gpui::ColorExt::opacity(&theme.popover, 0.58))
         .child(
             div()
                 .w(ui_rem(320.0))
@@ -211,7 +211,7 @@ pub(crate) fn render_gallery_import_overlay(
                 .items_center()
                 .gap(ui_rem(18.0))
                 .rounded_xl()
-                .bg(theme.background)
+                .bg(theme.popover)
                 .shadow_lg()
                 .child(icon("refresh", 44.0, theme.primary))
                 .child(
@@ -772,7 +772,7 @@ fn render_gallery_drop_target(
                         .px(ui_rem(28.0))
                         .py(ui_rem(16.0))
                         .rounded_xl()
-                        .bg(theme.background)
+                        .bg(theme.popover)
                         .shadow_lg()
                         .flex()
                         .items_center()

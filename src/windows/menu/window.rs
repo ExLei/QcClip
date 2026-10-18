@@ -214,7 +214,7 @@ impl MenuWindowView {
         let max_height = logical_menu_max_height(window, cx, scale_factor, self.target_display);
         menu_shell(
             self.render_items(cx),
-            cx.theme().colors,
+            crate::window_material::menu_window_colors(cx),
             max_height,
             self.level,
             &self.scroll_handle,
@@ -471,7 +471,7 @@ impl Render for MenuWindowView {
         self.place_window(measured_size, window, cx);
         let scale_factor = self.display_scale_factor(window);
         let max_height = logical_menu_max_height(window, cx, scale_factor, self.target_display);
-        let colors = cx.theme().colors;
+        let colors = crate::window_material::menu_window_colors(cx);
         let target_bounds = self.entrance.target_bounds();
         let menu = menu_shell(
             self.render_items(cx),

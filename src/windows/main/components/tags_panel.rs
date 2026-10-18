@@ -740,8 +740,14 @@ pub fn render(
         .relative()
         .overflow_hidden()
         .occlude()
-        .bg(theme.secondary)
-        .when(material_enabled, |this| this.backdrop_blur(px(18.0)))
+        .bg(if material_enabled && !sidebar_layout {
+            theme.popover
+        } else {
+            theme.secondary
+        })
+        .when(material_enabled && !sidebar_layout, |this| {
+            this.backdrop_blur(px(18.0))
+        })
         .border(px(0.5))
         .border_color(theme.border)
         .when(!material_enabled, |this| this.shadow_lg())
