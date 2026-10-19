@@ -14,7 +14,7 @@ use std::{
     cell::RefCell,
     cmp,
     ops::{Deref, Range},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 use gpui::{
@@ -384,17 +384,18 @@ fn update_reorderable_item_size_layout(
     gap: Pixels,
     items_count: usize,
 ) {
-    let identity = Rc::as_ptr(&item_sizes.state) as usize;
+    let identity = Rc::downgrade(&item_sizes.state);
+    let same_source = layout
+        .reorderable_sizes_identity
+        .as_ref()
+        .is_some_and(|previous| previous.ptr_eq(&identity));
     let mut source = item_sizes.state.borrow_mut();
-    if layout.reorderable_sizes_identity == identity
-        && layout.reorderable_sizes_version == source.version
-    {
+    let same_count = layout.sizes.len() == items_count && layout.origins.len() == items_count;
+    if same_source && same_count && layout.reorderable_sizes_version == source.version {
         return;
     }
 
-    let moved_range = if layout.reorderable_sizes_identity == identity
-        && layout.sizes.len() == items_count
-    {
+    let moved_range = if same_source && same_count {
         source.dirty_range.take()
     } else {
         None
@@ -417,7 +418,8 @@ fn update_reorderable_item_size_layout(
         source.dirty_range = None;
         rebuild_item_size_layout(layout, &source.values, axis, gap, items_count);
     }
-    layout.reorderable_sizes_identity = identity;
+    // 弱引用保留分配身份，避免旧数据释放后地址复用导致误命中缓存。
+    layout.reorderable_sizes_identity = Some(identity);
     layout.reorderable_sizes_version = source.version;
 }
 
@@ -557,7 +559,7 @@ pub struct VirtualListFrameState {
 #[derive(Default, Clone)]
 pub struct ItemSizeLayout {
     items_sizes: Rc<Vec<Size<Pixels>>>,
-    reorderable_sizes_identity: usize,
+    reorderable_sizes_identity: Option<Weak<RefCell<ReorderableVirtualListSizesState>>>,
     reorderable_sizes_version: u64,
     content_size: Size<Pixels>,
     sizes: Vec<Pixels>,
@@ -656,11 +658,11 @@ impl Element for VirtualList {
                                 gap,
                                 self.items_count,
                             );
-                        } else if state.reorderable_sizes_identity != 0
+                        } else if state.reorderable_sizes_identity.is_some()
                             || state.items_sizes != self.item_sizes
                         {
                             state.items_sizes = self.item_sizes.clone();
-                            state.reorderable_sizes_identity = 0;
+                            state.reorderable_sizes_identity = None;
                             state.reorderable_sizes_version = 0;
                             rebuild_item_size_layout(
                                 &mut state,
@@ -1164,5 +1166,35 @@ mod tests {
 
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(visible_ranges.borrow().is_empty());
+    }
+
+    #[test]
+    fn replacing_reorderable_sizes_rebuilds_layout_after_source_is_dropped() {
+        let mut layout = ItemSizeLayout::default();
+        for round in 0..128 {
+            for (step, count) in [4, 8, 2, 0, 6, 6].into_iter().enumerate() {
+                let height = px(20. + round as f32 + step as f32);
+                let values = ReorderableVirtualListSizes::new(vec![size(px(10.), height); count]);
+                update_reorderable_item_size_layout(
+                    &mut layout,
+                    &values,
+                    Axis::Vertical,
+                    px(3.),
+                    count,
+                );
+                assert_eq!(layout.sizes.len(), count, "替换数据后行高数量必须同步");
+                assert_eq!(layout.origins.len(), count, "替换数据后行坐标数量必须同步");
+                let mut expected_origin = px(0.);
+                for index in 0..count {
+                    assert_eq!(layout.origins[index], expected_origin);
+                    expected_origin += height;
+                    if index + 1 < count {
+                        expected_origin += px(3.);
+                    }
+                }
+                assert_eq!(layout.content_size.height, expected_origin);
+                drop(values);
+            }
+        }
     }
 }
