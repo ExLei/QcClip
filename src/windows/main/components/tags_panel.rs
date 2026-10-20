@@ -196,6 +196,7 @@ fn action_button(
         "filter" => 2_u32,
         "refresh" => 4_u32,
         "versions-off" => 5_u32,
+        "checks" => 6_u32,
         _ => 3_u32,
     };
     let color = if active {
@@ -230,6 +231,10 @@ fn action_button(
     } else if name == "filter" {
         button = button.on_click(cx.listener(|this, _, _, cx| {
             this.toggle_tags_match_mode(cx);
+        }));
+    } else if name == "checks" {
+        button = button.on_click(cx.listener(|this, _, _, cx| {
+            this.toggle_tags_multi_select(cx);
         }));
     } else if name == "refresh" {
         button = button.on_click(cx.listener(|this, _, _, cx| {
@@ -613,7 +618,9 @@ pub fn render(
 
     let theme = cx.theme().colors;
     let tags_panel_pinned = main.tags_panel_pinned;
-    let clear_tags_on_tab_switch = config_runtime::clipboard_config(cx).clear_tags_on_tab_switch;
+    let clipboard = config_runtime::clipboard_config(cx);
+    let clear_tags_on_tab_switch = clipboard.clear_tags_on_tab_switch;
+    let tags_multi_select = clipboard.tags_multi_select;
     let appearance = config_runtime::appearance_config(cx);
     let titlebar_position = appearance.titlebar_position;
     let material_enabled = appearance.window_material != WindowMaterial::Disabled;
@@ -875,6 +882,17 @@ pub fn render(
                             "settings",
                             translator.translate("main.tags.manage"),
                             false,
+                            theme,
+                            cx,
+                        ))
+                        .child(action_button(
+                            "checks",
+                            translator.translate(if tags_multi_select {
+                                "main.tags.multi_select_enabled"
+                            } else {
+                                "main.tags.multi_select_disabled"
+                            }),
+                            tags_multi_select,
                             theme,
                             cx,
                         ))

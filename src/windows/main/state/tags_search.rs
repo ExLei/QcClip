@@ -1,5 +1,15 @@
 use super::*;
 
+fn toggle_tag_selection(selected_tag_ids: &mut HashSet<i64>, tag_id: i64, multi_select: bool) {
+    let was_selected = selected_tag_ids.remove(&tag_id);
+    if !multi_select {
+        selected_tag_ids.clear();
+    }
+    if !was_selected {
+        selected_tag_ids.insert(tag_id);
+    }
+}
+
 impl MainWindow {
     pub(crate) fn refresh_tags(&mut self, cx: &mut Context<Self>) {
         self.tags_query_generation = self.tags_query_generation.wrapping_add(1);
@@ -218,9 +228,11 @@ impl MainWindow {
     }
 
     pub(crate) fn select_tag(&mut self, tag_id: i64, cx: &mut Context<Self>) {
-        if !self.selected_tag_ids.insert(tag_id) {
-            self.selected_tag_ids.remove(&tag_id);
-        }
+        toggle_tag_selection(
+            &mut self.selected_tag_ids,
+            tag_id,
+            crate::config_runtime::clipboard_config(cx).tags_multi_select,
+        );
         self.refresh_history(cx);
     }
 
@@ -836,6 +848,27 @@ impl MainWindow {
         }
     }
 
+    pub(crate) fn toggle_tags_multi_select(&mut self, cx: &mut Context<Self>) {
+        let mut clipboard = crate::config_runtime::clipboard_config(cx);
+        clipboard.tags_multi_select = !clipboard.tags_multi_select;
+        let multi_select = clipboard.tags_multi_select;
+        if let Err(error) = crate::config_runtime::set_clipboard_config(clipboard, cx) {
+            tracing::error!("保存标签选择模式失败：{error}");
+            return;
+        }
+        if !multi_select && self.selected_tag_ids.len() > 1 {
+            let retained_tag = self
+                .tags
+                .iter()
+                .find(|tag| self.selected_tag_ids.contains(&tag.id))
+                .map(|tag| tag.id);
+            self.selected_tag_ids.retain(|id| Some(*id) == retained_tag);
+            self.refresh_history(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
     pub(crate) fn reset_tag_selection(&mut self, cx: &mut Context<Self>) {
         if self.selected_tag_ids.is_empty() {
             return;
@@ -869,5 +902,43 @@ impl MainWindow {
             })
             .ok();
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toggle_tag_selection;
+    use std::collections::HashSet;
+
+    #[test]
+    fn tags_multi_selection_adds_and_removes_only_the_clicked_tag() {
+        let mut selected = HashSet::new();
+        toggle_tag_selection(&mut selected, 1, true);
+        toggle_tag_selection(&mut selected, 2, true);
+        assert_eq!(selected, HashSet::from([1, 2]));
+        toggle_tag_selection(&mut selected, 1, true);
+        assert_eq!(selected, HashSet::from([2]));
+    }
+
+    #[test]
+    fn tags_single_selection_replaces_the_previous_tag_and_can_be_cleared() {
+        let mut selected = HashSet::new();
+        toggle_tag_selection(&mut selected, 1, false);
+        assert_eq!(selected, HashSet::from([1]));
+        toggle_tag_selection(&mut selected, 2, false);
+        assert_eq!(selected, HashSet::from([2]));
+        toggle_tag_selection(&mut selected, 2, false);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn tags_single_selection_clears_multiple_previous_selections() {
+        let mut selected = HashSet::from([1, 2]);
+        toggle_tag_selection(&mut selected, 3, false);
+        assert_eq!(selected, HashSet::from([3]));
+
+        selected.insert(2);
+        toggle_tag_selection(&mut selected, 2, false);
+        assert!(selected.is_empty());
     }
 }

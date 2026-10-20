@@ -610,6 +610,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.clear_tags_on_tab_switch,
             warnings,
         ),
+        tags_multi_select: read_field(
+            object,
+            "tagsMultiSelect",
+            "clipboard.tagsMultiSelect",
+            default.tags_multi_select,
+            warnings,
+        ),
         window_position: read_field(
             object,
             "windowPosition",
@@ -903,6 +910,37 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tags_selection_mode_defaults_to_multi_select_and_round_trips() {
+        for content in ["{}", r#"{"clipboard":{"clearTagsOnTabSwitch":true}}"#] {
+            let loaded = super::from_str(content).expect("无法读取旧版标签配置");
+            assert!(loaded.config.clipboard.tags_multi_select);
+            assert!(loaded.warnings.is_empty());
+        }
+
+        for multi_select in [false, true] {
+            let loaded = super::from_str(&format!(
+                r#"{{"clipboard":{{"tagsMultiSelect":{multi_select}}}}}"#,
+            ))
+            .expect("无法读取标签选择模式");
+            assert_eq!(loaded.config.clipboard.tags_multi_select, multi_select);
+            assert!(loaded.warnings.is_empty());
+            let saved = serde_json::to_string(&loaded.config).expect("无法保存标签选择模式");
+            assert_eq!(
+                super::from_str(&saved)
+                    .expect("无法重新读取标签选择模式")
+                    .config,
+                loaded.config,
+            );
+        }
+
+        let invalid = super::from_str(r#"{"clipboard":{"tagsMultiSelect":"false"}}"#)
+            .expect("无法读取字段无效的标签配置");
+        assert!(invalid.config.clipboard.tags_multi_select);
+        assert_eq!(invalid.warnings.len(), 1);
+        assert!(invalid.warnings[0].contains("clipboard.tagsMultiSelect"));
+    }
+
     #[test]
     fn history_cleanup_on_startup_round_trips_and_defaults_to_disabled() {
         for content in ["{}", r#"{"history":{"retentionDays":7,"maxItems":100}}"#] {

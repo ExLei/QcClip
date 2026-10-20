@@ -139,6 +139,8 @@
   "main.tags.manager.search_empty": "没有匹配的标签",
   "main.tags.pin": "固定标签面板",
   "main.tags.reset_selection": "重置所有选择",
+  "main.tags.multi_select_enabled": "当前为多选，点击切换为单选",
+  "main.tags.multi_select_disabled": "当前为单选，点击切换为多选",
   "main.tags.clear_on_tab_switch_enabled": "切换页面时清空选择（已开启，点击关闭）",
   "main.tags.clear_on_tab_switch_disabled": "切换页面时清空选择（已关闭，点击开启）",
   "main.tags.switch_to_any": "切换为匹配任意标签（OR）",

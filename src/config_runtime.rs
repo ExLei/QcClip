@@ -904,6 +904,19 @@ mod tests {
     }
 
     #[test]
+    fn tags_selection_mode_is_persisted_when_toggling_both_ways() {
+        let directory = tempdir().expect("无法创建临时目录");
+        let path = directory.path().join("config.json");
+        let mut config = AppConfig::default();
+
+        for multi_select in [false, true] {
+            config.clipboard.tags_multi_select = multi_select;
+            persist_config(&path, &config).expect("标签选择模式保存失败");
+            assert_eq!(load_config(&path), config);
+        }
+    }
+
+    #[test]
     fn saving_preserves_unknown_fields_values_and_future_version() {
         let directory = tempdir().expect("无法创建临时目录");
         let path = directory.path().join("config.json");

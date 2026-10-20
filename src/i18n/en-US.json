@@ -139,6 +139,8 @@
   "main.tags.manager.search_empty": "No matching tags",
   "main.tags.pin": "Pin tags panel",
   "main.tags.reset_selection": "Reset all selections",
+  "main.tags.multi_select_enabled": "Multiple selection enabled, click to switch to single selection",
+  "main.tags.multi_select_disabled": "Single selection enabled, click to switch to multiple selection",
   "main.tags.clear_on_tab_switch_enabled": "Clear tag selections when switching pages (on, click to disable)",
   "main.tags.clear_on_tab_switch_disabled": "Clear tag selections when switching pages (off, click to enable)",
   "main.tags.switch_to_any": "Match any tag (OR)",
