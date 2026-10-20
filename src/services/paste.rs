@@ -251,15 +251,19 @@ impl PasteService {
         move_to_first: Option<PasteOrderTarget>,
     ) -> Result<(), PasteError> {
         let connection = self.database.connect()?;
-        let payload = self
-            .load_payloads(&connection, item_id)?
-            .into_iter()
+        let payloads = self.load_payloads(&connection, item_id)?;
+        let Some(payload) = payloads
+            .iter()
             .filter(|payload| {
                 payload_role(payload) == FormatRole::PlainText
                     && !decode_text_payload(payload).trim().is_empty()
             })
-            .min_by_key(plain_text_payload_priority)
-            .ok_or(PasteError::NoRestorableFormat)?;
+            .min_by_key(|payload| plain_text_payload_priority(payload))
+            .cloned()
+        else {
+            drop(connection);
+            return self.paste_item(item_id, move_to_first);
+        };
 
         paste_into_active_window(&[payload], &self.clipboard_write_suppressor)
             .map_err(PasteError::Clipboard)?;

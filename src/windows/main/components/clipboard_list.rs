@@ -2565,6 +2565,8 @@ fn render_row(
                             format_key.clone(),
                             cx,
                         );
+                    } else {
+                        this.paste_item(item_id, cx);
                     }
                 }
                 ClipboardMouseMiddleBehavior::SelectItem => {
