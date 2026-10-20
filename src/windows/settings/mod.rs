@@ -810,6 +810,12 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Personalization,
+            title_key: "settings.personalization.preview_information",
+            description_key: Some("settings.personalization.preview_information_description"),
+            ratio: 0.30,
+        },
+        SearchTargetSpec {
+            page: Personalization,
             title_key: "settings.personalization.animations",
             description_key: Some("settings.personalization.animations_description"),
             ratio: 0.31,

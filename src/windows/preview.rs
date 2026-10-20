@@ -13,7 +13,7 @@ use gpui::{
 use gpui_component::ActiveTheme as _;
 
 use crate::{
-    config::ClipboardDisplayPriority,
+    config::{ClipboardDisplayPriority, PreviewInformationField},
     domain::{
         capture::FormatRole,
         clipboard::{
@@ -1422,7 +1422,7 @@ impl PreviewWindow {
         image_display_percentage: Option<f32>,
         window: &Window,
         cx: &App,
-    ) -> (AnyElement, Size<f32>) {
+    ) -> Option<(AnyElement, Size<f32>)> {
         let theme = crate::window_material::excluded_window_theme(cx);
         let translator = i18n::translator(cx);
         let ui_scale = crate::ui::scale::window_scale(window);
@@ -1435,6 +1435,7 @@ impl PreviewWindow {
             .unwrap_or(22.0 * ui_scale);
         let gap = 6.0 * ui_scale;
         let chip_padding = 6.0 * ui_scale;
+        let information = crate::config_runtime::preview_information_config(cx);
         let mut rows = Vec::new();
         if let Some(preview) = self.current_preview() {
             if self.mode == Some(PreviewMode::Image) {
@@ -1446,7 +1447,11 @@ impl PreviewWindow {
                         image_source_byte_length(preview.image_source.as_ref())
                     }
                 });
-                let size_label = if file_image { "file_size" } else { "raw_size" };
+                let size_label = if file_image {
+                    PreviewInformationField::FileSize
+                } else {
+                    PreviewInformationField::RawSize
+                };
                 let size = byte_length
                     .map(|bytes| {
                         let formatted = i18n::file_size(&translator, Some(bytes), false);
@@ -1468,32 +1473,47 @@ impl PreviewWindow {
                     let zoom = image_display_percentage
                         .map(|value| format!(" · {value:.0}%"))
                         .unwrap_or_default();
-                    rows.push(("dimensions", format!("{width} × {height} px{zoom}")));
+                    rows.push((
+                        PreviewInformationField::Dimensions,
+                        format!("{width} × {height} px{zoom}"),
+                    ));
                 }
                 if let Some(path) = &self.image_source_path {
                     rows.push((
-                        "name",
+                        PreviewInformationField::Name,
                         path.file_name()
                             .unwrap_or_default()
                             .to_string_lossy()
                             .into_owned(),
                     ));
-                    rows.push(("path", path.to_string_lossy().into_owned()));
+                    rows.push((
+                        PreviewInformationField::Path,
+                        path.to_string_lossy().into_owned(),
+                    ));
                 }
             } else if self.mode == Some(PreviewMode::File) {
-                rows.push(("files", self.file_entries.len().to_string()));
+                rows.push((
+                    PreviewInformationField::Files,
+                    self.file_entries.len().to_string(),
+                ));
                 let total_size = self
                     .file_entries
                     .iter()
                     .filter_map(|entry| entry.size)
                     .sum::<u64>();
                 rows.push((
-                    "known_size",
+                    PreviewInformationField::KnownSize,
                     i18n::file_size(&translator, Some(total_size), false),
                 ));
             } else {
-                rows.push(("characters", preview.char_count.to_string()));
-                rows.push(("lines", preview.text.split('\n').count().to_string()));
+                rows.push((
+                    PreviewInformationField::Characters,
+                    preview.char_count.to_string(),
+                ));
+                rows.push((
+                    PreviewInformationField::Lines,
+                    preview.text.split('\n').count().to_string(),
+                ));
             }
             let format = self
                 .image_source_path
@@ -1508,24 +1528,27 @@ impl PreviewWindow {
                     )
                 })
                 .unwrap_or_else(|| preview.format_name.clone());
-            rows.push(("format", format));
+            rows.push((PreviewInformationField::Format, format));
         }
         if let Some(item) = &self.item {
             rows.push((
-                "source",
+                PreviewInformationField::Source,
                 item.source_app_name
                     .clone()
                     .unwrap_or_else(|| translator.translate("main.source.unknown")),
             ));
             if let Some(time) = chrono::DateTime::from_timestamp_millis(item.last_seen_at) {
                 rows.push((
-                    "captured_at",
+                    PreviewInformationField::CapturedAt,
                     time.with_timezone(&chrono::Local)
                         .format("%Y-%m-%d %H:%M:%S")
                         .to_string(),
                 ));
             }
-            rows.push(("paste_count", item.paste_count.to_string()));
+            rows.push((
+                PreviewInformationField::PasteCount,
+                item.paste_count.to_string(),
+            ));
             let mut states = Vec::new();
             if item.is_pinned {
                 states.push(translator.translate("main.preview.info.pinned"));
@@ -1540,7 +1563,7 @@ impl PreviewWindow {
                 ));
             }
             if !states.is_empty() {
-                rows.push(("status", states.join(" · ")));
+                rows.push((PreviewInformationField::Status, states.join(" · ")));
             }
         }
         let modes = self.previews.iter().filter_map(mode_for_preview).fold(
@@ -1554,7 +1577,7 @@ impl PreviewWindow {
         );
         if modes.len() > 1 {
             rows.push((
-                "available_formats",
+                PreviewInformationField::AvailableFormats,
                 modes
                     .iter()
                     .map(|mode| mode.label(&translator))
@@ -1563,29 +1586,38 @@ impl PreviewWindow {
             ));
         }
         let mut hints = Vec::new();
-        if self.mode == Some(PreviewMode::Image) {
+        if self.mode == Some(PreviewMode::Image)
+            && information.enabled(PreviewInformationField::ZoomHint)
+        {
             hints.push(translator.translate("main.preview.zoom_hint"));
         }
-        if self.content_scrollable {
+        if self.content_scrollable && information.enabled(PreviewInformationField::ScrollHint) {
             hints.push(translator.translate("main.preview.scroll_hint"));
         }
-        if modes.len() > 1 {
+        if modes.len() > 1 && information.enabled(PreviewInformationField::SwitchFormatHint) {
             hints.push(translator.translate("main.preview.switch_format_hint"));
         }
         let mut fields = Vec::new();
-        if let Some(mode) = self.mode {
+        if let Some(mode) = self
+            .mode
+            .filter(|_| information.enabled(PreviewInformationField::ContentType))
+        {
             fields.push((mode.label(&translator), false));
         }
-        fields.extend(rows.into_iter().map(|(key, value)| {
-            (
-                format!(
-                    "{}：{value}",
-                    translator.translate(&format!("main.preview.info.{key}"))
-                ),
-                false,
-            )
-        }));
+        fields.extend(
+            rows.into_iter()
+                .filter(|(field, _)| information.enabled(*field))
+                .map(|(field, value)| {
+                    (
+                        format!("{}：{value}", translator.translate(field.label_key())),
+                        false,
+                    )
+                }),
+        );
         fields.extend(hints.into_iter().map(|hint| (hint, true)));
+        if fields.is_empty() {
+            return None;
+        }
         let mut style = window.text_style();
         style.font_family = cx.theme().font_family.clone();
         let field_widths = fields
@@ -1652,7 +1684,7 @@ impl PreviewWindow {
             .overflow_hidden()
             .child(content)
             .into_any_element();
-        (strip, size(width, height))
+        Some((strip, size(width, height)))
     }
 }
 
@@ -2099,8 +2131,13 @@ impl Render for PreviewWindow {
                 if width < (PREVIEW_INFO_MIN_WIDTH * ui_scale).min(viewport.width) {
                     continue;
                 }
-                let (strip, strip_size) =
-                    self.render_information(width, align_end, image_display_percentage, window, cx);
+                let (strip, strip_size) = self.render_information(
+                    width,
+                    align_end,
+                    image_display_percentage,
+                    window,
+                    cx,
+                )?;
                 let Some(rect) = information_rect(preview_rect, area, strip_size, align_end) else {
                     continue;
                 };

@@ -3,12 +3,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 mod item_display;
 pub mod load;
 mod notification;
+mod preview_information;
 mod tab_bar;
 
 pub use item_display::{
     ItemDisplayConfig, ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility,
 };
 pub use notification::{NotificationConfig, NotificationKind, NotificationPosition};
+pub use preview_information::{PreviewInformationConfig, PreviewInformationField};
 pub use tab_bar::{TabBarButton, TabBarButtonGroup, TabBarLayout, TabBarSection};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -1409,6 +1411,7 @@ pub struct AppearanceConfig {
     pub adaptive_max_lines: u8,
     pub only_show_notes: bool,
     pub item_display: ItemDisplayConfig,
+    pub preview_information: PreviewInformationConfig,
 }
 
 impl Default for AppearanceConfig {
@@ -1434,6 +1437,7 @@ impl Default for AppearanceConfig {
             adaptive_max_lines: ADAPTIVE_MAX_LINES_DEFAULT,
             only_show_notes: false,
             item_display: ItemDisplayConfig::default(),
+            preview_information: PreviewInformationConfig::default(),
         }
     }
 }

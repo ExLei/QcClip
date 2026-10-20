@@ -8,14 +8,14 @@ use super::super::SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH;
 use super::super::{
     SettingsWindowView,
     components::{
-        clickable_setting_row, compact_clickable_setting_row, setting_row, settings_dropdown,
-        settings_dropdown_with_font, settings_error_row, settings_page_header,
+        clickable_setting_row, compact_clickable_setting_row, compact_setting_row, setting_row,
+        settings_dropdown, settings_dropdown_with_font, settings_error_row, settings_page_header,
     },
 };
 use crate::{
     config::{
         AnimationConfig, AppearanceConfig, AppearanceMode, CardItemGap, ListItemHeight,
-        ListItemStyle, TitlebarPosition, WindowMaterial,
+        ListItemStyle, PreviewInformationField, TitlebarPosition, WindowMaterial,
     },
     config_runtime, i18n,
     ui::theme::{ThemeOption, available_theme_options},
@@ -675,6 +675,21 @@ impl SettingsWindowView {
                     },
                 ),
             ))
+            .child(self.highlight_element(
+                theme,
+                translator.translate("settings.personalization.preview_information"),
+                compact_clickable_setting_row(
+                    "settings-preview-information",
+                    theme,
+                    translator.translate("settings.personalization.preview_information"),
+                    {
+                        let view = view.clone();
+                        move |_, window, cx| {
+                            open_preview_information_sheet(view.clone(), window, cx)
+                        }
+                    },
+                ),
+            ))
             .child(
                 self.highlight_element(
                     theme,
@@ -785,6 +800,91 @@ impl SettingsWindowView {
         }
         section.into_any_element()
     }
+}
+
+fn open_preview_information_sheet(
+    view: Entity<SettingsWindowView>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let save_error = i18n::translator(cx).translate("settings.personalization.save_error");
+    window.open_sheet(cx, move |sheet, _, cx| {
+        let theme = cx.theme().colors;
+        let translator = i18n::translator(cx);
+        let information = config_runtime::preview_information_config(cx);
+        let appearance = config_runtime::appearance_config(cx);
+        let background = gpui::ColorExt::opacity(
+            &crate::window_material::excluded_window_theme(cx).background,
+            0.9,
+        );
+        let mut controls = h_flex().w_full().flex_shrink_0().gap_2().pb_2();
+        for (enabled, action) in [(true, "enable_all"), (false, "disable_all")] {
+            controls = controls.child(
+                Button::new(format!("settings-preview-information-{action}"))
+                    .small()
+                    .label(translator.translate(&format!(
+                        "settings.personalization.preview_information.{action}"
+                    )))
+                    .on_click({
+                        let view = view.clone();
+                        let save_error = save_error.clone();
+                        move |_, _, cx| {
+                            persist_appearance_change(
+                                view.clone(),
+                                "预览信息展示",
+                                move |appearance| {
+                                    appearance.preview_information.fields = if enabled {
+                                        PreviewInformationField::ALL.to_vec()
+                                    } else {
+                                        Vec::new()
+                                    };
+                                },
+                                save_error.clone(),
+                                cx,
+                            );
+                        }
+                    }),
+            );
+        }
+        let mut content = v_flex()
+            .size_full()
+            .min_h_0()
+            .overflow_y_scrollbar()
+            .child(controls);
+        for field in PreviewInformationField::ALL {
+            let label = translator.translate(field.label_key());
+            let switch = Switch::new(format!("settings-preview-information-{}", field.key()))
+                .checked(information.enabled(field))
+                .accessibility_label(label.clone())
+                .on_click({
+                    let view = view.clone();
+                    let save_error = save_error.clone();
+                    move |checked, _, cx| {
+                        persist_appearance_change(
+                            view.clone(),
+                            "预览信息展示",
+                            move |appearance| {
+                                appearance.preview_information.set_enabled(field, *checked)
+                            },
+                            save_error.clone(),
+                            cx,
+                        );
+                    }
+                });
+            content = content.child(compact_setting_row(theme, label, switch));
+        }
+        sheet
+            .title(translator.translate("settings.personalization.preview_information"))
+            .size(ui_rem(420.0))
+            .resizable(false)
+            .shadow_none()
+            .bg(background)
+            .when(
+                appearance.window_material != WindowMaterial::Disabled,
+                |this| this.backdrop_blur(px(18.0)),
+            )
+            .child(content)
+    });
 }
 
 fn open_animations_sheet(view: Entity<SettingsWindowView>, window: &mut Window, cx: &mut App) {

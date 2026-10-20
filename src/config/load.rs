@@ -445,6 +445,13 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
             default.only_show_notes,
             warnings,
         ),
+        preview_information: read_field(
+            object,
+            "previewInformation",
+            "appearance.previewInformation",
+            default.preview_information,
+            warnings,
+        ),
         item_display: read_group(object, "itemDisplay", warnings, |object, warnings| {
             let default = super::ItemDisplayConfig::default();
             super::ItemDisplayConfig {
@@ -1532,5 +1539,41 @@ mod tests {
             })
         );
         assert!(shortcut.only_in_window);
+    }
+
+    #[test]
+    fn preview_information_defaults_and_selection_survive_loading() {
+        use crate::config::PreviewInformationField;
+
+        let mut loaded = from_str(r#"{"appearance":{}}"#).expect("应当可以加载旧配置");
+        assert!(
+            PreviewInformationField::ALL.into_iter().all(|field| loaded
+                .config
+                .appearance
+                .preview_information
+                .enabled(field))
+        );
+        let info = &mut loaded.config.appearance.preview_information;
+        info.set_enabled(PreviewInformationField::Source, false);
+        info.set_enabled(PreviewInformationField::ZoomHint, false);
+        let json = serde_json::to_string(&loaded.config).expect("应当可以保存预览信息配置");
+        let saved: serde_json::Value = serde_json::from_str(&json).expect("应当可以读取保存的配置");
+        assert!(saved["appearance"].get("previewInformation").is_some());
+        assert!(saved["clipboard"].get("previewInformation").is_none());
+        let restored = from_str(&json).expect("应当可以重新加载预览信息配置");
+        assert_eq!(
+            loaded.config.appearance.preview_information,
+            restored.config.appearance.preview_information
+        );
+        assert!(restored.warnings.is_empty());
+        let empty = from_str(r#"{"appearance":{"previewInformation":{"fields":[]}}}"#)
+            .expect("应当允许关闭全部预览信息");
+        assert!(
+            PreviewInformationField::ALL.into_iter().all(|field| !empty
+                .config
+                .appearance
+                .preview_information
+                .enabled(field))
+        );
     }
 }

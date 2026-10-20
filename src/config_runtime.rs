@@ -13,8 +13,8 @@ use crate::{
     config::{
         AnimationKind, AppConfig, AppearanceConfig, ApplicationFilterConfig, ClipboardConfig,
         HistoryConfig, InterfaceLanguage, NotificationConfig, NotificationKind,
-        NotificationPosition, QuickPasteConfig, ShortcutBinding, ShortcutsConfig, SoundConfig,
-        WindowMaterial, default_window_material_opacity,
+        NotificationPosition, PreviewInformationConfig, QuickPasteConfig, ShortcutBinding,
+        ShortcutsConfig, SoundConfig, WindowMaterial, default_window_material_opacity,
     },
     i18n::{self, Locale},
 };
@@ -283,6 +283,12 @@ pub(crate) fn animation_enabled(cx: &App, kind: AnimationKind) -> bool {
 
 pub(crate) fn clipboard_config(cx: &App) -> ClipboardConfig {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.clipboard.clone())
+}
+
+pub(crate) fn preview_information_config(cx: &App) -> PreviewInformationConfig {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| {
+        runtime.config.appearance.preview_information.clone()
+    })
 }
 
 pub(crate) fn hover_preview_enabled(cx: &App) -> bool {
@@ -586,6 +592,8 @@ fn apply_appearance_change(previous: &AppearanceConfig, current: &AppearanceConf
         if background_image_needs_refresh(previous, current) {
             crate::window_material::refresh_background_image(cx);
         }
+    } else if previous.preview_information != current.preview_information {
+        cx.refresh_windows();
     } else {
         // 调用方会更新设置窗口，这里只额外让主窗口视图失效。
         crate::windows::main::MainWindowService::notify_main_view(cx);
