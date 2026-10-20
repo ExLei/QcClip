@@ -6,7 +6,7 @@ use std::{
 };
 
 use image::{DynamicImage, ImageFormat};
-use tempfile::{Builder, NamedTempFile};
+use tempfile::{Builder, TempPath};
 
 use crate::domain::capture::{FormatKind, FormatRole, classify_format_role};
 use crate::platform::clipboard::ClipboardPayload;
@@ -21,7 +21,7 @@ struct RetainedImageFile {
 }
 
 pub(crate) struct ImageTempFile {
-    file: NamedTempFile,
+    path: TempPath,
 }
 
 impl ImageTempFile {
@@ -38,11 +38,13 @@ impl ImageTempFile {
         file.as_file_mut()
             .flush()
             .map_err(|error| format!("刷新图片临时文件失败：{error}"))?;
-        Ok(Self { file })
+        Ok(Self {
+            path: file.into_temp_path(),
+        })
     }
 
     pub(crate) fn path(&self) -> &Path {
-        self.file.path()
+        &self.path
     }
 }
 
@@ -269,4 +271,33 @@ fn normalize_dib_v5(bytes: &[u8]) -> Option<Vec<u8>> {
     }
     normalized.extend_from_slice(&bytes[V5_HEADER_SIZE..]);
     Some(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs::OpenOptions, io::Cursor, os::windows::fs::OpenOptionsExt};
+
+    use image::{DynamicImage, ImageFormat};
+
+    use super::ImageTempFile;
+
+    #[test]
+    fn image_temp_file_allows_exclusive_read_and_removes_on_drop() {
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .expect("生成测试图片失败");
+        let file = ImageTempFile::from_bytes(bytes.get_ref(), "png").expect("创建图片临时文件失败");
+        let path = file.path().to_path_buf();
+
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .expect("临时图片应允许目标程序独占打开");
+        assert!(reader.metadata().expect("读取图片属性失败").len() > 0);
+        drop(reader);
+        drop(file);
+        assert!(!path.exists());
+    }
 }
