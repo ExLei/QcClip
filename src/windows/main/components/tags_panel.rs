@@ -752,7 +752,9 @@ pub fn render(
         } else {
             theme.secondary
         };
-        background.alpha = 0.5;
+        if material_enabled {
+            background.alpha = 0.5;
+        }
         background
     };
 
