@@ -1323,6 +1323,78 @@ fn is_resize_hit_test_value(hit_test: isize) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ResizeEdgeRestrictions {
+    left: bool,
+    right: bool,
+    top: bool,
+    bottom: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn filter_resize_hit_test_value(hit_test: isize, restrictions: ResizeEdgeRestrictions) -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
+        HTTOPRIGHT,
+    };
+
+    let hit_test = hit_test as u32;
+    match hit_test {
+        HTLEFT if restrictions.left => HTCLIENT as isize,
+        HTRIGHT if restrictions.right => HTCLIENT as isize,
+        HTTOP if restrictions.top => HTCLIENT as isize,
+        HTBOTTOM if restrictions.bottom => HTCLIENT as isize,
+        HTTOPLEFT => filter_corner_hit_test(
+            restrictions.left,
+            restrictions.top,
+            HTLEFT,
+            HTTOP,
+            HTTOPLEFT,
+        ),
+        HTTOPRIGHT => filter_corner_hit_test(
+            restrictions.right,
+            restrictions.top,
+            HTRIGHT,
+            HTTOP,
+            HTTOPRIGHT,
+        ),
+        HTBOTTOMLEFT => filter_corner_hit_test(
+            restrictions.left,
+            restrictions.bottom,
+            HTLEFT,
+            HTBOTTOM,
+            HTBOTTOMLEFT,
+        ),
+        HTBOTTOMRIGHT => filter_corner_hit_test(
+            restrictions.right,
+            restrictions.bottom,
+            HTRIGHT,
+            HTBOTTOM,
+            HTBOTTOMRIGHT,
+        ),
+        _ => hit_test as isize,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn filter_corner_hit_test(
+    first_restricted: bool,
+    second_restricted: bool,
+    first_hit_test: u32,
+    second_hit_test: u32,
+    corner_hit_test: u32,
+) -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::HTCLIENT;
+
+    match (first_restricted, second_restricted) {
+        (true, true) => HTCLIENT as isize,
+        (true, false) => second_hit_test as isize,
+        (false, true) => first_hit_test as isize,
+        (false, false) => corner_hit_test as isize,
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn is_native_resize_mouse_down(message: u32, hit_test: isize) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN};
 
@@ -1395,6 +1467,96 @@ mod window_resize_hit_test_tests {
         assert!(!super::is_resize_hit_test_value(HTNOWHERE as isize));
         assert!(!super::is_resize_hit_test_value(HTCLIENT as isize));
         assert!(!super::is_resize_hit_test_value(HTCAPTION as isize));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn screen_facing_resize_edges_are_filtered_by_window_position() {
+        use windows::Win32::{
+            Foundation::RECT,
+            UI::WindowsAndMessaging::{
+                HTBOTTOM, HTBOTTOMLEFT, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
+            },
+        };
+
+        let monitor = RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let left_window = RECT {
+            left: 0,
+            top: 200,
+            right: 500,
+            bottom: 800,
+        };
+        let left_restrictions =
+            super::resize_edge_restrictions_for_rect(left_window, monitor, &[monitor]);
+        assert!(left_restrictions.left);
+        assert!(!left_restrictions.right);
+        assert_eq!(
+            super::filter_resize_hit_test_value(HTLEFT as isize, left_restrictions),
+            HTCLIENT as isize
+        );
+        assert_eq!(
+            super::filter_resize_hit_test_value(HTTOPLEFT as isize, left_restrictions),
+            HTTOP as isize
+        );
+
+        let bottom_window = RECT {
+            left: 600,
+            top: 500,
+            right: 1200,
+            bottom: 1080,
+        };
+        let bottom_restrictions =
+            super::resize_edge_restrictions_for_rect(bottom_window, monitor, &[monitor]);
+        assert!(bottom_restrictions.bottom);
+        assert_eq!(
+            super::filter_resize_hit_test_value(HTBOTTOM as isize, bottom_restrictions),
+            HTCLIENT as isize
+        );
+        assert_eq!(
+            super::filter_resize_hit_test_value(HTBOTTOMLEFT as isize, bottom_restrictions),
+            HTLEFT as isize
+        );
+        assert_eq!(
+            super::filter_resize_hit_test_value(HTRIGHT as isize, bottom_restrictions),
+            HTRIGHT as isize
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn internal_monitor_edges_remain_resizable() {
+        use windows::Win32::Foundation::RECT;
+
+        let left_monitor = RECT {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let right_monitor = RECT {
+            left: 1920,
+            top: 0,
+            right: 3840,
+            bottom: 1080,
+        };
+        let window = RECT {
+            left: 1420,
+            top: 200,
+            right: 1920,
+            bottom: 800,
+        };
+        let restrictions = super::resize_edge_restrictions_for_rect(
+            window,
+            left_monitor,
+            &[left_monitor, right_monitor],
+        );
+        assert!(!restrictions.left);
+        assert!(!restrictions.right);
     }
 }
 
@@ -2466,11 +2628,16 @@ unsafe extern "system" fn frameless_window_proc(
         && unsafe { (*hook).resizable }
     {
         // 先让 GPUI 认领自绘标题栏的拖动区域与窗口按钮，其余区域再补上缩放热区。
-        let result = unsafe { call_hook_previous(hook, hwnd, message, wparam, lparam) };
+        let restrictions = unsafe { screen_edge_resize_restrictions(hwnd) };
+        let result = filter_resize_hit_test_value(
+            unsafe { call_hook_previous(hook, hwnd, message, wparam, lparam) }.0,
+            restrictions,
+        );
+        let result = LRESULT(result);
         if result == LRESULT(HTCLIENT as isize)
             && let Some(edge) = unsafe { resize_hit_test(hwnd, lparam) }
         {
-            return edge;
+            return LRESULT(filter_resize_hit_test_value(edge.0, restrictions));
         }
         return result;
     }
@@ -2673,6 +2840,122 @@ unsafe fn resize_hit_test(
         return None;
     };
     Some(LRESULT(code as isize))
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn screen_edge_resize_restrictions(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> ResizeEdgeRestrictions {
+    use windows::Win32::{
+        Foundation::LPARAM,
+        Graphics::Gdi::{
+            EnumDisplayMonitors, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+            MonitorFromWindow,
+        },
+    };
+
+    let Ok(client) = client_area_metrics(hwnd) else {
+        return ResizeEdgeRestrictions::default();
+    };
+    let window_rect = windows::Win32::Foundation::RECT {
+        left: client.client_left,
+        top: client.client_top,
+        right: client.client_left.saturating_add(client.client_width),
+        bottom: client.client_top.saturating_add(client.client_height),
+    };
+
+    // SAFETY: hwnd 来自当前窗口，使用最近显示器作为窗口边界判定基准。
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_invalid() {
+        return ResizeEdgeRestrictions::default();
+    }
+    let mut monitor_info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: monitor 来自 MonitorFromWindow，monitor_info 是有效的可写结构体。
+    if !unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
+        return ResizeEdgeRestrictions::default();
+    }
+
+    let mut monitors = Vec::new();
+    // SAFETY: 回调仅向本次调用栈上的 Vec 写入显示器矩形。
+    let _ = unsafe {
+        EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect_monitor_rect),
+            LPARAM(&mut monitors as *mut _ as isize),
+        )
+    };
+    resize_edge_restrictions_for_rect(window_rect, monitor_info.rcMonitor, &monitors)
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn collect_monitor_rect(
+    _monitor: windows::Win32::Graphics::Gdi::HMONITOR,
+    _dc: windows::Win32::Graphics::Gdi::HDC,
+    rect: *mut windows::Win32::Foundation::RECT,
+    data: windows::Win32::Foundation::LPARAM,
+) -> windows::core::BOOL {
+    if !rect.is_null() && data.0 != 0 {
+        // SAFETY: rect 由 EnumDisplayMonitors 提供，data 指向调用方栈上的 Vec。
+        let monitor_rect = unsafe { *rect };
+        let monitors = unsafe { &mut *(data.0 as *mut Vec<windows::Win32::Foundation::RECT>) };
+        monitors.push(monitor_rect);
+    }
+    windows::core::BOOL(1)
+}
+
+#[cfg(target_os = "windows")]
+fn resize_edge_restrictions_for_rect(
+    window: windows::Win32::Foundation::RECT,
+    monitor: windows::Win32::Foundation::RECT,
+    monitors: &[windows::Win32::Foundation::RECT],
+) -> ResizeEdgeRestrictions {
+    const TOLERANCE: i32 = 2;
+
+    let has_adjacent = |side: fn(&windows::Win32::Foundation::RECT) -> i32,
+                        other_side: fn(&windows::Win32::Foundation::RECT) -> i32,
+                        start: fn(&windows::Win32::Foundation::RECT) -> i32,
+                        end: fn(&windows::Win32::Foundation::RECT) -> i32| {
+        monitors.iter().any(|other| {
+            (other_side(other) - side(&monitor)).abs() <= TOLERANCE
+                && start(other) < end(&monitor)
+                && end(other) > start(&monitor)
+        })
+    };
+
+    ResizeEdgeRestrictions {
+        left: (window.left - monitor.left).abs() <= TOLERANCE
+            && !has_adjacent(
+                |rect| rect.left,
+                |rect| rect.right,
+                |rect| rect.top,
+                |rect| rect.bottom,
+            ),
+        right: (window.right - monitor.right).abs() <= TOLERANCE
+            && !has_adjacent(
+                |rect| rect.right,
+                |rect| rect.left,
+                |rect| rect.top,
+                |rect| rect.bottom,
+            ),
+        top: (window.top - monitor.top).abs() <= TOLERANCE
+            && !has_adjacent(
+                |rect| rect.top,
+                |rect| rect.bottom,
+                |rect| rect.left,
+                |rect| rect.right,
+            ),
+        bottom: (window.bottom - monitor.bottom).abs() <= TOLERANCE
+            && !has_adjacent(
+                |rect| rect.bottom,
+                |rect| rect.top,
+                |rect| rect.left,
+                |rect| rect.right,
+            ),
+    }
 }
 
 #[cfg(target_os = "windows")]
