@@ -1035,7 +1035,9 @@ impl PreviewWindow {
             crate::platform::window::uninstall_preview_foreground_hook(hook);
         }
         self.generation = self.generation.wrapping_add(1);
-        self.popup.set_visible(window, false);
+        let generation = self.generation;
+        let popup = self.popup;
+        let preview = cx.entity();
         self.item = None;
         self.previews.clear();
         self.mode = None;
@@ -1056,6 +1058,13 @@ impl PreviewWindow {
         self.text_list_state.reset(0);
         self.content_scrollable = false;
         cx.notify();
+        window.on_next_frame(move |window, cx| {
+            let _ = preview.update(cx, |preview, _| {
+                if !preview.visible && preview.generation == generation {
+                    popup.set_visible(window, false);
+                }
+            });
+        });
     }
 
     fn render_content(
@@ -2107,7 +2116,8 @@ impl Render for PreviewWindow {
             .relative()
             .flex_none()
             .child(surface)
-            .child(surface_bounds_measure);
+            .child(surface_bounds_measure)
+            .when(self.content_size.is_none(), |this| this.invisible());
         let surface = if animations_enabled {
             surface
                 .with_animation(
