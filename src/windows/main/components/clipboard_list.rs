@@ -1758,6 +1758,10 @@ fn render_item_surface<T>(
     let theme = cx.theme().colors;
     let info_bar_background = if drag_preview {
         gpui::transparent_black()
+    } else if !metrics.horizontal {
+        let mut background = theme.popover;
+        background.alpha = 0.5;
+        background
     } else {
         theme.popover
     };
@@ -1824,6 +1828,7 @@ fn render_item_surface<T>(
         .border_color(theme.border)
         .bg(info_bar_background)
         .rounded_bl(px(6.0))
+        .when(!metrics.horizontal, |this| this.backdrop_blur(px(18.0)))
         .children(hover_actions)
         .when(identity_count > 0, |this| this.child(identity));
     let toolbar_visible = (identity_count > 0 && display.toolbar_visibility.is_visible(selected))
@@ -1986,19 +1991,11 @@ fn render_item_surface<T>(
         row.w_full()
     };
     row = row.px(ui_rem(10.0)).py(metrics.vertical_padding);
-    let horizontal_material_enabled = metrics.horizontal
-        && crate::window_material::supported_material(
-            config_runtime::appearance_config(cx).window_material,
-        ) != crate::config::WindowMaterial::Disabled;
     if metrics.horizontal {
         let surface_theme = crate::window_material::excluded_window_theme(cx);
-        row = row.bg(if horizontal_material_enabled {
-            gpui::ColorExt::opacity(&surface_theme.background, 0.9)
-        } else if selected {
-            surface_theme.list_active
-        } else {
-            surface_theme.background
-        });
+        let mut background = surface_theme.background;
+        background.alpha = 0.5;
+        row = row.bg(background).backdrop_blur(px(18.0));
         if has_toolbar {
             row = row.child(
                 div()
@@ -2106,11 +2103,9 @@ fn render_item_surface<T>(
     if !drag_preview && hover_allowed {
         let hover_color = if metrics.horizontal {
             let surface_theme = crate::window_material::excluded_window_theme(cx);
-            if horizontal_material_enabled {
-                gpui::ColorExt::opacity(&surface_theme.background, 1.0)
-            } else {
-                surface_theme.list_hover
-            }
+            let mut color = surface_theme.background;
+            color.alpha = 1.0;
+            color
         } else {
             theme.list_hover
         };

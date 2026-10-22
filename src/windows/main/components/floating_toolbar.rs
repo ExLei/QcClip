@@ -65,6 +65,8 @@ pub fn render(
         scroll_handle.offset().y
     };
     let show_scroll_top = scroll_offset < px(-SCROLL_TOP_THRESHOLD);
+    let mut toolbar_background = theme.popover;
+    toolbar_background.alpha = 0.5;
     let ui_scale = crate::ui::scale::theme_scale(cx);
     let toolbar_height = toolbar_height(show_scroll_top, show_new_favorite) * ui_scale;
     // 没有任何功能按钮需要显示时整体隐藏（含拖拽手柄）。
@@ -174,7 +176,8 @@ pub fn render(
         .items_center()
         .p_1()
         .rounded_md()
-        .bg(theme.popover)
+        .bg(toolbar_background)
+        .backdrop_blur(px(18.0))
         .border_1()
         .border_color(theme.border)
         .shadow_lg()

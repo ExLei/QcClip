@@ -624,6 +624,7 @@ pub fn render(
     let appearance = config_runtime::appearance_config(cx);
     let titlebar_position = appearance.titlebar_position;
     let material_enabled = appearance.window_material != WindowMaterial::Disabled;
+    let custom_image_background = crate::window_material::uses_custom_image_background(cx);
     let translator = i18n::translator(cx);
     let scale = crate::ui::scale::window_scale(window);
     let panel_width = if sidebar_layout {
@@ -739,6 +740,22 @@ pub fn render(
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(tags_search_input_element);
 
+    let panel_background = if custom_image_background {
+        crate::window_material::material_tint_color(
+            crate::window_material::excluded_window_theme(cx).background,
+            cx.theme().background,
+            appearance.window_material_opacity,
+        )
+    } else {
+        let mut background = if material_enabled && !sidebar_layout {
+            theme.popover
+        } else {
+            theme.secondary
+        };
+        background.alpha = 0.5;
+        background
+    };
+
     let mut panel = div()
         .id("tags-panel")
         .track_focus(&main.focus_handle)
@@ -747,14 +764,11 @@ pub fn render(
         .relative()
         .overflow_hidden()
         .occlude()
-        .bg(if material_enabled && !sidebar_layout {
-            theme.popover
-        } else {
-            theme.secondary
-        })
-        .when(material_enabled && !sidebar_layout, |this| {
-            this.backdrop_blur(px(18.0))
-        })
+        .bg(panel_background)
+        .when(
+            custom_image_background || (material_enabled && !sidebar_layout),
+            |this| this.backdrop_blur(px(18.0)),
+        )
         .border(px(0.5))
         .border_color(theme.border)
         .when(!material_enabled, |this| this.shadow_lg())

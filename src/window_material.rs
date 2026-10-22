@@ -145,9 +145,11 @@ pub(crate) fn background_element(_window: &Window, cx: &App) -> gpui::AnyElement
     }
 
     let base = excluded_window_theme(cx);
-    let tint = material_window_color(base.background, appearance.window_material_opacity);
-    // 色相跟随主题过渡，主遮罩的 Alpha 则独立于内部表面色。
-    let tint = with_alpha(cx.theme().background, tint.alpha);
+    let tint = material_tint_color(
+        base.background,
+        cx.theme().background,
+        appearance.window_material_opacity,
+    );
     div()
         .absolute()
         .inset_0()
@@ -437,6 +439,15 @@ fn material_window_color(base: Hsla, window_opacity: f32) -> Hsla {
     with_alpha(base, base.alpha * opacity)
 }
 
+pub(crate) fn material_tint_color(
+    base_background: Hsla,
+    theme_background: Hsla,
+    window_opacity: f32,
+) -> Hsla {
+    let tint = material_window_color(base_background, window_opacity);
+    with_alpha(theme_background, tint.alpha)
+}
+
 /// 普通表面轻覆盖，交互状态保留辨识度，浮层独立保证可读性。
 fn material_colors(base: ThemeColor) -> ThemeColor {
     let mut colors = base;
@@ -640,6 +651,17 @@ mod tests {
         assert_eq!(material_window_color(base, 0.5), with_alpha(base, 0.5));
         assert_eq!(material_window_color(base, 1.0), base);
         assert_eq!(material_window_color(with_alpha(base, 0.8), 0.5).alpha, 0.4);
+    }
+
+    #[test]
+    fn material_tint_keeps_theme_hue_and_global_opacity() {
+        let base_background = gpui::hsla(0.2, 0.3, 0.4, 0.8);
+        let theme_background = gpui::hsla(0.8, 0.9, 0.6, 0.06);
+
+        assert_eq!(
+            material_tint_color(base_background, theme_background, 0.5),
+            with_alpha(theme_background, 0.4)
+        );
     }
 
     #[test]

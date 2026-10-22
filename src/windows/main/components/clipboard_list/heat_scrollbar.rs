@@ -232,7 +232,7 @@ pub(super) fn render(
         && config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListItemHover);
     let motion = Duration::from_millis(180).with_easing(gpui::ease_in_out);
     let mut rail_background = theme.background;
-    rail_background.alpha = 0.88;
+    rail_background.alpha = 0.5;
     let thumb_color = gpui::rgb_to_hsla(gpui::rgb(if dark { 0xafc9b5 } else { 0x4f6658 }));
 
     let rail = div()
@@ -444,6 +444,7 @@ pub(super) fn render(
                         .w(ui_rem(if expanded { 24.0 } else { 12.0 }))
                 })
                 .bg(rail_background)
+                .backdrop_blur(px(18.0))
                 .when(horizontal, |this| this.border_t_1())
                 .when(!horizontal, |this| this.border_l_1())
                 .border_color(gpui::ColorExt::opacity(&theme.muted_foreground, 0.16))
@@ -647,7 +648,7 @@ pub(super) fn render(
             .max(px(0.0)),
         );
         let mut background = theme.popover;
-        background.alpha = 0.94;
+        background.alpha = 0.5;
         let foreground = theme.popover_foreground;
         let secondary = gpui::ColorExt::opacity(&foreground, 0.7);
         // 纯展示元素不注册命中区域，鼠标可穿透到下方列表。
@@ -668,6 +669,7 @@ pub(super) fn render(
                     .border_1()
                     .border_color(gpui::ColorExt::opacity(&foreground, 0.12))
                     .bg(background)
+                    .backdrop_blur(px(18.0))
                     .text_color(foreground)
                     .text_xs()
                     .shadow_sm()
