@@ -626,6 +626,10 @@ impl MainWindow {
             self.list_scroll_handle
                 .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
             self.list_smooth_scroll.reset();
+            self.selected_item_id = self.list_order_ids.first().copied();
+            self.multi_selected_item_ids.clear();
+            self.multi_selection_anchor = None;
+            self.reconcile_selection();
         }
     }
 
