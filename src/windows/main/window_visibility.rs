@@ -690,6 +690,9 @@ pub(crate) fn set_visibility(
         sync_mouse_leave_state(cx);
         return Ok(());
     }
+    if visible {
+        MainWindowService::prepare_window_shown(cx);
+    }
     if !visible {
         // 隐藏动画期间仍可能收到列表 hover 事件；先使正在进行的预览查询失效，
         // 避免查询完成后重新创建预览窗口。

@@ -289,6 +289,9 @@ pub fn run() {
                                     clipboard_write_suppressor.clone(),
                                     cx,
                                 );
+                                if initially_visible {
+                                    main_window.prepare_window_shown(cx);
+                                }
                                 main_window.refresh_tags(cx);
                                 main_window.refresh_history(cx);
                                 if let Some(events) = events {

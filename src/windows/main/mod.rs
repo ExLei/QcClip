@@ -123,6 +123,15 @@ impl MainWindowService {
         }
     }
 
+    pub(crate) fn prepare_window_shown(cx: &mut App) {
+        let main_view = cx
+            .try_global::<Self>()
+            .and_then(|service| service.main_view.clone());
+        if let Some(main_view) = main_view {
+            let _ = main_view.update(cx, |view, cx| view.prepare_window_shown(cx));
+        }
+    }
+
     pub(crate) fn clipboard_write_suppressor(
         cx: &App,
     ) -> Option<crate::platform::clipboard::ClipboardWriteSuppressor> {

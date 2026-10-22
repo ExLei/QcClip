@@ -618,13 +618,20 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn handle_window_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn prepare_window_shown(&mut self, cx: &mut Context<Self>) {
         let clipboard = crate::config_runtime::clipboard_config(cx);
         if clipboard.auto_scroll_to_top && self.active_tab != TabId::Emoji {
             self.list_scroll_handle
                 .scroll_to_item(0, gpui::ScrollStrategy::Top);
+            self.list_scroll_handle
+                .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
             self.list_smooth_scroll.reset();
         }
+    }
+
+    pub(crate) fn handle_window_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prepare_window_shown(cx);
+        let clipboard = crate::config_runtime::clipboard_config(cx);
         if clipboard.auto_clear_search {
             self.clear_search_input(window, cx);
         }
