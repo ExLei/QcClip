@@ -13,7 +13,7 @@ use gpui::{
 use gpui_component::ActiveTheme as _;
 
 use crate::{
-    config::{ClipboardDisplayPriority, PreviewInformationField},
+    config::{ClipboardDisplayPriority, ClipboardWindowPosition, PreviewInformationField},
     domain::{
         capture::FormatRole,
         clipboard::{
@@ -466,6 +466,7 @@ impl PreviewWindowService {
         let Some(display) = work_area_for_physical_point(cx, anchor.center()) else {
             return;
         };
+        let window_position = crate::config_runtime::clipboard_config(cx).window_position;
         self.active_source = Some(source);
         let scale = display.scale_factor.max(1.0);
         let bounds = Bounds::new(
@@ -504,6 +505,7 @@ impl PreviewWindowService {
                 anchor,
                 main_window,
                 display_priority,
+                window_position,
                 window,
                 cx,
             );
@@ -525,6 +527,7 @@ struct PreviewWindow {
     anchor: Option<PreviewAnchor>,
     main_window: Option<PreviewRect>,
     display_priority: ClipboardDisplayPriority,
+    window_position: ClipboardWindowPosition,
     generation: u64,
     reveal_generation: u64,
     content_size: Option<(f32, f32)>,
@@ -566,6 +569,7 @@ impl PreviewWindow {
             anchor: None,
             main_window: None,
             display_priority: ClipboardDisplayPriority::default(),
+            window_position: ClipboardWindowPosition::default(),
             generation: 0,
             reveal_generation: 0,
             content_size: None,
@@ -603,6 +607,7 @@ impl PreviewWindow {
         anchor: PreviewAnchor,
         main_window: Option<PreviewRect>,
         display_priority: ClipboardDisplayPriority,
+        window_position: ClipboardWindowPosition,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
@@ -612,6 +617,7 @@ impl PreviewWindow {
         self.main_window = main_window;
         self.source = Some(source);
         self.display_priority = display_priority;
+        self.window_position = window_position;
         self.visible = true;
         if self.foreground_hook.is_none() {
             self.foreground_hook = crate::platform::window::install_preview_foreground_hook();
@@ -1419,6 +1425,7 @@ impl PreviewWindow {
         &self,
         max_width: f32,
         align_end: bool,
+        center_align: bool,
         image_display_percentage: Option<f32>,
         window: &Window,
         cx: &App,
@@ -1652,7 +1659,8 @@ impl PreviewWindow {
                         .flex_none()
                         .flex()
                         .gap(px(gap))
-                        .when(align_end, |this| this.justify_end())
+                        .when(center_align, |this| this.justify_center())
+                        .when(!center_align && align_end, |this| this.justify_end())
                         .children(range.map(|index| {
                             let (text, hint) = &fields[index];
                             div()
@@ -1765,9 +1773,22 @@ impl Render for PreviewWindow {
         let placement_size = (self.mode != Some(PreviewMode::Image))
             .then_some(self.content_size)
             .flatten();
-        let placement = choose_preview_placement(pointer, work_area, main_rect, placement_size);
-        let max_width = resolve_preview_max_width(work_area, main_rect, pointer, placement.side);
-        let max_height = resolve_preview_max_height(work_area.height);
+        let placement = choose_preview_placement_for_window(
+            pointer,
+            work_area,
+            main_rect,
+            placement_size,
+            self.window_position,
+        );
+        let max_width = resolve_preview_max_width_for_window(
+            work_area,
+            main_rect,
+            pointer,
+            placement.side,
+            self.window_position,
+        );
+        let max_height =
+            resolve_preview_max_height_for_window(work_area, main_rect, self.window_position);
         let surface_border_width = if self.mode == Some(PreviewMode::Image) {
             0.0
         } else {
@@ -1883,8 +1904,13 @@ impl Render for PreviewWindow {
             };
             (width.min(max_width), height)
         });
-        let placement =
-            choose_preview_placement(pointer, work_area, main_rect, visible_preview_size);
+        let placement = choose_preview_placement_for_window(
+            pointer,
+            work_area,
+            main_rect,
+            visible_preview_size,
+            self.window_position,
+        );
         let connector_target_rect = self.surface_bounds.or_else(|| {
             visible_preview_size.map(|(width, height)| {
                 preview_rect_for_placement(placement, width, height, work_area)
@@ -2127,18 +2153,31 @@ impl Render for PreviewWindow {
             };
             let (align_end, areas) = information_areas(preview_rect, main_rect, viewport, gap);
             for area in areas {
-                let width = information_max_width(preview_rect, area, align_end).floor();
+                let width = information_max_width_for_alignment(
+                    preview_rect,
+                    area,
+                    align_end,
+                    self.window_position.is_screen_edge(),
+                )
+                .floor();
                 if width < (PREVIEW_INFO_MIN_WIDTH * ui_scale).min(viewport.width) {
                     continue;
                 }
                 let (strip, strip_size) = self.render_information(
                     width,
                     align_end,
+                    self.window_position.is_screen_edge(),
                     image_display_percentage,
                     window,
                     cx,
                 )?;
-                let Some(rect) = information_rect(preview_rect, area, strip_size, align_end) else {
+                let Some(rect) = information_rect_with_alignment(
+                    preview_rect,
+                    area,
+                    strip_size,
+                    align_end,
+                    self.window_position.is_screen_edge(),
+                ) else {
                     continue;
                 };
                 return Some(
@@ -2549,6 +2588,19 @@ fn information_max_width(preview: LogicalRect, area: LogicalRect, align_end: boo
     }
 }
 
+fn information_max_width_for_alignment(
+    preview: LogicalRect,
+    area: LogicalRect,
+    align_end: bool,
+    center_align: bool,
+) -> f32 {
+    if center_align {
+        area.width
+    } else {
+        information_max_width(preview, area, align_end)
+    }
+}
+
 fn information_rect(
     preview: LogicalRect,
     area: LogicalRect,
@@ -2567,6 +2619,30 @@ fn information_rect(
     };
     Some(LogicalRect {
         left: left.clamp(area.left, area.right() - strip_size.width),
+        top: preview
+            .top
+            .clamp(area.top, area.bottom() - strip_size.height),
+        width: strip_size.width,
+        height: strip_size.height,
+    })
+}
+
+fn information_rect_with_alignment(
+    preview: LogicalRect,
+    area: LogicalRect,
+    strip_size: Size<f32>,
+    align_end: bool,
+    center_align: bool,
+) -> Option<LogicalRect> {
+    if !center_align {
+        return information_rect(preview, area, strip_size, align_end);
+    }
+    if strip_size.width > area.width || strip_size.height > area.height {
+        return None;
+    }
+    Some(LogicalRect {
+        left: (preview.left + (preview.width - strip_size.width) / 2.0)
+            .clamp(area.left, area.right() - strip_size.width),
         top: preview
             .top
             .clamp(area.top, area.bottom() - strip_size.height),
@@ -2642,6 +2718,86 @@ fn choose_preview_placement(
     }
 
     choose_pointer_placement(pointer, work_area, preview_width, preview_height)
+}
+
+fn choose_preview_placement_for_window(
+    pointer: Point<f32>,
+    work_area: LogicalRect,
+    main_window: Option<LogicalRect>,
+    preview_size: Option<(f32, f32)>,
+    window_position: ClipboardWindowPosition,
+) -> PreviewPlacement {
+    if let Some((free_area, side)) = screen_edge_free_area(work_area, main_window, window_position)
+    {
+        let (width, height) = preview_size
+            .map(|(width, height)| (width.max(TEXT_MIN_WIDTH), height.max(TEXT_MIN_HEIGHT)))
+            .unwrap_or((TEXT_MIN_WIDTH, TEXT_MIN_HEIGHT));
+        let width = width.min((free_area.width - 24.0).max(1.0));
+        let height = height.min((free_area.height - 24.0).max(1.0));
+        return PreviewPlacement {
+            position: point(
+                free_area.left + (free_area.width - width) / 2.0,
+                free_area.top + (free_area.height - height) / 2.0,
+            ),
+            anchor: Anchor::TopLeft,
+            side,
+        };
+    }
+
+    choose_preview_placement(pointer, work_area, main_window, preview_size)
+}
+
+fn screen_edge_free_area(
+    work_area: LogicalRect,
+    main_window: Option<LogicalRect>,
+    window_position: ClipboardWindowPosition,
+) -> Option<(LogicalRect, PreviewPlacementSide)> {
+    let main = main_window?;
+    match window_position {
+        ClipboardWindowPosition::ScreenLeftCenter => {
+            let left = main.right() + PREVIEW_MAIN_GAP;
+            (left < work_area.right()).then_some((
+                LogicalRect {
+                    left,
+                    width: work_area.right() - left,
+                    ..work_area
+                },
+                PreviewPlacementSide::Right,
+            ))
+        }
+        ClipboardWindowPosition::ScreenRightCenter => {
+            let right = main.left - PREVIEW_MAIN_GAP;
+            (right > work_area.left).then_some((
+                LogicalRect {
+                    width: right - work_area.left,
+                    ..work_area
+                },
+                PreviewPlacementSide::Left,
+            ))
+        }
+        ClipboardWindowPosition::ScreenTopCenter => {
+            let top = main.bottom() + PREVIEW_MAIN_GAP;
+            (top < work_area.bottom()).then_some((
+                LogicalRect {
+                    top,
+                    height: work_area.bottom() - top,
+                    ..work_area
+                },
+                PreviewPlacementSide::Bottom,
+            ))
+        }
+        ClipboardWindowPosition::ScreenBottomCenter => {
+            let bottom = main.top - PREVIEW_MAIN_GAP;
+            (bottom > work_area.top).then_some((
+                LogicalRect {
+                    height: bottom - work_area.top,
+                    ..work_area
+                },
+                PreviewPlacementSide::Top,
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn choose_pointer_placement(
@@ -2733,8 +2889,33 @@ fn resolve_preview_max_width(
     }
 }
 
+fn resolve_preview_max_width_for_window(
+    work_area: LogicalRect,
+    main_window: Option<LogicalRect>,
+    pointer: Point<f32>,
+    side: PreviewPlacementSide,
+    window_position: ClipboardWindowPosition,
+) -> f32 {
+    if let Some((free_area, _)) = screen_edge_free_area(work_area, main_window, window_position) {
+        return (free_area.width - 24.0).max(1.0);
+    }
+    resolve_preview_max_width(work_area, main_window, pointer, side)
+}
+
 fn resolve_preview_max_height(work_area_height: f32) -> f32 {
     (work_area_height * PREVIEW_MAX_HEIGHT_RATIO).max(1.0)
+}
+
+fn resolve_preview_max_height_for_window(
+    work_area: LogicalRect,
+    main_window: Option<LogicalRect>,
+    window_position: ClipboardWindowPosition,
+) -> f32 {
+    let work_area_max = resolve_preview_max_height(work_area.height);
+    if let Some((free_area, _)) = screen_edge_free_area(work_area, main_window, window_position) {
+        return work_area_max.min((free_area.height - 24.0).max(1.0));
+    }
+    work_area_max
 }
 
 fn text_line_ranges(text: &str) -> Vec<Range<usize>> {
@@ -2838,11 +3019,13 @@ impl ScrollWheelDelta for ScrollWheelEvent {
 #[cfg(test)]
 mod tests {
     use super::{
-        LogicalRect, PreviewPlacementSide, PreviewWindow, choose_preview_placement,
-        image_source_byte_length, information_areas, information_max_width, information_rect,
-        information_row_ranges, interpolate_reveal_size, intersect_logical_rect,
-        preview_reveal_start_size, resolve_best_connector, resolve_preview_max_height,
-        resolve_preview_max_width, text_line_ranges,
+        ClipboardWindowPosition, LogicalRect, PreviewPlacementSide, PreviewWindow,
+        choose_preview_placement, choose_preview_placement_for_window, image_source_byte_length,
+        information_areas, information_max_width, information_max_width_for_alignment,
+        information_rect, information_rect_with_alignment, information_row_ranges,
+        interpolate_reveal_size, intersect_logical_rect, preview_reveal_start_size,
+        resolve_best_connector, resolve_preview_max_height, resolve_preview_max_height_for_window,
+        resolve_preview_max_width, resolve_preview_max_width_for_window, text_line_ranges,
     };
     use gpui::{Anchor, point};
 
@@ -2866,6 +3049,162 @@ mod tests {
             resolve_preview_max_width(work, Some(main), point(900.0, 400.0), placement.side),
             802.0
         );
+    }
+
+    #[test]
+    fn edge_docked_preview_is_centered_in_the_free_area() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let cases = [
+            (
+                ClipboardWindowPosition::ScreenLeftCenter,
+                LogicalRect {
+                    left: 0.0,
+                    top: 0.0,
+                    width: 320.0,
+                    height: 1080.0,
+                },
+                PreviewPlacementSide::Right,
+                point(979.0, 440.0),
+            ),
+            (
+                ClipboardWindowPosition::ScreenRightCenter,
+                LogicalRect {
+                    left: 1600.0,
+                    top: 0.0,
+                    width: 320.0,
+                    height: 1080.0,
+                },
+                PreviewPlacementSide::Left,
+                point(641.0, 440.0),
+            ),
+            (
+                ClipboardWindowPosition::ScreenTopCenter,
+                LogicalRect {
+                    left: 0.0,
+                    top: 0.0,
+                    width: 1920.0,
+                    height: 220.0,
+                },
+                PreviewPlacementSide::Bottom,
+                point(810.0, 559.0),
+            ),
+            (
+                ClipboardWindowPosition::ScreenBottomCenter,
+                LogicalRect {
+                    left: 0.0,
+                    top: 800.0,
+                    width: 1920.0,
+                    height: 280.0,
+                },
+                PreviewPlacementSide::Top,
+                point(810.0, 291.0),
+            ),
+        ];
+
+        for (window_position, main, expected_side, expected_position) in cases {
+            let first = choose_preview_placement_for_window(
+                point(80.0, 60.0),
+                work,
+                Some(main),
+                Some((300.0, 200.0)),
+                window_position,
+            );
+            let second = choose_preview_placement_for_window(
+                point(1800.0, 1000.0),
+                work,
+                Some(main),
+                Some((300.0, 200.0)),
+                window_position,
+            );
+
+            assert_eq!(first.side, expected_side);
+            assert_eq!(first.position, expected_position);
+            assert_eq!(second.position, expected_position);
+        }
+    }
+
+    #[test]
+    fn edge_docked_preview_height_is_limited_to_the_free_area() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let main = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 400.0,
+        };
+
+        assert_eq!(
+            resolve_preview_max_height_for_window(
+                work,
+                Some(main),
+                ClipboardWindowPosition::ScreenTopCenter,
+            ),
+            638.0
+        );
+    }
+
+    #[test]
+    fn edge_docked_preview_width_is_limited_to_the_free_area() {
+        let work = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let main = LogicalRect {
+            left: 0.0,
+            top: 0.0,
+            width: 1700.0,
+            height: 1080.0,
+        };
+
+        assert_eq!(
+            resolve_preview_max_width_for_window(
+                work,
+                Some(main),
+                point(500.0, 500.0),
+                PreviewPlacementSide::Right,
+                ClipboardWindowPosition::ScreenLeftCenter,
+            ),
+            178.0
+        );
+    }
+
+    #[test]
+    fn edge_docked_information_is_centered_with_the_preview() {
+        let preview = LogicalRect {
+            left: 500.0,
+            top: 300.0,
+            width: 400.0,
+            height: 240.0,
+        };
+        let area = LogicalRect {
+            left: 320.0,
+            top: 0.0,
+            width: 1280.0,
+            height: 292.0,
+        };
+        let strip_size = gpui::size(320.0, 80.0);
+        let width = information_max_width_for_alignment(preview, area, false, true);
+        let strip = information_rect_with_alignment(preview, area, strip_size, false, true)
+            .expect("贴边预览的提示信息应放在预览外侧并居中");
+
+        assert_eq!(width, area.width);
+        assert_eq!(
+            strip.left + strip.width / 2.0,
+            preview.left + preview.width / 2.0
+        );
+        assert_eq!(strip.bottom(), preview.top - 8.0);
     }
 
     #[test]
