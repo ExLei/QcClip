@@ -46,8 +46,15 @@ fn heat_level(count: u64) -> u8 {
     }
 }
 
-fn heat_color(level: u8) -> gpui::Hsla {
+fn heat_color(level: u8, dark: bool) -> gpui::Hsla {
     gpui::rgb_to_hsla(gpui::rgb(match level {
+        0 if dark => 0x29352f,
+        1 if dark => 0x42664d,
+        2 if dark => 0x4c8a5a,
+        3 if dark => 0x9b873f,
+        4 if dark => 0xac7042,
+        5 if dark => 0xa8524b,
+        6 if dark => 0x8e4143,
         0 => 0xd5e6da,
         1 => 0x8fba9c,
         2 => 0x4d9671,
@@ -515,7 +522,7 @@ pub(super) fn render(
                                 bounds.size.apply_along(axis.invert(), |_| thickness),
                             );
                             window.paint_quad(
-                                gpui::fill(heat_bounds, heat_color(0))
+                                gpui::fill(heat_bounds, heat_color(0, dark))
                                     .corner_radii(thickness / 2.0),
                             );
                             // 合并相邻同档热度，避免大量分段边缘产生横纹。
@@ -536,7 +543,7 @@ pub(super) fn render(
                                             (end - start - px(0.7 * scale)).max(px(0.0))
                                         }),
                                     ),
-                                    gpui::ColorExt::opacity(&heat_color(*level), 0.94),
+                                    gpui::ColorExt::opacity(&heat_color(*level, dark), 0.94),
                                 ));
                             }
                             if let Some(bucket) = state
