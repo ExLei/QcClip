@@ -7,6 +7,7 @@ use gpui::{AnyElement, Context, IntoElement, Window, div, px};
 use gpui_component::{ActiveTheme as _, tooltip::Tooltip};
 
 use crate::{
+    config_runtime,
     emoji::{self, EmojiCategoryId, EmojiItem},
     i18n,
     windows::main::{state::MainWindow, tabs::SymbolCategoryId},
@@ -29,10 +30,18 @@ pub(crate) struct EmojiRowsCache {
 
 pub fn render(main: &mut MainWindow, window: &Window, cx: &mut Context<MainWindow>) -> AnyElement {
     let translator = i18n::translator(cx);
+    let horizontal_categories = config_runtime::clipboard_config(cx)
+        .window_position
+        .uses_horizontal_list();
     let is_emoji = main.symbol_category == SymbolCategoryId::Emoji;
     let content = if is_emoji {
         let data = emoji::data();
-        let columns = symbol_layout::grid_columns(main, window, symbol_list::CELL_MIN_WIDTH);
+        let columns = symbol_layout::grid_columns(
+            main,
+            window,
+            symbol_list::CELL_MIN_WIDTH,
+            horizontal_categories,
+        );
         let query = main.symbol_search_query.trim().to_lowercase();
         let locale = translator.locale().clone();
         let cache_matches = main.emoji_rows_cache.as_ref().is_some_and(|cache| {
@@ -122,6 +131,14 @@ pub fn render(main: &mut MainWindow, window: &Window, cx: &mut Context<MainWindo
         };
         this.select_emoji_category(category, window, cx);
     });
+    let category_area_width =
+        f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window) / 2.0;
+    let show_category_labels = horizontal_categories
+        && symbol_sidebar::horizontal_labels_fit(
+            sidebar_items.iter().map(|item| item.label.as_str()),
+            category_area_width,
+            16.0,
+        );
     let sidebar = symbol_sidebar::render(
         &sidebar_items,
         if is_emoji {
@@ -130,11 +147,13 @@ pub fn render(main: &mut MainWindow, window: &Window, cx: &mut Context<MainWindo
             u32::MAX
         },
         sidebar_handler,
+        horizontal_categories,
+        show_category_labels,
         cx,
     );
     let search_box = symbol_search::render(main, window, cx, None);
 
-    symbol_layout::render(sidebar, search_box, content, cx)
+    symbol_layout::render(sidebar, search_box, content, horizontal_categories, cx)
 }
 fn build_rows(
     main: &MainWindow,

@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, IntoElement, Window, div, px};
 use gpui_component::{ActiveTheme as _, tooltip::Tooltip};
 
 use crate::{
-    i18n,
+    config_runtime, i18n,
     symbols::{self, SymbolGroupId, SymbolItem},
     windows::main::state::MainWindow,
 };
@@ -26,7 +26,15 @@ pub(crate) fn render(
 ) -> AnyElement {
     let data = symbols::data();
     let translator = i18n::translator(cx);
-    let columns = symbol_layout::grid_columns(main, window, symbol_list::CELL_MIN_WIDTH);
+    let horizontal_categories = config_runtime::clipboard_config(cx)
+        .window_position
+        .uses_horizontal_list();
+    let columns = symbol_layout::grid_columns(
+        main,
+        window,
+        symbol_list::CELL_MIN_WIDTH,
+        horizontal_categories,
+    );
     let rows = Rc::new(build_rows(main, data, columns, &translator));
 
     main.symbol_category_row_indices.clear();
@@ -73,16 +81,26 @@ pub(crate) fn render(
         };
         this.select_symbol_group(category, window, cx);
     });
+    let category_area_width =
+        f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window) / 2.0;
+    let show_category_labels = horizontal_categories
+        && symbol_sidebar::horizontal_labels_fit(
+            sidebar_items.iter().map(|item| item.label.as_str()),
+            category_area_width,
+            16.0,
+        );
     let sidebar = symbol_sidebar::render(
         &sidebar_items,
         main.symbol_group as u32,
         sidebar_handler,
+        horizontal_categories,
+        show_category_labels,
         cx,
     );
     let search_box = symbol_search::render(main, window, cx, None);
     let content = render_virtual_list(main, data, rows, columns, cx);
 
-    symbol_layout::render(sidebar, search_box, content, cx)
+    symbol_layout::render(sidebar, search_box, content, horizontal_categories, cx)
 }
 
 fn build_rows(

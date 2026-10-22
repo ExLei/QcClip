@@ -141,9 +141,30 @@ pub(crate) fn render(
     main.ensure_gallery_group_icons(cx);
 
     let translator = i18n::translator(cx);
-    let columns = gallery_grid_columns(main, window);
-    let cell_size = gallery_cell_size(main, window, columns);
-    let sidebar = render_sidebar(main, cx, &translator);
+    let horizontal_categories = crate::config_runtime::clipboard_config(cx)
+        .window_position
+        .uses_horizontal_list();
+    let add_group_label = translator.translate("main.gallery.add_group");
+    let category_area_width =
+        f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window) / 2.0;
+    let show_group_labels = horizontal_categories
+        && symbol_sidebar::horizontal_labels_fit(
+            main.gallery_groups
+                .iter()
+                .map(|group| group.name.as_str())
+                .chain(std::iter::once(add_group_label.as_str())),
+            category_area_width,
+            24.0,
+        );
+    let columns = gallery_grid_columns(main, window, horizontal_categories);
+    let cell_size = gallery_cell_size(main, window, columns, horizontal_categories);
+    let sidebar = render_sidebar(
+        main,
+        cx,
+        &translator,
+        horizontal_categories,
+        show_group_labels,
+    );
     let add_images_button = render_add_images_button(&translator, cx);
     let selected_group = main
         .selected_gallery_group_id
@@ -166,7 +187,7 @@ pub(crate) fn render(
     let search_box = symbol_search::render(main, window, cx, Some(search_actions));
     let content = render_group_content(main, window, columns, cell_size, cx, &translator);
 
-    symbol_layout::render(sidebar, search_box, content, cx)
+    symbol_layout::render(sidebar, search_box, content, horizontal_categories, cx)
 }
 
 pub(crate) fn render_gallery_import_overlay(
@@ -239,17 +260,23 @@ pub(crate) fn render_gallery_import_overlay(
         .into_any_element()
 }
 
-fn gallery_grid_columns(main: &MainWindow, window: &Window) -> u16 {
+fn gallery_grid_columns(main: &MainWindow, window: &Window, horizontal_categories: bool) -> u16 {
     let viewport_width =
         f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
-    let main_sidebar_width = if crate::windows::main::uses_sidebar_layout(viewport_width) {
-        if main.sidebar_collapsed { 56.0 } else { 132.0 }
-    } else {
+    let main_sidebar_width =
+        if !horizontal_categories && crate::windows::main::uses_sidebar_layout(viewport_width) {
+            if main.sidebar_collapsed { 56.0 } else { 132.0 }
+        } else {
+            0.0
+        };
+    let category_sidebar_width = if horizontal_categories {
         0.0
+    } else {
+        symbol_sidebar::TAB_BAR_HEIGHT
     };
     let content_width = (viewport_width
         - main_sidebar_width
-        - symbol_sidebar::TAB_BAR_HEIGHT
+        - category_sidebar_width
         - GALLERY_GRID_HORIZONTAL_PADDING * 2.0)
         .max(0.0);
     let columns_for_max_size =
@@ -257,17 +284,28 @@ fn gallery_grid_columns(main: &MainWindow, window: &Window) -> u16 {
     (columns_for_max_size as u16).clamp(1, GALLERY_MAX_COLUMNS)
 }
 
-fn gallery_cell_size(main: &MainWindow, window: &Window, columns: u16) -> f32 {
+fn gallery_cell_size(
+    main: &MainWindow,
+    window: &Window,
+    columns: u16,
+    horizontal_categories: bool,
+) -> f32 {
     let viewport_width =
         f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window);
-    let main_sidebar_width = if crate::windows::main::uses_sidebar_layout(viewport_width) {
-        if main.sidebar_collapsed { 56.0 } else { 132.0 }
-    } else {
+    let main_sidebar_width =
+        if !horizontal_categories && crate::windows::main::uses_sidebar_layout(viewport_width) {
+            if main.sidebar_collapsed { 56.0 } else { 132.0 }
+        } else {
+            0.0
+        };
+    let category_sidebar_width = if horizontal_categories {
         0.0
+    } else {
+        symbol_sidebar::TAB_BAR_HEIGHT
     };
     let content_width = (viewport_width
         - main_sidebar_width
-        - symbol_sidebar::TAB_BAR_HEIGHT
+        - category_sidebar_width
         - GALLERY_GRID_HORIZONTAL_PADDING * 2.0)
         .max(0.0);
     let gaps = GALLERY_GRID_GAP * f32::from(columns.saturating_sub(1));
@@ -309,6 +347,8 @@ fn render_sidebar(
     main: &MainWindow,
     cx: &mut Context<MainWindow>,
     translator: &i18n::Translator,
+    horizontal: bool,
+    show_labels: bool,
 ) -> AnyElement {
     let theme = cx.theme().colors;
     let main_window = cx.entity().clone();
@@ -325,16 +365,66 @@ fn render_sidebar(
                 .iter()
                 .position(|group| &group.id == active_id)
         });
-    div()
-        .w(ui_rem(symbol_sidebar::TAB_BAR_HEIGHT))
-        .min_w(ui_rem(symbol_sidebar::TAB_BAR_HEIGHT))
-        .h_full()
-        .flex_none()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap_1()
-        .py_1()
+    let group_buttons = main
+        .gallery_groups
+        .iter()
+        .map(|group| {
+            render_group_button(
+                group,
+                main.selected_gallery_group_id.as_deref() == Some(group.id.as_str()),
+                horizontal,
+                show_labels,
+                main,
+                cx,
+            )
+        })
+        .collect::<Vec<_>>();
+    let group_list = if horizontal {
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .relative()
+            .gap_1()
+            .overflow_x_scrollbar()
+            .children(group_buttons)
+            .child(render_add_group_button(
+                &main_window,
+                image_library,
+                translator,
+                theme,
+                true,
+                show_labels,
+                cx,
+            ))
+            .into_any_element()
+    } else {
+        div()
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .items_center()
+            .relative()
+            .gap_1()
+            .overflow_y_scrollbar()
+            .when_some(active_index, |this, index| {
+                this.child(symbol_sidebar::active_indicator_at(
+                    "gallery-sidebar-active-indicator",
+                    index,
+                    0.0,
+                    theme.primary,
+                    animations_enabled,
+                ))
+            })
+            .children(group_buttons)
+            .into_any_element()
+    };
+    let mut sidebar = div()
         .bg(theme.tab_bar)
         .overflow_hidden()
         .on_drag_move(|event: &DragMoveEvent<GalleryImageDrag>, _, cx| {
@@ -355,58 +445,57 @@ fn render_sidebar(
                 DragPreviewService::hide(cx);
                 crate::platform::external_drag::ExternalDragService::cancel(cx);
             }
-        }))
-        .child(
-            div()
-                .w_full()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .flex_col()
-                .items_center()
-                .relative()
-                .gap_1()
-                .overflow_y_scrollbar()
-                .when_some(active_index, |this, index| {
-                    this.child(symbol_sidebar::active_indicator_at(
-                        "gallery-sidebar-active-indicator",
-                        index,
-                        0.0,
-                        theme.primary,
-                        animations_enabled,
-                    ))
-                })
-                .children(main.gallery_groups.iter().map(|group| {
-                    render_group_button(
-                        group,
-                        main.selected_gallery_group_id.as_deref() == Some(group.id.as_str()),
-                        main,
-                        cx,
-                    )
-                })),
-        )
-        .child(render_add_group_button(
-            &main_window,
-            image_library,
-            translator,
-            theme,
-            cx,
-        ))
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .right_0()
-                .bottom_0()
-                .w(px(0.5))
-                .bg(theme.border),
-        )
-        .into_any_element()
+        }));
+    if horizontal {
+        sidebar = sidebar
+            .w_full()
+            .min_w_0()
+            .h(px(symbol_sidebar::TAB_BAR_HEIGHT))
+            .flex_none()
+            .flex()
+            .items_center()
+            .border_l(px(0.5))
+            .border_color(theme.border)
+            .child(group_list);
+    } else {
+        sidebar = sidebar
+            .w(ui_rem(symbol_sidebar::TAB_BAR_HEIGHT))
+            .min_w(ui_rem(symbol_sidebar::TAB_BAR_HEIGHT))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .py_1()
+            .child(group_list)
+            .child(render_add_group_button(
+                &main_window,
+                main.image_library.clone(),
+                translator,
+                theme,
+                false,
+                false,
+                cx,
+            ))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .w(px(0.5))
+                    .bg(theme.border),
+            );
+    }
+    sidebar.into_any_element()
 }
 
 fn render_group_button(
     group: &ImageLibraryGroup,
     active: bool,
+    horizontal: bool,
+    show_label: bool,
     main: &MainWindow,
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
@@ -417,24 +506,19 @@ fn render_group_button(
     let target_group_id_for_scale = group.id.clone();
     let target_group_id_for_drop = group.id.clone();
     let label = group.name.clone();
+    let tooltip_label = label.clone();
     let icon_path = main.image_library.group_icon_path(group);
     let icon_image = icon_path
         .as_ref()
         .and_then(|path| main.loaded_gallery_group_icons.get(path))
         .cloned();
-    let group_button = div()
+    let mut group_button = div()
         .id(format!("gallery-group-{}", group.id))
-        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
-        .flex_none()
+        .h(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex()
         .items_center()
-        .justify_center()
         .rounded_lg()
         .cursor_pointer()
-        .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-        .when(!active, |this| {
-            this.hover(|this| this.bg(theme.secondary_hover))
-        })
         .on_click(cx.listener(move |this, _, window, cx| {
             if this.selected_gallery_group_id.as_deref() == Some(group_id.as_str()) {
                 this.refresh_gallery_images(cx);
@@ -443,6 +527,32 @@ fn render_group_button(
             }
             let _ = window;
         }));
+    if horizontal && show_label {
+        group_button = group_button
+            .min_w_auto()
+            .flex_1()
+            .justify_center()
+            .gap_1()
+            .px_2();
+    } else if horizontal {
+        group_button = group_button
+            .w(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
+            .min_w(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
+            .flex_1()
+            .justify_center();
+    } else {
+        group_button = group_button
+            .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
+            .flex_none()
+            .justify_center();
+    }
+    group_button = group_button
+        .tooltip(move |window, cx| Tooltip::new(tooltip_label.clone()).build(window, cx));
+    if horizontal && active {
+        group_button = group_button.bg(theme.primary).shadow_sm();
+    } else if !active {
+        group_button = group_button.hover(|this| this.bg(theme.secondary_hover));
+    }
     let icon = match icon_image {
         Some(image) => div()
             .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT - 4.0))
@@ -470,7 +580,7 @@ fn render_group_button(
         )
         .into_any_element(),
     };
-    group_button
+    let group_button = group_button
         .drag_over::<GalleryImageDrag>(move |this, drag, _, cx| {
             if drag.source_group_id.as_deref() != Some(target_group_id_for_style.as_str()) {
                 this.bg(cx.theme().drop_target)
@@ -520,7 +630,21 @@ fn render_group_button(
             this.move_gallery_image(drag.path.clone(), target_group_id_for_drop.clone(), cx);
         }))
         .child(icon)
-        .into_any_element()
+        .when(horizontal && show_label, |this| {
+            this.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(ui_rem(12.0))
+                    .text_color(if active {
+                        theme.primary_foreground
+                    } else {
+                        theme.foreground
+                    })
+                    .child(group.name.clone()),
+            )
+        });
+    group_button.into_any_element()
 }
 
 fn render_edit_group_button(
@@ -567,30 +691,56 @@ fn render_add_group_button(
     image_library: ImageLibraryService,
     translator: &i18n::Translator,
     theme: gpui_component::ThemeColor,
+    horizontal: bool,
+    show_label: bool,
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     let label = translator.translate("main.gallery.add_group");
+    let tooltip_label = label.clone();
     let main_window = main_window.clone();
-    div()
+    let mut button = div()
         .id("gallery-add-group")
-        .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
-        .flex_none()
+        .h(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
         .flex()
         .items_center()
-        .justify_center()
         .rounded_lg()
         .cursor_pointer()
-        .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-        .hover(|this| this.bg(theme.secondary_hover))
         .on_click(cx.listener(move |_, _, window, cx| {
             open_new_group_form(main_window.clone(), image_library.clone(), window, cx);
-        }))
+        }));
+    if horizontal && show_label {
+        button = button.min_w_auto().flex_1().justify_center().gap_1().px_2();
+    } else if horizontal {
+        button = button
+            .w(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
+            .min_w(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
+            .flex_1()
+            .justify_center();
+    } else {
+        button = button
+            .size(ui_rem(symbol_sidebar::TAB_BUTTON_HEIGHT))
+            .flex_none()
+            .justify_center();
+    }
+    button
+        .tooltip(move |window, cx| Tooltip::new(tooltip_label.clone()).build(window, cx))
+        .hover(|this| this.bg(theme.secondary_hover))
         .child(hover_icon(
             "gallery-add-group",
             "plus",
             18.0,
             theme.foreground,
         ))
+        .when(horizontal && show_label, |this| {
+            this.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(ui_rem(12.0))
+                    .text_color(theme.foreground)
+                    .child(label),
+            )
+        })
         .into_any_element()
 }
 

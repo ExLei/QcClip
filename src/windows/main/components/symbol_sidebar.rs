@@ -32,6 +32,33 @@ impl SymbolSidebarItem {
 pub(crate) type SymbolSidebarSelectHandler =
     Rc<dyn Fn(&mut MainWindow, u32, &mut Window, &mut Context<MainWindow>)>;
 
+pub(crate) fn horizontal_labels_fit<'a>(
+    labels: impl Iterator<Item = &'a str>,
+    available_width: f32,
+    icon_width: f32,
+) -> bool {
+    let labels = labels.collect::<Vec<_>>();
+    if labels.is_empty() {
+        return false;
+    }
+
+    let required_width = labels
+        .iter()
+        .map(|label| {
+            icon_width
+                + 4.0
+                + label
+                    .chars()
+                    .map(|character| if character.is_ascii() { 6.5 } else { 12.0 })
+                    .sum::<f32>()
+                + 16.0
+        })
+        .sum::<f32>()
+        + (labels.len() - 1) as f32 * 4.0
+        + 8.0;
+    required_width <= available_width
+}
+
 fn spring<T: gpui::SpringTarget>(target: T) -> SpringAnimation<T> {
     SpringAnimation::new(SpringConfig::new(420.0, 36.0, 1.0)).to(target)
 }
@@ -96,81 +123,138 @@ pub(crate) fn render(
     items: &[SymbolSidebarItem],
     active_id: u32,
     on_select: SymbolSidebarSelectHandler,
+    horizontal: bool,
+    show_labels: bool,
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     let theme = cx.theme().colors;
     let animations_enabled =
         config_runtime::animation_enabled(cx, crate::config::AnimationKind::SingleSelectIndicator);
     let active_index = items.iter().position(|item| item.id == active_id);
-    let content = div()
-        .w(ui_rem(TAB_BAR_HEIGHT))
-        .min_w(ui_rem(TAB_BAR_HEIGHT))
-        .h_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .relative()
-        .overflow_y_scrollbar()
-        .gap_1()
-        .py_1()
-        .bg(theme.tab_bar)
-        .when_some(active_index, |this, index| {
-            this.child(active_indicator(
-                "symbol-sidebar-active-indicator",
-                index,
-                theme.primary,
-                animations_enabled,
-            ))
-        });
-
-    let content = content.children(items.iter().map(|item| {
-        let active = item.id == active_id;
-        let color = if active {
-            theme.primary_foreground
-        } else {
-            theme.foreground
-        };
-        let item_id = item.id;
-        let label = item.label.clone();
-        let on_select = on_select.clone();
-        let group = format!("symbol-sidebar-{}", item.id);
-        let mut button = div()
-            .id(("symbol-sidebar", item_id))
-            .group(group.clone())
-            .size(ui_rem(TAB_BUTTON_HEIGHT))
-            .flex_none()
+    let buttons = items
+        .iter()
+        .map(|item| {
+            let active = item.id == active_id;
+            let color = if active {
+                theme.primary_foreground
+            } else {
+                theme.foreground
+            };
+            let item_id = item.id;
+            let label = item.label.clone();
+            let on_select = on_select.clone();
+            let group = format!("symbol-sidebar-{}", item.id);
+            let mut button = div()
+                .id(("symbol-sidebar", item_id))
+                .group(group.clone())
+                .flex()
+                .items_center()
+                .rounded_lg()
+                .cursor_pointer()
+                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    on_select(this, item_id, window, cx);
+                }));
+            button = if horizontal && show_labels {
+                button
+                    .h(ui_rem(TAB_BUTTON_HEIGHT))
+                    .min_w_auto()
+                    .flex_1()
+                    .justify_center()
+                    .gap_1()
+                    .px_2()
+                    .child(hover_icon(group.clone(), item.icon, 16.0, color))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(ui_rem(12.0))
+                            .text_color(color)
+                            .child(item.label.clone()),
+                    )
+            } else if horizontal {
+                button
+                    .size(ui_rem(TAB_BUTTON_HEIGHT))
+                    .min_w(ui_rem(TAB_BUTTON_HEIGHT))
+                    .flex_1()
+                    .justify_center()
+                    .child(hover_icon(group.clone(), item.icon, 16.0, color))
+            } else {
+                button
+                    .size(ui_rem(TAB_BUTTON_HEIGHT))
+                    .flex_none()
+                    .justify_center()
+                    .child(hover_icon(group.clone(), item.icon, 16.0, color))
+            };
+            if horizontal && active {
+                button = button.bg(theme.primary).shadow_sm();
+            } else if !active {
+                button = button.hover(|this| this.bg(theme.secondary_hover));
+            }
+            button.into_any_element()
+        })
+        .collect::<Vec<_>>();
+    let content = if horizontal {
+        div()
+            .w_full()
+            .min_w_0()
+            .h_full()
             .flex()
+            .flex_row()
             .items_center()
-            .justify_center()
-            .rounded_lg()
-            .cursor_pointer()
-            .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
-            .child(hover_icon(group, item.icon, 16.0, color))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                on_select(this, item_id, window, cx);
-            }));
-        if !active {
-            button = button.hover(|this| this.bg(theme.secondary_hover));
-        }
-        button
-    }));
+            .relative()
+            .overflow_x_scrollbar()
+            .gap_1()
+            .px_1()
+            .bg(theme.tab_bar)
+            .children(buttons)
+            .into_any_element()
+    } else {
+        div()
+            .w(ui_rem(TAB_BAR_HEIGHT))
+            .min_w(ui_rem(TAB_BAR_HEIGHT))
+            .h_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .relative()
+            .overflow_y_scrollbar()
+            .gap_1()
+            .py_1()
+            .bg(theme.tab_bar)
+            .when_some(active_index, |this, index| {
+                this.child(active_indicator(
+                    "symbol-sidebar-active-indicator",
+                    index,
+                    theme.primary,
+                    animations_enabled,
+                ))
+            })
+            .children(buttons)
+            .into_any_element()
+    };
 
-    let content = content.into_any_element();
-
-    div()
-        .w(ui_rem(TAB_BAR_HEIGHT))
-        .min_w(ui_rem(TAB_BAR_HEIGHT))
-        .h_full()
-        .flex_none()
-        .child(content)
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .right_0()
-                .bottom_0()
-                .w(px(0.5))
-                .bg(theme.border),
-        )
-        .into_any_element()
+    let mut root = div().h_full().flex_none().child(content);
+    if horizontal {
+        root = root
+            .w_full()
+            .min_w_0()
+            .h(px(TAB_BAR_HEIGHT))
+            .border_l(px(0.5))
+            .border_color(theme.border);
+    } else {
+        root = root
+            .w(ui_rem(TAB_BAR_HEIGHT))
+            .min_w(ui_rem(TAB_BAR_HEIGHT))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .w(px(0.5))
+                    .bg(theme.border),
+            );
+    }
+    root.into_any_element()
 }

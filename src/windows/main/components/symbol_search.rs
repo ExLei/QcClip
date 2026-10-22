@@ -70,6 +70,7 @@ pub(crate) fn render(
     }
     let mut root = div()
         .h(px(TAB_BAR_HEIGHT))
+        .w_full()
         .flex_none()
         .flex()
         .items_center()
