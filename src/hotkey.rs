@@ -434,283 +434,120 @@ impl HotkeyRuntime {
     }
 
     fn apply_main(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
-        let next = binding.map(binding_to_hotkey).transpose()?;
-
-        if self.main_hotkey == next {
-            self.status = if next.is_some() {
-                RegistrationStatus::Registered
-            } else {
-                RegistrationStatus::Disabled
-            };
-            return Ok(());
-        }
-
-        if self.manager.is_none() && next.is_some() {
-            self.status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        }
-
-        if let Some(current) = self.main_hotkey {
-            if self.manager.is_none() {
-                self.status = RegistrationStatus::Failed;
-                return Err("全局快捷键管理器不可用".to_owned());
-            }
-            self.remove_active_command(current.id());
-            let Some(manager) = self.manager.as_ref() else {
-                self.status = RegistrationStatus::Failed;
-                return Err("全局快捷键管理器不可用".to_owned());
-            };
-            manager
-                .unregister(current)
-                .map_err(|error| format!("注销原快捷键失败：{error}"))?;
-            self.main_hotkey = None;
-        }
-
-        let Some(next) = next else {
-            self.status = RegistrationStatus::Disabled;
-            return Ok(());
-        };
-        let Some(manager) = self.manager.as_ref() else {
-            self.status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        };
-        if self.has_active_command(next.id()) {
-            self.status = RegistrationStatus::Failed;
-            return Err("快捷键与另一条快捷键重复".to_owned());
-        }
-        manager
-            .register(next)
-            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
-
-        self.main_hotkey = Some(next);
-        self.set_active_command(next.id(), Some(HotkeyCommand::ToggleMainWindow));
-        self.status = RegistrationStatus::Registered;
-        Ok(())
+        self.apply_global_hotkey(
+            binding.map(binding_to_hotkey).transpose(),
+            HotkeyCommand::ToggleMainWindow,
+            |runtime| (&mut runtime.main_hotkey, &mut runtime.status),
+        )
     }
 
     fn apply_settings(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
-        let next = binding.map(binding_to_hotkey).transpose()?;
-
-        if self.settings_hotkey == next {
-            self.settings_status = if next.is_some() {
-                RegistrationStatus::Registered
-            } else {
-                RegistrationStatus::Disabled
-            };
-            return Ok(());
-        }
-
-        if self.manager.is_none() && next.is_some() {
-            self.settings_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        }
-
-        if let Some(current) = self.settings_hotkey {
-            self.remove_active_command(current.id());
-            self.unregister(current)?;
-            self.settings_hotkey = None;
-        }
-
-        let Some(next) = next else {
-            self.settings_status = RegistrationStatus::Disabled;
-            return Ok(());
-        };
-        if self.has_active_command(next.id()) {
-            self.settings_status = RegistrationStatus::Failed;
-            return Err("快捷键与另一条快捷键重复".to_owned());
-        }
-        let Some(manager) = self.manager.as_ref() else {
-            self.settings_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        };
-        manager
-            .register(next)
-            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
-
-        self.settings_hotkey = Some(next);
-        self.set_active_command(next.id(), Some(HotkeyCommand::OpenSettings));
-        self.settings_status = RegistrationStatus::Registered;
-        Ok(())
+        self.apply_global_hotkey(
+            binding.map(binding_to_hotkey).transpose(),
+            HotkeyCommand::OpenSettings,
+            |runtime| (&mut runtime.settings_hotkey, &mut runtime.settings_status),
+        )
     }
 
     fn apply_clipboard_monitor(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
-        let next = binding.map(binding_to_hotkey).transpose()?;
-
-        if self.clipboard_monitor_hotkey == next {
-            self.clipboard_monitor_status = if next.is_some() {
-                RegistrationStatus::Registered
-            } else {
-                RegistrationStatus::Disabled
-            };
-            return Ok(());
-        }
-
-        if self.manager.is_none() && next.is_some() {
-            self.clipboard_monitor_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        }
-
-        if let Some(current) = self.clipboard_monitor_hotkey {
-            self.remove_active_command(current.id());
-            self.unregister(current)?;
-            self.clipboard_monitor_hotkey = None;
-        }
-
-        let Some(next) = next else {
-            self.clipboard_monitor_status = RegistrationStatus::Disabled;
-            return Ok(());
-        };
-        if self.has_active_command(next.id()) {
-            self.clipboard_monitor_status = RegistrationStatus::Failed;
-            return Err("快捷键与另一条快捷键重复".to_owned());
-        }
-        let Some(manager) = self.manager.as_ref() else {
-            self.clipboard_monitor_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        };
-        manager
-            .register(next)
-            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
-
-        self.clipboard_monitor_hotkey = Some(next);
-        self.set_active_command(next.id(), Some(HotkeyCommand::ToggleClipboardMonitor));
-        self.clipboard_monitor_status = RegistrationStatus::Registered;
-        Ok(())
+        self.apply_global_hotkey(
+            binding.map(binding_to_hotkey).transpose(),
+            HotkeyCommand::ToggleClipboardMonitor,
+            |runtime| {
+                (
+                    &mut runtime.clipboard_monitor_hotkey,
+                    &mut runtime.clipboard_monitor_status,
+                )
+            },
+        )
     }
 
     fn apply_plain_text_paste(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
-        let next = binding.map(binding_to_hotkey).transpose()?;
-
-        if self.plain_text_paste_hotkey == next {
-            self.plain_text_paste_status = if next.is_some() {
-                RegistrationStatus::Registered
-            } else {
-                RegistrationStatus::Disabled
-            };
-            return Ok(());
-        }
-
-        if self.manager.is_none() && next.is_some() {
-            self.plain_text_paste_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        }
-
-        if let Some(current) = self.plain_text_paste_hotkey {
-            self.remove_active_command(current.id());
-            self.unregister(current)?;
-            self.plain_text_paste_hotkey = None;
-        }
-
-        let Some(next) = next else {
-            self.plain_text_paste_status = RegistrationStatus::Disabled;
-            return Ok(());
-        };
-        if self.has_active_command(next.id()) {
-            self.plain_text_paste_status = RegistrationStatus::Failed;
-            return Err("快捷键与另一条快捷键重复".to_owned());
-        }
-        let Some(manager) = self.manager.as_ref() else {
-            self.plain_text_paste_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        };
-        manager
-            .register(next)
-            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
-
-        self.plain_text_paste_hotkey = Some(next);
-        self.set_active_command(next.id(), Some(HotkeyCommand::PlainTextPaste));
-        self.plain_text_paste_status = RegistrationStatus::Registered;
-        Ok(())
+        self.apply_global_hotkey(
+            binding.map(binding_to_hotkey).transpose(),
+            HotkeyCommand::PlainTextPaste,
+            |runtime| {
+                (
+                    &mut runtime.plain_text_paste_hotkey,
+                    &mut runtime.plain_text_paste_status,
+                )
+            },
+        )
     }
 
     fn apply_quick_paste(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
-        let next = binding.map(binding_to_hotkey).transpose()?;
-
-        if self.quick_paste_hotkey == next {
-            self.quick_paste_status = if next.is_some() {
-                RegistrationStatus::Registered
-            } else {
-                RegistrationStatus::Disabled
-            };
-            return Ok(());
-        }
-
-        if self.manager.is_none() && next.is_some() {
-            self.quick_paste_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        }
-
-        if let Some(current) = self.quick_paste_hotkey {
-            self.remove_active_command(current.id());
-            self.unregister(current)?;
-            self.quick_paste_hotkey = None;
-        }
-
-        let Some(next) = next else {
-            self.quick_paste_status = RegistrationStatus::Disabled;
-            return Ok(());
-        };
-        if self.has_active_command(next.id()) {
-            self.quick_paste_status = RegistrationStatus::Failed;
-            return Err("快捷键与另一条快捷键重复".to_owned());
-        }
-        let Some(manager) = self.manager.as_ref() else {
-            self.quick_paste_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        };
-        manager
-            .register(next)
-            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
-
-        self.quick_paste_hotkey = Some(next);
-        self.set_active_command(next.id(), Some(HotkeyCommand::QuickPaste));
-        self.quick_paste_status = RegistrationStatus::Registered;
-        Ok(())
+        self.apply_global_hotkey(
+            binding.map(binding_to_hotkey).transpose(),
+            HotkeyCommand::QuickPaste,
+            |runtime| {
+                (
+                    &mut runtime.quick_paste_hotkey,
+                    &mut runtime.quick_paste_status,
+                )
+            },
+        )
     }
 
     fn apply_add_favorite(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
-        let next = binding.map(binding_to_hotkey).transpose()?;
+        self.apply_global_hotkey(
+            binding.map(add_favorite_binding_to_hotkey).transpose(),
+            HotkeyCommand::AddFavorite,
+            |runtime| {
+                (
+                    &mut runtime.add_favorite_hotkey,
+                    &mut runtime.add_favorite_status,
+                )
+            },
+        )
+    }
 
-        if self.add_favorite_hotkey == next {
-            self.add_favorite_status = if next.is_some() {
-                RegistrationStatus::Registered
-            } else {
-                RegistrationStatus::Disabled
+    fn apply_global_hotkey(
+        &mut self,
+        next: Result<Option<HotKey>, String>,
+        command: HotkeyCommand,
+        select_registration: fn(&mut Self) -> (&mut Option<HotKey>, &mut RegistrationStatus),
+    ) -> Result<(), String> {
+        let mut current = *select_registration(self).0;
+        let result = (|| {
+            let next = next?;
+            if current == next {
+                return Ok(());
+            }
+            if self.manager.is_none() && next.is_some() {
+                return Err("全局快捷键管理器不可用".to_owned());
+            }
+            if let Some(previous) = current {
+                self.remove_active_command(previous.id());
+                self.unregister(previous)?;
+                current = None;
+            }
+            let Some(next) = next else {
+                return Ok(());
             };
-            return Ok(());
-        }
-
-        if self.manager.is_none() && next.is_some() {
-            self.add_favorite_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        }
-
-        if let Some(current) = self.add_favorite_hotkey {
-            self.remove_active_command(current.id());
-            self.unregister(current)?;
-            self.add_favorite_hotkey = None;
-        }
-
-        let Some(next) = next else {
-            self.add_favorite_status = RegistrationStatus::Disabled;
-            return Ok(());
+            if self.has_active_command(next.id()) {
+                return Err("快捷键与另一条快捷键重复".to_owned());
+            }
+            let manager = self
+                .manager
+                .as_ref()
+                .ok_or_else(|| "全局快捷键管理器不可用".to_owned())?;
+            manager
+                .register(next)
+                .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
+            current = Some(next);
+            self.set_active_command(next.id(), Some(command));
+            Ok(())
+        })();
+        let (hotkey, status) = select_registration(self);
+        *hotkey = current;
+        *status = if result.is_err() {
+            RegistrationStatus::Failed
+        } else if current.is_some() {
+            RegistrationStatus::Registered
+        } else {
+            RegistrationStatus::Disabled
         };
-        if self.has_active_command(next.id()) {
-            self.add_favorite_status = RegistrationStatus::Failed;
-            return Err("快捷键与另一条快捷键重复".to_owned());
-        }
-        let Some(manager) = self.manager.as_ref() else {
-            self.add_favorite_status = RegistrationStatus::Failed;
-            return Err("全局快捷键管理器不可用".to_owned());
-        };
-        manager
-            .register(next)
-            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
-
-        self.add_favorite_hotkey = Some(next);
-        self.set_active_command(next.id(), Some(HotkeyCommand::AddFavorite));
-        self.add_favorite_status = RegistrationStatus::Registered;
-        Ok(())
+        result
     }
 
     fn apply_quick_paste_index(&mut self, config: &QuickPasteShortcutConfig) {
@@ -2021,6 +1858,9 @@ pub(crate) fn set_all_session_shortcuts_only_in_window(
 }
 
 fn validate_shortcuts_config(shortcuts: &ShortcutsConfig) -> Result<(), String> {
+    if let Some(binding) = shortcuts.add_favorite.as_ref() {
+        add_favorite_binding_to_hotkey(binding)?;
+    }
     let mut registered = HashMap::new();
     let mut bindings = Vec::with_capacity(SessionShortcutId::ALL.len() + 6);
     bindings.push(("全局显示/隐藏窗口", shortcuts.toggle_main_window.as_ref()));
@@ -2231,6 +2071,14 @@ pub(crate) fn shortcut_binding_from_keystroke(
     })
 }
 
+fn add_favorite_binding_to_hotkey(binding: &ShortcutBinding) -> Result<HotKey, String> {
+    let hotkey = binding_to_hotkey(binding)?;
+    if hotkey.mods == HotkeyModifiers::CONTROL && hotkey.key == Code::KeyC {
+        return Err("快捷收藏不能使用 Ctrl+C：该组合键用于复制当前选区".to_owned());
+    }
+    Ok(hotkey)
+}
+
 fn binding_to_hotkey(binding: &ShortcutBinding) -> Result<HotKey, String> {
     if binding.key.trim().is_empty() {
         return Err("快捷键缺少主按键".to_owned());
@@ -2328,6 +2176,288 @@ fn is_modifier_key(key: &str) -> bool {
 mod tests {
     use super::*;
     use crate::config::ShortcutsConfig;
+
+    type ApplyShortcut = fn(&mut HotkeyRuntime, Option<&ShortcutBinding>) -> Result<(), String>;
+
+    const GLOBAL_SHORTCUTS: [(HotkeyCommand, ApplyShortcut); 6] = [
+        (HotkeyCommand::ToggleMainWindow, HotkeyRuntime::apply_main),
+        (HotkeyCommand::OpenSettings, HotkeyRuntime::apply_settings),
+        (
+            HotkeyCommand::ToggleClipboardMonitor,
+            HotkeyRuntime::apply_clipboard_monitor,
+        ),
+        (
+            HotkeyCommand::PlainTextPaste,
+            HotkeyRuntime::apply_plain_text_paste,
+        ),
+        (HotkeyCommand::QuickPaste, HotkeyRuntime::apply_quick_paste),
+        (
+            HotkeyCommand::AddFavorite,
+            HotkeyRuntime::apply_add_favorite,
+        ),
+    ];
+
+    fn registration(
+        runtime: &HotkeyRuntime,
+        command: HotkeyCommand,
+    ) -> (Option<HotKey>, RegistrationStatus) {
+        match command {
+            HotkeyCommand::ToggleMainWindow => (runtime.main_hotkey, runtime.status),
+            HotkeyCommand::OpenSettings => (runtime.settings_hotkey, runtime.settings_status),
+            HotkeyCommand::ToggleClipboardMonitor => (
+                runtime.clipboard_monitor_hotkey,
+                runtime.clipboard_monitor_status,
+            ),
+            HotkeyCommand::PlainTextPaste => (
+                runtime.plain_text_paste_hotkey,
+                runtime.plain_text_paste_status,
+            ),
+            HotkeyCommand::QuickPaste => (runtime.quick_paste_hotkey, runtime.quick_paste_status),
+            HotkeyCommand::AddFavorite => {
+                (runtime.add_favorite_hotkey, runtime.add_favorite_status)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn runtime_for_test(manager: Option<GlobalHotKeyManager>) -> HotkeyRuntime {
+        HotkeyRuntime {
+            #[cfg(target_os = "windows")]
+            middle_mouse: middle_mouse::runtime_without_subscription(),
+            manager,
+            main_hotkey: None,
+            settings_hotkey: None,
+            clipboard_monitor_hotkey: None,
+            plain_text_paste_hotkey: None,
+            quick_paste_hotkey: None,
+            add_favorite_hotkey: None,
+            quick_paste_index_hotkeys: HashMap::new(),
+            failed_quick_paste_index_hotkeys: HashMap::new(),
+            quick_paste_navigation_hotkeys: HashMap::new(),
+            session_hotkeys: HashMap::new(),
+            failed_session_hotkeys: HashMap::new(),
+            last_session_dispatch: HashMap::new(),
+            pressed_session_hotkeys: HashMap::new(),
+            pressed_plain_text_paste: None,
+            pressed_quick_paste: None,
+            pressed_quick_paste_navigation: HashMap::new(),
+            suspended_main_status: None,
+            suspended_settings_status: None,
+            suspended_clipboard_monitor_status: None,
+            suspended_plain_text_paste_status: None,
+            suspended_quick_paste_status: None,
+            suspended_add_favorite_status: None,
+            suspended_quick_paste_index_status: None,
+            suspended_session_statuses: HashMap::new(),
+            suspended: false,
+            global_enabled: true,
+            status: RegistrationStatus::Disabled,
+            settings_status: RegistrationStatus::Disabled,
+            clipboard_monitor_status: RegistrationStatus::Disabled,
+            plain_text_paste_status: RegistrationStatus::Disabled,
+            quick_paste_status: RegistrationStatus::Disabled,
+            add_favorite_status: RegistrationStatus::Disabled,
+            quick_paste_index_status: RegistrationStatus::Disabled,
+            active_commands: Arc::new(RwLock::new(HashMap::new())),
+            next_generation: 0,
+            next_press_generation: 0,
+        }
+    }
+
+    fn ctrl_c_binding(key: &str) -> ShortcutBinding {
+        ShortcutBinding {
+            control: true,
+            alt: false,
+            shift: false,
+            platform: false,
+            key: key.to_owned(),
+        }
+    }
+
+    #[test]
+    fn add_favorite_config_should_reject_reserved_ctrl_c_aliases() {
+        for key in ["c", "C", "KeyC"] {
+            let shortcuts = ShortcutsConfig {
+                add_favorite: Some(ctrl_c_binding(key)),
+                ..Default::default()
+            };
+
+            let error =
+                validate_shortcuts_config(&shortcuts).expect_err("快捷收藏不能占用系统复制快捷键");
+
+            assert!(error.contains("Ctrl+C"), "{key}: {error}");
+        }
+    }
+
+    #[test]
+    fn add_favorite_config_should_allow_modified_ctrl_c_and_disabled_binding() {
+        assert!(validate_shortcuts_config(&ShortcutsConfig::default()).is_ok());
+
+        for key in ["c", "C", "KeyC"] {
+            for (alt, shift, platform) in [
+                (true, false, false),
+                (false, true, false),
+                (false, false, true),
+            ] {
+                let shortcuts = ShortcutsConfig {
+                    add_favorite: Some(ShortcutBinding {
+                        alt,
+                        shift,
+                        platform,
+                        ..ctrl_c_binding(key)
+                    }),
+                    ..Default::default()
+                };
+
+                validate_shortcuts_config(&shortcuts)
+                    .expect("带额外修饰键的 Ctrl+C 不应被保留键规则拦截");
+            }
+        }
+    }
+
+    #[test]
+    fn add_favorite_runtime_should_reject_legacy_ctrl_c_before_registration() {
+        for key in ["c", "C", "KeyC"] {
+            let mut runtime = runtime_for_test(None);
+            let binding = ctrl_c_binding(key);
+
+            let error = runtime
+                .apply_add_favorite(Some(&binding))
+                .expect_err("旧配置中的 Ctrl+C 也必须被拒绝");
+
+            assert!(error.contains("Ctrl+C"), "{key}: {error}");
+            assert_eq!(runtime.add_favorite_status, RegistrationStatus::Failed);
+            assert_eq!(runtime.add_favorite_hotkey, None);
+            assert!(runtime.active_commands.read().unwrap().is_empty());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_registration_failure_should_fail_status_and_remove_old_dispatch() {
+        let modifiers = HotkeyModifiers::CONTROL | HotkeyModifiers::ALT | HotkeyModifiers::SHIFT;
+        let occupied = HotKey::new(Some(modifiers), Code::F24);
+        let previous = HotKey::new(Some(modifiers), Code::F23);
+        let binding = ShortcutBinding {
+            alt: true,
+            shift: true,
+            ..ctrl_c_binding("F24")
+        };
+        let previous_binding = ShortcutBinding {
+            key: "F23".to_owned(),
+            ..binding.clone()
+        };
+        // Managers own native windows; their same-thread Drop releases registrations,
+        // including when a failing assertion unwinds this test.
+        let blocker = GlobalHotKeyManager::new().expect("应创建预占快捷键的系统管理器");
+        blocker.register(occupied).expect("应预占测试快捷键");
+
+        for (command, apply) in GLOBAL_SHORTCUTS {
+            for replacing in [false, true] {
+                let manager = GlobalHotKeyManager::new().expect("应创建被测系统管理器");
+                let mut runtime = runtime_for_test(Some(manager));
+                if replacing {
+                    apply(&mut runtime, Some(&previous_binding)).expect("旧快捷键应注册成功");
+                    assert_eq!(
+                        runtime.active_commands.read().unwrap()[&previous.id()].command,
+                        command
+                    );
+                    if command == HotkeyCommand::QuickPaste {
+                        runtime.pressed_quick_paste = Some((previous.id(), 1, 1));
+                    }
+                }
+
+                let error = apply(&mut runtime, Some(&binding))
+                    .expect_err("系统应拒绝被另一管理器占用的快捷键");
+
+                assert!(error.contains("系统拒绝注册快捷键"), "{error}");
+                let (current, status) = registration(&runtime, command);
+                assert_eq!(
+                    status,
+                    RegistrationStatus::Failed,
+                    "{command:?}, {replacing}"
+                );
+                assert_eq!(current, None, "{command:?}, {replacing}");
+                assert!(runtime.active_commands.read().unwrap().is_empty());
+                assert!(runtime.pressed_quick_paste.is_none());
+                if replacing {
+                    blocker
+                        .register(previous)
+                        .expect("失败替换后旧快捷键应已从系统注销");
+                    blocker
+                        .unregister(previous)
+                        .expect("应释放已核实的旧快捷键");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn global_shortcuts_report_validation_and_manager_failures() {
+        for (command, apply) in GLOBAL_SHORTCUTS {
+            let mut runtime = runtime_for_test(None);
+            for key in ["", "F24"] {
+                let error = apply(&mut runtime, Some(&ctrl_c_binding(key)))
+                    .expect_err("Invalid bindings and an unavailable manager must fail");
+                assert!(error.contains(if key.is_empty() {
+                    "缺少主按键"
+                } else {
+                    "管理器不可用"
+                }));
+                assert_eq!(
+                    registration(&runtime, command),
+                    (None, RegistrationStatus::Failed),
+                    "{command:?}"
+                );
+                assert!(runtime.active_commands.read().unwrap().is_empty());
+            }
+            apply(&mut runtime, None).expect("An empty binding needs no native manager");
+            assert_eq!(
+                registration(&runtime, command),
+                (None, RegistrationStatus::Disabled),
+                "{command:?}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn global_shortcuts_preserve_unchanged_registration_and_release_cleared_bindings() {
+        let binding = ShortcutBinding {
+            alt: true,
+            shift: true,
+            ..ctrl_c_binding("F22")
+        };
+        let hotkey = binding_to_hotkey(&binding).unwrap();
+        let verifier = GlobalHotKeyManager::new().unwrap();
+        for (command, apply) in GLOBAL_SHORTCUTS {
+            let mut runtime = runtime_for_test(Some(GlobalHotKeyManager::new().unwrap()));
+            apply(&mut runtime, Some(&binding)).expect("Register the shortcut");
+            let active = runtime.active_commands.read().unwrap()[&hotkey.id()];
+            assert_eq!(active.command, command);
+            assert_eq!(
+                registration(&runtime, command),
+                (Some(hotkey), RegistrationStatus::Registered)
+            );
+
+            apply(&mut runtime, Some(&binding)).expect("Keep the same registration");
+            assert_eq!(
+                runtime.active_commands.read().unwrap()[&hotkey.id()],
+                active
+            );
+
+            apply(&mut runtime, None).expect("Clear the shortcut");
+            assert_eq!(
+                registration(&runtime, command),
+                (None, RegistrationStatus::Disabled)
+            );
+            assert!(runtime.active_commands.read().unwrap().is_empty());
+            verifier
+                .register(hotkey)
+                .expect("The native shortcut must be available again");
+            verifier.unregister(hotkey).unwrap();
+        }
+    }
 
     #[test]
     fn recorded_shortcut_should_convert_to_binding() {
