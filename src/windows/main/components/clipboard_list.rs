@@ -22,6 +22,7 @@ use gpui::{
     ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Window, canvas, div, img,
     linear_color_stop, linear_gradient, point, px, size,
 };
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::{
     ActiveTheme as _, ReorderableVirtualListSizes, ThemeColor, VirtualListScrollHandle,
     tooltip::Tooltip, v_flex, v_virtual_list_reorderable,
@@ -851,6 +852,7 @@ fn render_rows(
         list = list.py(metrics.card_vertical_inset);
     }
 
+    let heat_scrollbar_enabled = config_runtime::clipboard_config(cx).heat_scrollbar_enabled;
     let list_container = div()
         .id("clipboard-list-drop-surface")
         .relative()
@@ -891,19 +893,28 @@ fn render_rows(
             this.handle_list_scroll_wheel(event, window, cx);
         }))
         .child(list)
-        .child(heat_scrollbar::render(
-            heatmap.buckets(),
-            heat_scrollbar,
-            scroll_handle,
-            viewport_width,
+        .when(heat_scrollbar_enabled, |this| {
+            this.child(heat_scrollbar::render(
+                heatmap.buckets(),
+                heat_scrollbar,
+                scroll_handle,
+                viewport_width,
+                if horizontal {
+                    gpui::Axis::Horizontal
+                } else {
+                    gpui::Axis::Vertical
+                },
+                window,
+                cx,
+            ))
+        })
+        .when(!heat_scrollbar_enabled, |this| {
             if horizontal {
-                gpui::Axis::Horizontal
+                this.horizontal_scrollbar(scroll_handle)
             } else {
-                gpui::Axis::Vertical
-            },
-            window,
-            cx,
-        ));
+                this.vertical_scrollbar(scroll_handle)
+            }
+        });
     let list_container = if horizontal {
         let entity = cx.entity();
         gpui_component::ElementExt::on_prepaint(list_container, move |bounds, _, cx| {

@@ -534,6 +534,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.hover_preview_enabled,
             warnings,
         ),
+        heat_scrollbar_enabled: read_field(
+            object,
+            "heatScrollbarEnabled",
+            "clipboard.heatScrollbarEnabled",
+            default.heat_scrollbar_enabled,
+            warnings,
+        ),
         page_hover_switch: read_field(
             object,
             "pageHoverSwitch",
@@ -1419,6 +1426,19 @@ mod tests {
         assert!(!loaded.config.clipboard.page_hover_switch);
         assert!(loaded.config.clipboard.filter_hover_switch);
         assert!(loaded.warnings.is_empty());
+    }
+
+    #[test]
+    fn heat_scrollbar_defaults_to_enabled_and_persists_disabled_state() {
+        let loaded = from_str(r#"{"clipboard":{}}"#).expect("应当可以加载旧剪贴板设置");
+        assert!(loaded.config.clipboard.heat_scrollbar_enabled);
+
+        let loaded = from_str(r#"{"clipboard":{"heatScrollbarEnabled":false}}"#)
+            .expect("应当可以加载关闭热度滚动条的设置");
+        assert!(!loaded.config.clipboard.heat_scrollbar_enabled);
+
+        let saved = serde_json::to_value(&loaded.config).expect("热度滚动条设置应当可以保存");
+        assert_eq!(saved["clipboard"]["heatScrollbarEnabled"], false);
     }
 
     #[test]

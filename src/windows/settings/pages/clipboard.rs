@@ -332,6 +332,22 @@ impl SettingsWindowView {
                     );
                 }
             });
+        let heat_scrollbar_switch = Switch::new("settings-clipboard-heat-scrollbar")
+            .large()
+            .checked(clipboard.heat_scrollbar_enabled)
+            .accessibility_label(translator.translate("settings.clipboard.heat_scrollbar"))
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    persist_clipboard_change(
+                        view.clone(),
+                        move |clipboard| clipboard.heat_scrollbar_enabled = *checked,
+                        save_error.clone(),
+                        cx,
+                    );
+                }
+            });
         let move_pasted_to_first_in_clipboard_switch =
             Switch::new("settings-clipboard-move-pasted-to-first-in-clipboard")
                 .large()
@@ -548,6 +564,18 @@ impl SettingsWindowView {
                             .into(),
                     ),
                     hover_preview_switch,
+                ),
+            )
+            .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.clipboard.heat_scrollbar"),
+                    Some(
+                        translator
+                            .translate("settings.clipboard.heat_scrollbar_description")
+                            .into(),
+                    ),
+                    heat_scrollbar_switch,
                 ),
             )
             .child(
