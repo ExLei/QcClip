@@ -23,7 +23,9 @@ use gpui_component::input::Input;
 use gpui_component::slider::Slider;
 use gpui_component::switch::Switch;
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme as _, Sizable as _, collapsible::Collapsible, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Sizable as _, collapsible::Collapsible, h_flex, v_flex,
+};
 
 #[derive(Clone, Copy)]
 enum HoverBar {
@@ -243,6 +245,7 @@ impl SettingsWindowView {
         );
         let edge_hide_switch = Switch::new("settings-clipboard-edge-hide")
             .large()
+            .disabled(clipboard.window_position.is_screen_edge())
             .checked(clipboard.edge_hide)
             .accessibility_label(translator.translate("settings.clipboard.edge_hide"))
             .on_click({
@@ -259,6 +262,7 @@ impl SettingsWindowView {
             });
         let edge_hide_show_edge_switch = Switch::new("settings-clipboard-edge-hide-show-edge")
             .large()
+            .disabled(clipboard.window_position.is_screen_edge())
             .checked(clipboard.edge_hide_show_edge)
             .accessibility_label(translator.translate("settings.clipboard.edge_hide_show_edge"))
             .on_click({

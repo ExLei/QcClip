@@ -110,6 +110,8 @@ pub(crate) struct PersistedMainWindowState {
     pub(crate) normal_position: Option<PersistedWindowPosition>,
     /// 普通窗口和贴边窗口共用的客户区逻辑尺寸。
     pub(crate) size: Option<PersistedWindowSize>,
+    /// 按左、右、上、下分别保存边缘面板的宽度或高度。
+    pub(crate) edge_panel_sizes: [f32; 4],
     /// 侧边标签面板的宽度，使用未经过界面缩放的逻辑像素。
     pub(crate) tags_panel_width: f32,
     /// 当前保存的贴边状态；为空表示上次退出时没有贴边。
@@ -178,6 +180,7 @@ impl Default for PersistedMainWindowState {
             last_search_engine_template: None,
             normal_position: None,
             size: None,
+            edge_panel_sizes: [360.0, 360.0, 260.0, 260.0],
             tags_panel_width: Self::DEFAULT_TAGS_PANEL_WIDTH,
             edge: None,
             gallery_sort: PersistedGallerySort::default(),
@@ -205,6 +208,22 @@ impl PersistedMainWindowState {
         self.size
             .filter(|size| size.is_valid())
             .unwrap_or(PersistedWindowSize::DEFAULT)
+    }
+
+    pub(crate) fn restored_edge_panel_size(&self, side: PersistedEdgeSide) -> f32 {
+        let fallback = match side {
+            PersistedEdgeSide::Left | PersistedEdgeSide::Right => 360.0,
+            PersistedEdgeSide::Top | PersistedEdgeSide::Bottom => 260.0,
+        };
+        valid_edge_panel_size(self.edge_panel_sizes[side as usize], fallback)
+    }
+}
+
+fn valid_edge_panel_size(size: f32, fallback: f32) -> f32 {
+    if size.is_finite() {
+        size.max(PersistedWindowSize::MIN_SIZE)
+    } else {
+        fallback
     }
 }
 
@@ -368,6 +387,21 @@ where
     }
 }
 
+pub(crate) fn set_main_window_edge_panel_size(side: PersistedEdgeSide, size: f32, cx: &mut App) {
+    if !size.is_finite() || size < PersistedWindowSize::MIN_SIZE {
+        return;
+    }
+    let mut state = state(cx);
+    let stored = &mut state.main_window.edge_panel_sizes[side as usize];
+    if *stored == size {
+        return;
+    }
+    *stored = size;
+    if let Err(error) = set_state(state, cx) {
+        tracing::error!("保存边缘窗口尺寸失败：{error}");
+    }
+}
+
 pub(crate) fn set_preview_image_base_size(image_base_size: f32, cx: &mut App) {
     let changed = cx.update_global::<StateRuntime, _>(|runtime, _| {
         runtime.update_preview_image_base_size(image_base_size)
@@ -472,6 +506,23 @@ mod tests {
     }
 
     #[test]
+    fn edge_panel_sizes_have_independent_defaults_and_minimums() {
+        use super::PersistedEdgeSide::{Bottom, Left, Right, Top};
+        let state = PersistedMainWindowState::default();
+        assert_eq!(state.restored_edge_panel_size(Left), 360.0);
+        assert_eq!(state.restored_edge_panel_size(Top), 260.0);
+        let state = PersistedMainWindowState {
+            edge_panel_sizes: [700.0, 420.0, f32::NAN, 300.0],
+            ..Default::default()
+        };
+        assert_eq!(state.restored_edge_panel_size(Left), 700.0);
+        assert_eq!(state.restored_edge_panel_size(Right), 420.0);
+        assert_eq!(state.restored_edge_panel_size(Top), 260.0);
+        assert_eq!(state.restored_edge_panel_size(Bottom), 300.0);
+        assert_eq!(state.restored_size(), PersistedWindowSize::DEFAULT);
+    }
+
+    #[test]
     fn restored_window_size_rejects_collapsed_and_non_finite_sizes() {
         for size in [
             PersistedWindowSize {
@@ -555,6 +606,7 @@ mod tests {
                     width: 480.0,
                     height: 640.0,
                 }),
+                edge_panel_sizes: [420.0, 480.0, 280.0, 320.0],
                 tags_panel_width: 240.0,
                 edge: None,
                 gallery_sort: PersistedGallerySort::default(),

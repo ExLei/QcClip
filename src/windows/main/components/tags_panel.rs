@@ -16,7 +16,7 @@ use gpui_component::{ActiveTheme as _, Sizable, h_flex, input::Input, tooltip::T
 #[cfg(target_os = "windows")]
 use crate::platform::drag_preview::DragPreviewService;
 use crate::{
-    config::{TitlebarPosition, WindowMaterial},
+    config::{ClipboardWindowPosition, TitlebarPosition, WindowMaterial},
     config_runtime,
     domain::clipboard::Tag,
     i18n,
@@ -1047,17 +1047,30 @@ pub fn render(
             .min(content_right - panel_width);
         panel = panel
             .absolute()
-            .top(if titlebar_position.is_vertical() {
-                px(34.5 * crate::ui::scale::window_scale(window))
-            } else {
-                px(70.5 * crate::ui::scale::window_scale(window))
-            })
             .left(panel_left)
             .w(panel_width)
-            .max_h(relative(0.70))
-            .border_t_0()
-            .rounded_bl(px(16.0))
-            .rounded_br(px(16.0));
+            .max_h(relative(0.70));
+        panel = if clipboard.window_position == ClipboardWindowPosition::ScreenBottomCenter {
+            panel
+                .bottom(ui_rem(super::symbol_sidebar::TAB_BAR_HEIGHT))
+                .border_b_0()
+                .rounded_tl(px(16.0))
+                .rounded_tr(px(16.0))
+        } else {
+            panel
+                .top(
+                    if clipboard.window_position == ClipboardWindowPosition::ScreenTopCenter {
+                        px(super::symbol_sidebar::TAB_BAR_HEIGHT * scale)
+                    } else if titlebar_position.is_vertical() {
+                        px(34.5 * scale)
+                    } else {
+                        px(70.5 * scale)
+                    },
+                )
+                .border_t_0()
+                .rounded_bl(px(16.0))
+                .rounded_br(px(16.0))
+        };
     }
 
     panel

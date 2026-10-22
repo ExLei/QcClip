@@ -1,4 +1,5 @@
 use super::*;
+use gpui::Along;
 
 const MAX_HEAT_BUCKETS: usize = 256;
 
@@ -131,7 +132,7 @@ pub(crate) struct HeatScrollbarState {
     pub(crate) thumb_bounds: gpui::Bounds<Pixels>,
     // 保存按下位置和滑块内的抓取比例，行高变化后仍让滑块跟随鼠标。
     pub(crate) drag_origin: Option<(Point<Pixels>, f32)>,
-    pub(crate) drag_pointer_y: Pixels,
+    pub(crate) drag_pointer: Point<Pixels>,
     hovered: bool,
     last_scroll_offset: Option<Pixels>,
     hide_deadline: Option<Instant>,
@@ -181,8 +182,12 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn observe_heat_scrollbar_scroll(&mut self, cx: &mut Context<Self>) {
-        let offset = self.list_scroll_handle.as_ref().offset().y;
+    pub(crate) fn observe_heat_scrollbar_scroll(
+        &mut self,
+        axis: gpui::Axis,
+        cx: &mut Context<Self>,
+    ) {
+        let offset = self.list_scroll_handle.as_ref().offset().along(axis);
         if !self.heat_scrollbar.update_scroll_offset(offset) {
             return;
         }

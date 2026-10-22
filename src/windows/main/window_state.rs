@@ -55,6 +55,7 @@ pub(crate) struct State {
     visibility_transition_active: bool,
     normal_bounds: Option<platform_window::PhysicalClientBounds>,
     normal_logical_size: Option<(f32, f32)>,
+    panel_attachment: Option<EdgeAttachment>,
     mouse_leave_state: MouseLeaveState,
     edge_reveal_suppressed: bool,
     edge_reveal_blocked: bool,
@@ -71,6 +72,7 @@ impl State {
         self.visibility_transition_active = false;
         self.normal_bounds = None;
         self.normal_logical_size = None;
+        self.panel_attachment = None;
         self.mouse_leave_state = MouseLeaveState::Disarmed;
         self.edge_reveal_suppressed = false;
         self.edge_reveal_blocked = false;
@@ -155,7 +157,17 @@ impl State {
     }
 
     pub(crate) fn can_record_window_geometry(&self) -> bool {
-        self.is_logically_visible() && !self.visibility_transition_active
+        self.is_logically_visible()
+            && !self.visibility_transition_active
+            && self.panel_attachment.is_none()
+    }
+
+    pub(crate) fn panel_attachment(&self) -> Option<EdgeAttachment> {
+        self.panel_attachment
+    }
+
+    pub(crate) fn set_panel_attachment(&mut self, attachment: Option<EdgeAttachment>) {
+        self.panel_attachment = attachment;
     }
 
     pub(crate) fn is_logically_visible(&self) -> bool {
@@ -276,6 +288,22 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edge_panel_keeps_normal_geometry_and_does_not_enable_edge_reveal() {
+        let mut state = State::default();
+        let normal = attachment().client_bounds;
+        state.remember_normal_geometry(normal, (360.0, 520.0));
+        state.set_panel_attachment(Some(attachment()));
+        assert!(!state.can_record_window_geometry());
+        assert!(state.edge_attachment().is_none());
+        assert_eq!(state.normal_bounds(), Some(normal));
+        state.set_visibility(false);
+        assert!(state.panel_attachment().is_some());
+        state.set_panel_attachment(None);
+        state.set_visibility(true);
+        assert!(state.can_record_window_geometry());
+    }
 
     fn attachment() -> EdgeAttachment {
         EdgeAttachment {

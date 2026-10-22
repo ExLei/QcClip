@@ -415,26 +415,106 @@ pub(crate) fn attach_if_near_edge(
 }
 
 pub(crate) fn sync_window_size_after_native_resize(cx: &mut App) {
-    let (window, can_record) = cx.read_global::<MainWindowService, _>(|service, _| {
+    let (window, can_record, panel) = cx.read_global::<MainWindowService, _>(|service, _| {
         (
             service.window,
             service.window_state.can_record_window_geometry(),
+            service.window_state.panel_attachment(),
         )
     });
     let Some(window) = window else {
         return;
     };
     let result = window.update(cx, |_, window, _| {
-        if !platform_window::take_window_resize_finished(window)? || !can_record {
+        if !platform_window::take_window_resize_finished(window)?
+            || (!can_record && panel.is_none())
+        {
             return Ok::<_, String>(None);
         }
-        let bounds = platform_window::physical_client_bounds(window)?;
+        let mut bounds = platform_window::physical_client_bounds(window)?;
         let logical_size = platform_window::CoordinateConverter::new(window.scale_factor())
             .logical_client_size(bounds);
-        Ok(Some((bounds, logical_size)))
+        if let Some(panel) = panel {
+            let screen = panel.screen_bounds;
+            let horizontal = matches!(
+                panel.side,
+                window_state::EdgeSide::Top | window_state::EdgeSide::Bottom
+            );
+            let axis_limit = if horizontal {
+                screen.height
+            } else {
+                screen.width
+            };
+            let thickness = platform_window::CoordinateConverter::new(window.scale_factor())
+                .logical_to_physical_i32(
+                    (if horizontal {
+                        logical_size.1
+                    } else {
+                        logical_size.0
+                    })
+                    .max(PersistedWindowSize::MIN_SIZE),
+                )
+                .min((axis_limit / 2.0) as i32);
+            let screen_left = screen.x.round() as i32;
+            let screen_top = screen.y.round() as i32;
+            let screen_right = (screen.x + screen.width).round() as i32;
+            let screen_bottom = (screen.y + screen.height).round() as i32;
+            match panel.side {
+                window_state::EdgeSide::Left => {
+                    bounds.left = screen_left;
+                    bounds.right = bounds.left.saturating_add(thickness);
+                    bounds.top = screen_top;
+                    bounds.bottom = screen_bottom;
+                }
+                window_state::EdgeSide::Right => {
+                    bounds.right = screen_right;
+                    bounds.left = bounds.right.saturating_sub(thickness);
+                    bounds.top = screen_top;
+                    bounds.bottom = screen_bottom;
+                }
+                window_state::EdgeSide::Top => {
+                    bounds.top = screen_top;
+                    bounds.bottom = bounds.top.saturating_add(thickness);
+                    bounds.left = screen_left;
+                    bounds.right = screen_right;
+                }
+                window_state::EdgeSide::Bottom => {
+                    bounds.bottom = screen_bottom;
+                    bounds.top = bounds.bottom.saturating_sub(thickness);
+                    bounds.left = screen_left;
+                    bounds.right = screen_right;
+                }
+            }
+            let logical = platform_window::CoordinateConverter::new(window.scale_factor())
+                .physical_to_logical(thickness as f32);
+            return Ok(Some((bounds, logical_size, Some((panel, logical)))));
+        }
+        Ok(Some((bounds, logical_size, None)))
     });
     match result {
-        Ok(Ok(Some((bounds, logical_size)))) => {
+        Ok(Ok(Some((bounds, logical_size, panel)))) => {
+            if let Some((mut attachment, thickness)) = panel {
+                attachment.client_bounds = bounds;
+                if let Err(error) = window.update(cx, |_, window, cx| {
+                    platform_window::set_client_bounds(window, bounds)?;
+                    window.bounds_changed(cx);
+                    Ok::<_, String>(())
+                }) {
+                    tracing::error!("调整边缘窗口尺寸失败：{error}");
+                    return;
+                }
+                cx.update_global::<MainWindowService, _>(|service, _| {
+                    service.window_state.set_panel_attachment(Some(attachment));
+                });
+                let side = match attachment.side {
+                    window_state::EdgeSide::Left => PersistedEdgeSide::Left,
+                    window_state::EdgeSide::Right => PersistedEdgeSide::Right,
+                    window_state::EdgeSide::Top => PersistedEdgeSide::Top,
+                    window_state::EdgeSide::Bottom => PersistedEdgeSide::Bottom,
+                };
+                crate::state_runtime::set_main_window_edge_panel_size(side, thickness, cx);
+                return;
+            }
             let size = PersistedWindowSize {
                 width: logical_size.0,
                 height: logical_size.1,

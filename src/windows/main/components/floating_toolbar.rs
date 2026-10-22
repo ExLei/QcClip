@@ -56,7 +56,15 @@ pub fn render(
     let animations_enabled =
         crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::FloatingToolbar);
     let translator = i18n::translator(cx);
-    let show_scroll_top = scroll_handle.offset().y < px(-SCROLL_TOP_THRESHOLD);
+    let horizontal = crate::config_runtime::clipboard_config(cx)
+        .window_position
+        .uses_horizontal_list();
+    let scroll_offset = if horizontal {
+        scroll_handle.offset().x
+    } else {
+        scroll_handle.offset().y
+    };
+    let show_scroll_top = scroll_offset < px(-SCROLL_TOP_THRESHOLD);
     let ui_scale = crate::ui::scale::theme_scale(cx);
     let toolbar_height = toolbar_height(show_scroll_top, show_new_favorite) * ui_scale;
     // 没有任何功能按钮需要显示时整体隐藏（含拖拽手柄）。
@@ -83,12 +91,17 @@ pub fn render(
         })
         .child(hover_icon(
             "floating-toolbar-scroll-top",
-            "arrow-bar-to-up",
+            if horizontal {
+                "arrow-bar-to-left"
+            } else {
+                "arrow-bar-to-up"
+            },
             14.0,
             theme.foreground,
         ))
         .on_click(cx.listener(|this, _, _, cx| {
             let mut offset = this.list_scroll_handle.offset();
+            offset.x = px(0.0);
             offset.y = px(0.0);
             this.list_scroll_handle.set_offset(offset);
             cx.notify();

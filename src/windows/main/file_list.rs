@@ -430,19 +430,23 @@ impl Render for FileListView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let translator = i18n::translator(cx);
         let appearance = crate::config_runtime::appearance_config(cx);
+        let item_height = if crate::config_runtime::clipboard_config(cx)
+            .window_position
+            .uses_horizontal_list()
+        {
+            ListItemHeight::Large
+        } else {
+            appearance.list_item_height
+        };
         let presentation = file_list_presentation(
-            appearance.list_item_height,
+            item_height,
             window.rem_size(),
             usize::from(appearance.adaptive_max_lines),
         )
         .with_font_metrics(AppFontMetrics::from_window(window, cx));
         let visible_count = self.paths.len().min(presentation.visible_entries);
         let entry_height = presentation.entry_height();
-        let entry_gap = presentation.entry_gap(
-            window.rem_size(),
-            appearance.list_item_height,
-            visible_count,
-        );
+        let entry_gap = presentation.entry_gap(window.rem_size(), item_height, visible_count);
         let text_gap = presentation.text_gap();
         let cache_range = 0..visible_count;
         self.trim_cache(cache_range.clone(), window);

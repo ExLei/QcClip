@@ -324,10 +324,23 @@ pub fn run() {
                                             crate::windows::main::MainWindowService::window_handle(
                                                 cx,
                                             )
-                                            && let Err(error) = window
-                                                .update(cx, |_, window, _| window.activate_window())
                                         {
-                                            tracing::error!("激活已有实例主窗口失败：{error}");
+                                            let result = window.update(cx, |_, window, cx| {
+                                                if crate::config_runtime::clipboard_config(cx)
+                                                    .window_position
+                                                    .is_screen_edge()
+                                                {
+                                                    crate::platform::window::activate_window_preserving_bounds(window)
+                                                } else {
+                                                    window.activate_window();
+                                                    Ok(())
+                                                }
+                                            });
+                                            match result {
+                                                Ok(Ok(())) => {}
+                                                Ok(Err(error)) => tracing::error!("激活已有实例主窗口失败：{error}"),
+                                                Err(error) => tracing::error!("激活已有实例主窗口失败：{error}"),
+                                            }
                                         }
                                         cx.activate(true);
                                     });

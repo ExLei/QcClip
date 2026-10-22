@@ -94,7 +94,9 @@ impl ConfigRuntime {
         if previous.appearance != config.appearance {
             apply_appearance_change(&previous.appearance, &config.appearance, cx);
         }
-        if previous.clipboard.edge_hide != config.clipboard.edge_hide {
+        if previous.clipboard.edge_hide != config.clipboard.edge_hide
+            && previous.clipboard.window_position == config.clipboard.window_position
+        {
             crate::windows::main::MainWindowService::set_edge_hide_enabled(
                 config.clipboard.edge_hide,
                 cx,
@@ -102,6 +104,9 @@ impl ConfigRuntime {
         }
         if previous.clipboard.edge_hide_show_edge != config.clipboard.edge_hide_show_edge {
             crate::windows::main::MainWindowService::refresh_edge_hide_position(cx);
+        }
+        if previous.clipboard.window_position != config.clipboard.window_position {
+            crate::windows::main::MainWindowService::refresh_window_position(cx);
         }
         if previous.clipboard.hover_preview_enabled && !config.clipboard.hover_preview_enabled {
             crate::windows::main::MainWindowService::cancel_hover_preview(cx);
@@ -556,6 +561,11 @@ pub(crate) fn set_appearance_config(
     appearance: AppearanceConfig,
     cx: &mut App,
 ) -> Result<bool, ConfigError> {
+    let horizontal_list = clipboard_config(cx).window_position.uses_horizontal_list();
+    let mut appearance = appearance;
+    if horizontal_list && appearance.titlebar_position.is_vertical() {
+        appearance.titlebar_position = crate::config::TitlebarPosition::Top;
+    }
     let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
         (
             runtime.config.appearance.clone(),
@@ -663,18 +673,25 @@ pub(crate) fn set_clipboard_config(
 
     let edge_hide = clipboard.edge_hide;
     let edge_hide_show_edge = clipboard.edge_hide_show_edge;
+    let window_position = clipboard.window_position;
     let hover_preview_enabled = clipboard.hover_preview_enabled;
+    if window_position.uses_horizontal_list() && next.appearance.titlebar_position.is_vertical() {
+        next.appearance.titlebar_position = crate::config::TitlebarPosition::Top;
+    }
     next.clipboard = clipboard;
     persist_config(&path, &next)?;
 
     cx.update_global::<ConfigRuntime, _>(|runtime, _| {
         runtime.config = next;
     });
-    if current.edge_hide != edge_hide {
+    if current.edge_hide != edge_hide && current.window_position == window_position {
         crate::windows::main::MainWindowService::set_edge_hide_enabled(edge_hide, cx);
     }
     if current.edge_hide_show_edge != edge_hide_show_edge {
         crate::windows::main::MainWindowService::refresh_edge_hide_position(cx);
+    }
+    if current.window_position != window_position {
+        crate::windows::main::MainWindowService::refresh_window_position(cx);
     }
     if current.hover_preview_enabled && !hover_preview_enabled {
         crate::windows::main::MainWindowService::cancel_hover_preview(cx);
@@ -702,8 +719,11 @@ pub(crate) fn reset_clipboard_config(cx: &mut App) -> Result<bool, ConfigError> 
     cx.update_global::<ConfigRuntime, _>(|runtime, _| {
         runtime.config = next;
     });
-    if current.edge_hide {
+    if current.edge_hide && current.window_position == ClipboardConfig::default().window_position {
         crate::windows::main::MainWindowService::set_edge_hide_enabled(false, cx);
+    }
+    if current.window_position != ClipboardConfig::default().window_position {
+        crate::windows::main::MainWindowService::refresh_window_position(cx);
     }
     cx.refresh_windows();
     Ok(true)

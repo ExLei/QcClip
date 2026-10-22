@@ -1,6 +1,7 @@
 use super::*;
 use crate::windows::main::state::{HeatBucket, HeatScrollbarState};
 use crate::windows::main::window_drag::exclude_from_window_drag;
+use gpui::{Along, Axis};
 
 fn item_ratio(index: usize, total: usize, item_offset: &impl Fn(usize) -> Option<Pixels>) -> f32 {
     if let (Some(offset), Some(height)) = (item_offset(index), item_offset(total))
@@ -14,15 +15,18 @@ fn item_ratio(index: usize, total: usize, item_offset: &impl Fn(usize) -> Option
 fn bucket_at(
     buckets: &[HeatBucket],
     bounds: gpui::Bounds<Pixels>,
-    y: Pixels,
+    position: Pixels,
+    axis: Axis,
     item_offset: impl Fn(usize) -> Option<Pixels>,
 ) -> Option<usize> {
     let total = buckets.last()?.range.end;
-    let height = f32::from(bounds.size.height);
-    if height <= 0.0 {
+    let start = bounds.origin.along(axis);
+    let length = bounds.size.along(axis);
+    let length = f32::from(length);
+    if length <= 0.0 {
         return None;
     }
-    let ratio = (f32::from(y - bounds.top()) / height).clamp(0.0, 1.0);
+    let ratio = (f32::from(position - start) / length).clamp(0.0, 1.0);
     Some(
         buckets
             .partition_point(|bucket| item_ratio(bucket.range.end, total, &item_offset) <= ratio)
@@ -72,13 +76,13 @@ fn heat_runs(buckets: &[HeatBucket]) -> Vec<(Range<usize>, u8)> {
 
 fn overview_buckets(
     buckets: Rc<Vec<HeatBucket>>,
-    height: Pixels,
+    length: Pixels,
     scale: f32,
 ) -> Rc<Vec<HeatBucket>> {
-    let count = if height <= px(0.0) {
+    let count = if length <= px(0.0) {
         256
     } else {
-        ((f32::from(height) / (3.0 * scale)).floor() as usize).clamp(1, 256)
+        ((f32::from(length) / (3.0 * scale)).floor() as usize).clamp(1, 256)
     };
     if buckets.len() <= count {
         return buckets;
@@ -109,67 +113,91 @@ fn drag_delta(
     current: Point<Pixels>,
     dragging: bool,
     scale: f32,
+    axis: Axis,
 ) -> Option<Pixels> {
     let delta = current - start;
     let distance_squared = f32::from(delta.x).powi(2) + f32::from(delta.y).powi(2);
-    (dragging || distance_squared >= (4.0 * scale).powi(2)).then_some(delta.y)
+    (dragging || distance_squared >= (4.0 * scale).powi(2)).then_some(delta.along(axis))
 }
 
 fn thumb_bounds(
     track: gpui::Bounds<Pixels>,
-    viewport_height: Pixels,
+    viewport_length: Pixels,
     max_offset: Pixels,
     offset: Pixels,
     scale: f32,
+    axis: Axis,
 ) -> gpui::Bounds<Pixels> {
-    let height = track.size.height.max(px(0.0));
-    let content_height = viewport_height + max_offset;
-    let fraction = if content_height > px(0.0) {
-        (f32::from(viewport_height) / f32::from(content_height)).clamp(0.0, 1.0)
+    let track_length = track.size.along(axis).max(px(0.0));
+    let content_length = viewport_length + max_offset;
+    let fraction = if content_length > px(0.0) {
+        (f32::from(viewport_length) / f32::from(content_length)).clamp(0.0, 1.0)
     } else {
         1.0
     };
-    let thumb_height = (height * fraction).max(px(24.0 * scale)).min(height);
+    let thumb_length = (track_length * fraction)
+        .max(px(24.0 * scale))
+        .min(track_length);
     let progress = if max_offset > px(0.0) {
         (-f32::from(offset) / f32::from(max_offset)).clamp(0.0, 1.0)
     } else {
         0.0
     };
     gpui::Bounds::new(
-        point(
-            track.left() + track.size.width / 12.0,
-            track.top() + (height - thumb_height) * progress,
-        ),
-        size(track.size.width * (5.0 / 6.0), thumb_height),
+        track
+            .origin
+            .apply_along(axis, |start| {
+                start + (track_length - thumb_length) * progress
+            })
+            .apply_along(axis.invert(), |start| {
+                start + track.size.along(axis.invert()) / 12.0
+            }),
+        track
+            .size
+            .apply_along(axis, |_| thumb_length)
+            .apply_along(axis.invert(), |thickness| thickness * (5.0 / 6.0)),
     )
 }
 
 fn pointer_offset(
     track: gpui::Bounds<Pixels>,
-    thumb_height: Pixels,
+    thumb_length: Pixels,
     grip: f32,
-    pointer_y: Pixels,
+    pointer_position: Pixels,
     max_offset: Pixels,
+    axis: Axis,
 ) -> Pixels {
-    let travel = track.size.height - thumb_height;
+    let start = track.origin.along(axis);
+    let track_length = track.size.along(axis);
+    let travel = track_length - thumb_length;
     if travel <= px(0.0) || max_offset <= px(0.0) {
         return px(0.0);
     }
-    (-max_offset * (f32::from(pointer_y - track.top() - thumb_height * grip) / f32::from(travel)))
+    (-max_offset * (f32::from(pointer_position - start - thumb_length * grip) / f32::from(travel)))
         .clamp(-max_offset, px(0.0))
 }
 
 fn track_press_offset(
     track: gpui::Bounds<Pixels>,
     thumb: gpui::Bounds<Pixels>,
-    y: Pixels,
+    position: Pixels,
     max_offset: Pixels,
+    axis: Axis,
 ) -> Option<Pixels> {
     // 滑块的抓取范围覆盖整条交互区，保留鼠标在滑块内的相对位置。
-    if thumb.size.height > px(0.0) && y >= thumb.top() && y <= thumb.bottom() {
+    let thumb_start = thumb.origin.along(axis);
+    let thumb_length = thumb.size.along(axis);
+    if thumb_length > px(0.0) && position >= thumb_start && position <= thumb_start + thumb_length {
         return None;
     }
-    Some(pointer_offset(track, thumb.size.height, 0.5, y, max_offset))
+    Some(pointer_offset(
+        track,
+        thumb_length,
+        0.5,
+        position,
+        max_offset,
+        axis,
+    ))
 }
 
 pub(super) fn render(
@@ -177,16 +205,19 @@ pub(super) fn render(
     state: &HeatScrollbarState,
     scroll_handle: &VirtualListScrollHandle,
     list_width: Pixels,
+    axis: Axis,
     window: &Window,
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
+    let horizontal = axis == Axis::Horizontal;
     if buckets.is_empty() {
         return div().into_any_element();
     }
     let theme = cx.theme().colors;
     let dark = cx.theme().mode.is_dark();
     let scale = crate::ui::scale::window_scale(window);
-    let buckets = overview_buckets(buckets, state.bounds.size.height, scale);
+    let track_length = state.bounds.size.along(axis);
+    let buckets = overview_buckets(buckets, track_length, scale);
     let entity = cx.entity();
     let total = buckets.last().expect("热度分段不能为空").range.end;
     let paint_runs = heat_runs(&buckets);
@@ -207,10 +238,12 @@ pub(super) fn render(
     let rail = div()
         .id("clipboard-heat-scrollbar")
         .absolute()
-        .right_0()
-        .top_0()
-        .bottom_0()
-        .w(ui_rem(28.0))
+        .when(horizontal, |this| {
+            this.left_0().right_0().bottom_0().h(ui_rem(28.0))
+        })
+        .when(!horizontal, |this| {
+            this.right_0().top_0().bottom_0().w(ui_rem(28.0))
+        })
         .cursor_pointer()
         .block_mouse_except_scroll()
         .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
@@ -230,7 +263,8 @@ pub(super) fn render(
                 let slot = bucket_at(
                     &move_buckets,
                     this.heat_scrollbar.bounds,
-                    event.position.y,
+                    event.position.along(axis),
+                    axis,
                     |index| this.list_scroll_handle.item_offset(index),
                 );
                 if slot != this.heat_scrollbar.hovered_bucket {
@@ -249,33 +283,39 @@ pub(super) fn render(
                 let jump_offset = track_press_offset(
                     this.heat_scrollbar.bounds,
                     this.heat_scrollbar.thumb_bounds,
-                    event.position.y,
-                    handle.max_offset().y,
+                    event.position.along(axis),
+                    handle.max_offset().along(axis),
+                    axis,
                 );
                 // 比例偏移只用于计算拖动锚点，点击直接定位热点。
-                let offset = jump_offset.unwrap_or_else(|| handle.offset().y);
+                let offset = jump_offset.unwrap_or_else(|| handle.offset().along(axis));
                 this.heat_scrollbar.dragging = jump_offset.is_none();
                 this.heat_scrollbar.hovered_bucket = None;
                 let thumb = thumb_bounds(
                     this.heat_scrollbar.bounds,
-                    handle.bounds().size.height,
-                    handle.max_offset().y,
+                    handle.bounds().size.along(axis),
+                    handle.max_offset().along(axis),
                     offset,
                     scale,
+                    axis,
                 );
-                let grip = if thumb.size.height > px(0.0) {
-                    (f32::from(event.position.y - thumb.top()) / f32::from(thumb.size.height))
+                let thumb_start = thumb.origin.along(axis);
+                let thumb_length = thumb.size.along(axis);
+                let pointer_position = event.position.along(axis);
+                let grip = if thumb_length > px(0.0) {
+                    (f32::from(pointer_position - thumb_start) / f32::from(thumb_length))
                         .clamp(0.0, 1.0)
                 } else {
                     0.5
                 };
                 this.heat_scrollbar.drag_origin = Some((event.position, grip));
-                this.heat_scrollbar.drag_pointer_y = event.position.y;
+                this.heat_scrollbar.drag_pointer = event.position;
                 if jump_offset.is_some()
                     && let Some(slot) = bucket_at(
                         &press_buckets,
                         this.heat_scrollbar.bounds,
-                        event.position.y,
+                        pointer_position,
+                        axis,
                         |index| this.list_scroll_handle.item_offset(index),
                     )
                     && let Some(bucket) = press_buckets.get(slot)
@@ -309,23 +349,31 @@ pub(super) fn render(
                         }
                         return;
                     }
-                    if drag_delta(start, event.position, this.heat_scrollbar.dragging, scale)
-                        .is_none()
+                    if drag_delta(
+                        start,
+                        event.position,
+                        this.heat_scrollbar.dragging,
+                        scale,
+                        axis,
+                    )
+                    .is_none()
                     {
                         return;
                     }
                     this.heat_scrollbar.dragging = true;
                     this.heat_scrollbar.hovered_bucket = None;
-                    this.heat_scrollbar.drag_pointer_y = event.position.y;
+                    this.heat_scrollbar.drag_pointer = event.position;
                     let handle = this.list_scroll_handle.as_ref();
                     let mut offset = handle.offset();
-                    offset.y = pointer_offset(
+                    let value = pointer_offset(
                         this.heat_scrollbar.bounds,
-                        this.heat_scrollbar.thumb_bounds.size.height,
+                        this.heat_scrollbar.thumb_bounds.size.along(axis),
                         grip,
-                        event.position.y,
-                        handle.max_offset().y,
+                        event.position.along(axis),
+                        handle.max_offset().along(axis),
+                        axis,
                     );
+                    offset = offset.apply_along(axis, |_| value);
                     handle.set_offset(offset);
                     cx.stop_propagation();
                     cx.notify();
@@ -364,7 +412,7 @@ pub(super) fn render(
                     move |bounds, window, cx| {
                         entity.update(cx, |this, cx| {
                             this.heat_scrollbar.bounds = bounds;
-                            this.observe_heat_scrollbar_scroll(cx);
+                            this.observe_heat_scrollbar_scroll(axis, cx);
                             // Windows 离开事件只刷新窗口状态，不能依赖旧命中框清除悬停。
                             if !window.is_window_hovered()
                                 && this.heat_scrollbar.clear_on_window_exit()
@@ -383,16 +431,31 @@ pub(super) fn render(
             div()
                 .id("clipboard-heat-scrollbar-track")
                 .absolute()
-                .right_0()
-                .top_0()
-                .bottom_0()
-                .w(ui_rem(if expanded { 24.0 } else { 12.0 }))
+                .when(horizontal, |this| {
+                    this.left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(ui_rem(if expanded { 24.0 } else { 12.0 }))
+                })
+                .when(!horizontal, |this| {
+                    this.right_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(ui_rem(if expanded { 24.0 } else { 12.0 }))
+                })
                 .bg(rail_background)
-                .border_l_1()
+                .when(horizontal, |this| this.border_t_1())
+                .when(!horizontal, |this| this.border_l_1())
                 .border_color(gpui::ColorExt::opacity(&theme.muted_foreground, 0.16))
                 .opacity(if visible { 1.0 } else { 0.0 })
                 .when(animations_enabled, |this| {
-                    this.transitions(|transitions| transitions.w(motion.clone()).opacity(motion))
+                    this.transitions(|transitions| {
+                        if horizontal {
+                            transitions.h(motion.clone()).opacity(motion)
+                        } else {
+                            transitions.w(motion.clone()).opacity(motion)
+                        }
+                    })
                 })
                 .child(
                     canvas(
@@ -403,31 +466,34 @@ pub(super) fn render(
                                     let handle = this.list_scroll_handle.as_ref();
                                     let mut thumb = thumb_bounds(
                                         bounds,
-                                        handle.bounds().size.height,
-                                        handle.max_offset().y,
-                                        handle.offset().y,
+                                        handle.bounds().size.along(axis),
+                                        handle.max_offset().along(axis),
+                                        handle.offset().along(axis),
                                         scale,
+                                        axis,
                                     );
                                     if this.heat_scrollbar.dragging
                                         && let Some((_, grip)) = this.heat_scrollbar.drag_origin
                                     {
                                         let mut offset = handle.offset();
-                                        let y = pointer_offset(
+                                        let value = pointer_offset(
                                             bounds,
-                                            thumb.size.height,
+                                            thumb.size.along(axis),
                                             grip,
-                                            this.heat_scrollbar.drag_pointer_y,
-                                            handle.max_offset().y,
+                                            this.heat_scrollbar.drag_pointer.along(axis),
+                                            handle.max_offset().along(axis),
+                                            axis,
                                         );
-                                        if offset.y != y {
-                                            offset.y = y;
+                                        if (offset.along(axis)) != value {
+                                            offset = offset.apply_along(axis, |_| value);
                                             handle.set_offset(offset);
                                             thumb = thumb_bounds(
                                                 bounds,
-                                                handle.bounds().size.height,
-                                                handle.max_offset().y,
-                                                y,
+                                                handle.bounds().size.along(axis),
+                                                handle.max_offset().along(axis),
+                                                value,
                                                 scale,
+                                                axis,
                                             );
                                             cx.notify();
                                         }
@@ -440,30 +506,34 @@ pub(super) fn render(
                             let this = entity.read(cx);
                             let state = &this.heat_scrollbar;
                             let item_offset = |index| this.list_scroll_handle.item_offset(index);
-                            let width = bounds.size.width / 3.0;
-                            let x = bounds.left() + width;
+                            let thickness = bounds.size.along(axis.invert()) / 3.0;
                             let heat_bounds = gpui::Bounds::new(
-                                point(x, bounds.top()),
-                                size(width, bounds.size.height),
+                                bounds
+                                    .origin
+                                    .apply_along(axis.invert(), |start| start + thickness),
+                                bounds.size.apply_along(axis.invert(), |_| thickness),
                             );
                             window.paint_quad(
-                                gpui::fill(heat_bounds, heat_color(0)).corner_radii(width / 2.0),
+                                gpui::fill(heat_bounds, heat_color(0))
+                                    .corner_radii(thickness / 2.0),
                             );
                             // 合并相邻同档热度，避免大量分段边缘产生横纹。
                             for (range, level) in &paint_runs {
                                 if *level == 0 {
                                     continue;
                                 }
-                                let top = bounds.top()
-                                    + bounds.size.height
+                                let start = bounds.origin.along(axis)
+                                    + bounds.size.along(axis)
                                         * item_ratio(range.start, total, &item_offset);
-                                let bottom = bounds.top()
-                                    + bounds.size.height
+                                let end = bounds.origin.along(axis)
+                                    + bounds.size.along(axis)
                                         * item_ratio(range.end, total, &item_offset);
                                 window.paint_quad(gpui::fill(
                                     gpui::Bounds::new(
-                                        point(x, top),
-                                        size(width, (bottom - top - px(0.7 * scale)).max(px(0.0))),
+                                        heat_bounds.origin.apply_along(axis, |_| start),
+                                        heat_bounds.size.apply_along(axis, |_| {
+                                            (end - start - px(0.7 * scale)).max(px(0.0))
+                                        }),
                                     ),
                                     gpui::ColorExt::opacity(&heat_color(*level), 0.94),
                                 ));
@@ -472,15 +542,18 @@ pub(super) fn render(
                                 .hovered_bucket
                                 .and_then(|slot| paint_buckets.get(slot))
                             {
-                                let top = bounds.top()
-                                    + bounds.size.height
+                                let start = bounds.origin.along(axis)
+                                    + bounds.size.along(axis)
                                         * item_ratio(bucket.range.start, total, &item_offset);
-                                let bottom = bounds.top()
-                                    + bounds.size.height
+                                let end = bounds.origin.along(axis)
+                                    + bounds.size.along(axis)
                                         * item_ratio(bucket.range.end, total, &item_offset);
                                 window.paint_quad(
                                     gpui::outline(
-                                        gpui::Bounds::new(point(x, top), size(width, bottom - top)),
+                                        gpui::Bounds::new(
+                                            heat_bounds.origin.apply_along(axis, |_| start),
+                                            heat_bounds.size.apply_along(axis, |_| end - start),
+                                        ),
                                         thumb_color,
                                         gpui::BorderStyle::Solid,
                                     )
@@ -488,13 +561,17 @@ pub(super) fn render(
                                 );
                             }
                             let thumb = state.thumb_bounds;
-                            let border = bounds.size.width / 12.0;
-                            let radius = bounds.size.width / 6.0;
+                            let border = bounds.size.along(axis.invert()) / 12.0;
+                            let radius = bounds.size.along(axis.invert()) / 6.0;
                             window.paint_quad(
                                 gpui::outline(
                                     gpui::Bounds::new(
-                                        point(thumb.left() - border, thumb.top()),
-                                        size(thumb.size.width + border * 2.0, thumb.size.height),
+                                        thumb
+                                            .origin
+                                            .apply_along(axis.invert(), |start| start - border),
+                                        thumb.size.apply_along(axis.invert(), |length| {
+                                            length + border * 2.0
+                                        }),
                                     ),
                                     rail_background,
                                     gpui::BorderStyle::Solid,
@@ -550,11 +627,25 @@ pub(super) fn render(
                 ],
             )
         };
-        let top = (state.bounds.size.height
+        let tooltip_width = (list_width - px(40.0 * scale)).max(px(0.0));
+        let tooltip_width = if horizontal {
+            tooltip_width.min(px(220.0 * scale))
+        } else {
+            tooltip_width
+        };
+        let position = (state.bounds.size.along(axis)
             * item_ratio(bucket.range.start, total, &|index| {
                 scroll_handle.item_offset(index)
             }))
-        .min((state.bounds.size.height - px(72.0 * scale)).max(px(0.0)));
+        .min(
+            (state.bounds.size.along(axis)
+                - if horizontal {
+                    tooltip_width
+                } else {
+                    px(72.0 * scale)
+                })
+            .max(px(0.0)),
+        );
         let mut background = theme.popover;
         background.alpha = 0.94;
         let foreground = theme.popover_foreground;
@@ -564,10 +655,10 @@ pub(super) fn render(
             gpui::deferred(
                 div()
                     .absolute()
-                    .right(ui_rem(30.0))
-                    .top(top)
+                    .when(horizontal, |this| this.left(position).bottom(ui_rem(30.0)))
+                    .when(!horizontal, |this| this.right(ui_rem(30.0)).top(position))
                     .w_auto()
-                    .max_w((list_width - px(40.0 * scale)).max(px(0.0)))
+                    .max_w(tooltip_width)
                     .px_3()
                     .py_2()
                     .flex()
@@ -592,6 +683,75 @@ pub(super) fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn horizontal_heat_rail_uses_x_for_thumb_click_drag_and_hover() {
+        let axis = Axis::Horizontal;
+        let track = gpui::Bounds::new(point(px(30.0), px(700.0)), size(px(400.0), px(24.0)));
+        let thumb = thumb_bounds(track, px(400.0), px(1600.0), px(-400.0), 1.0, axis);
+        assert_eq!(thumb.size.width, px(80.0));
+        assert_eq!(thumb.left(), px(110.0));
+        assert!(thumb.top() > track.top());
+        assert!(thumb.bottom() < track.bottom());
+        assert_eq!(
+            track_press_offset(track, thumb, px(120.0), px(1600.0), axis),
+            None
+        );
+        assert_eq!(
+            track_press_offset(track, thumb, px(230.0), px(1600.0), axis),
+            Some(px(-800.0))
+        );
+        assert_eq!(
+            pointer_offset(track, thumb.size.width, 0.5, px(-100.0), px(1600.0), axis),
+            px(0.0)
+        );
+        assert_eq!(
+            pointer_offset(track, thumb.size.width, 0.5, px(900.0), px(1600.0), axis),
+            px(-1600.0)
+        );
+        assert_eq!(
+            drag_delta(
+                track.origin,
+                track.origin + point(px(5.0), px(0.0)),
+                false,
+                1.0,
+                axis
+            ),
+            Some(px(5.0))
+        );
+        let moved = pointer_offset(track, thumb.size.width, 0.25, px(230.0), px(1600.0), axis);
+        let dragged = thumb_bounds(track, px(400.0), px(1600.0), moved, 1.0, axis);
+        assert_eq!(dragged.left() + dragged.size.width * 0.25, px(230.0));
+
+        let buckets = vec![
+            HeatBucket {
+                range: 0..2,
+                total_count: 0,
+                max_count: 0,
+                peak_index: 0,
+            },
+            HeatBucket {
+                range: 2..4,
+                total_count: 80,
+                max_count: 80,
+                peak_index: 3,
+            },
+        ];
+        let offsets = [0.0, 48.0, 96.0, 288.0, 480.0];
+        let item_offset = |index| offsets.get(index).copied().map(px);
+        assert_eq!(
+            bucket_at(&buckets, track, px(109.0), axis, item_offset),
+            Some(0)
+        );
+        assert_eq!(
+            bucket_at(&buckets, track, px(110.0), axis, item_offset),
+            Some(1)
+        );
+        assert_eq!(
+            bucket_at(&buckets, track, px(900.0), axis, item_offset),
+            Some(1)
+        );
+    }
 
     #[test]
     fn heat_overview_limits_density_and_preserves_counts_and_peaks() {
@@ -638,20 +798,47 @@ mod tests {
     fn heat_press_distinguishes_click_from_drag_anywhere_on_the_rail() {
         let start = point(px(14.0), px(200.0));
         assert_eq!(
-            drag_delta(start, point(px(15.0), px(202.0)), false, 1.0),
+            drag_delta(
+                start,
+                point(px(15.0), px(202.0)),
+                false,
+                1.0,
+                Axis::Vertical
+            ),
             None
         );
         assert_eq!(
-            drag_delta(start, point(px(14.0), px(204.0)), false, 1.0),
+            drag_delta(
+                start,
+                point(px(14.0), px(204.0)),
+                false,
+                1.0,
+                Axis::Vertical
+            ),
             Some(px(4.0))
         );
-        assert_eq!(drag_delta(start, start, true, 1.0), Some(px(0.0)));
         assert_eq!(
-            drag_delta(start, point(px(14.0), px(204.0)), false, 2.0),
+            drag_delta(start, start, true, 1.0, Axis::Vertical),
+            Some(px(0.0))
+        );
+        assert_eq!(
+            drag_delta(
+                start,
+                point(px(14.0), px(204.0)),
+                false,
+                2.0,
+                Axis::Vertical
+            ),
             None
         );
         assert_eq!(
-            drag_delta(start, point(px(14.0), px(208.0)), false, 2.0),
+            drag_delta(
+                start,
+                point(px(14.0), px(208.0)),
+                false,
+                2.0,
+                Axis::Vertical
+            ),
             Some(px(8.0))
         );
     }
@@ -688,33 +875,68 @@ mod tests {
     #[test]
     fn heat_thumb_tracks_pixel_scroll_and_clamps_drag_at_both_ends() {
         let track = gpui::Bounds::new(point(px(88.0), px(10.0)), size(px(12.0), px(400.0)));
-        let top = thumb_bounds(track, px(400.0), px(1600.0), px(0.0), 1.0);
-        let bottom = thumb_bounds(track, px(400.0), px(1600.0), px(-1600.0), 1.0);
+        let top = thumb_bounds(track, px(400.0), px(1600.0), px(0.0), 1.0, Axis::Vertical);
+        let bottom = thumb_bounds(
+            track,
+            px(400.0),
+            px(1600.0),
+            px(-1600.0),
+            1.0,
+            Axis::Vertical,
+        );
         assert_eq!(top.size.height, px(80.0));
         assert_eq!(top.top(), track.top());
         assert_eq!(bottom.bottom(), track.bottom());
         assert!(top.left() > track.left());
         assert!(top.right() < track.right());
         assert_eq!(
-            thumb_bounds(track, px(400.0), px(0.0), px(0.0), 1.0)
+            thumb_bounds(track, px(400.0), px(0.0), px(0.0), 1.0, Axis::Vertical)
                 .size
                 .height,
             px(400.0)
         );
         assert_eq!(
-            pointer_offset(track, top.size.height, 0.5, px(370.0), px(1600.0)),
+            pointer_offset(
+                track,
+                top.size.height,
+                0.5,
+                px(370.0),
+                px(1600.0),
+                Axis::Vertical
+            ),
             px(-1600.0)
         );
         assert_eq!(
-            pointer_offset(track, top.size.height, 0.5, px(-900.0), px(1600.0)),
+            pointer_offset(
+                track,
+                top.size.height,
+                0.5,
+                px(-900.0),
+                px(1600.0),
+                Axis::Vertical
+            ),
             px(0.0)
         );
         assert_eq!(
-            pointer_offset(track, top.size.height, 0.5, px(900.0), px(1600.0)),
+            pointer_offset(
+                track,
+                top.size.height,
+                0.5,
+                px(900.0),
+                px(1600.0),
+                Axis::Vertical
+            ),
             px(-1600.0)
         );
         assert_eq!(
-            pointer_offset(track, track.size.height, 0.5, px(900.0), px(0.0)),
+            pointer_offset(
+                track,
+                track.size.height,
+                0.5,
+                px(900.0),
+                px(0.0),
+                Axis::Vertical
+            ),
             px(0.0)
         );
     }
@@ -722,17 +944,38 @@ mod tests {
     #[test]
     fn heat_track_press_centers_thumb_before_drag_and_preserves_grab_position() {
         let track = gpui::Bounds::new(point(px(88.0), px(10.0)), size(px(24.0), px(400.0)));
-        let thumb = thumb_bounds(track, px(400.0), px(1600.0), px(-400.0), 1.0);
-        let start = track_press_offset(track, thumb, px(210.0), px(1600.0)).unwrap();
+        let thumb = thumb_bounds(
+            track,
+            px(400.0),
+            px(1600.0),
+            px(-400.0),
+            1.0,
+            Axis::Vertical,
+        );
+        let start =
+            track_press_offset(track, thumb, px(210.0), px(1600.0), Axis::Vertical).unwrap();
         assert_eq!(start, px(-800.0));
-        let jumped = thumb_bounds(track, px(400.0), px(1600.0), start, 1.0);
+        let jumped = thumb_bounds(track, px(400.0), px(1600.0), start, 1.0, Axis::Vertical);
         assert_eq!(jumped.top() + jumped.size.height / 2.0, px(210.0));
 
-        let moved = pointer_offset(track, jumped.size.height, 0.5, px(250.0), px(1600.0));
-        let dragged = thumb_bounds(track, px(400.0), px(1600.0), moved, 1.0);
+        let moved = pointer_offset(
+            track,
+            jumped.size.height,
+            0.5,
+            px(250.0),
+            px(1600.0),
+            Axis::Vertical,
+        );
+        let dragged = thumb_bounds(track, px(400.0), px(1600.0), moved, 1.0, Axis::Vertical);
         assert_eq!(dragged.top() + dragged.size.height / 2.0, px(250.0));
         assert_eq!(
-            track_press_offset(track, thumb, thumb.top() + px(10.0), px(1600.0)),
+            track_press_offset(
+                track,
+                thumb,
+                thumb.top() + px(10.0),
+                px(1600.0),
+                Axis::Vertical
+            ),
             None
         );
         let grabbed = thumb_bounds(
@@ -745,21 +988,23 @@ mod tests {
                 0.125,
                 thumb.top() + px(50.0),
                 px(1600.0),
+                Axis::Vertical,
             ),
             1.0,
+            Axis::Vertical,
         );
         assert_eq!(grabbed.top() + px(10.0), thumb.top() + px(50.0));
 
         assert_eq!(
-            track_press_offset(track, thumb, track.top(), px(1600.0)),
+            track_press_offset(track, thumb, track.top(), px(1600.0), Axis::Vertical),
             Some(px(0.0))
         );
         assert_eq!(
-            track_press_offset(track, thumb, track.bottom(), px(1600.0)),
+            track_press_offset(track, thumb, track.bottom(), px(1600.0), Axis::Vertical),
             Some(px(-1600.0))
         );
         assert_eq!(
-            track_press_offset(track, thumb, px(500.0), px(0.0)),
+            track_press_offset(track, thumb, px(500.0), px(0.0), Axis::Vertical),
             Some(px(0.0))
         );
     }
@@ -787,13 +1032,34 @@ mod tests {
             },
         ];
         let bounds = gpui::Bounds::new(point(px(0.0), px(10.0)), size(px(24.0), px(100.0)));
-        assert_eq!(bucket_at(&buckets, bounds, px(-20.0), |_| None), Some(0));
-        assert_eq!(bucket_at(&buckets, bounds, px(30.0), |_| None), Some(1));
-        assert_eq!(bucket_at(&buckets, bounds, px(70.0), |_| None), Some(2));
-        assert_eq!(bucket_at(&buckets, bounds, px(300.0), |_| None), Some(2));
-        assert_eq!(bucket_at(&[], bounds, px(50.0), |_| None), None);
         assert_eq!(
-            bucket_at(&buckets, gpui::Bounds::default(), px(50.0), |_| None),
+            bucket_at(&buckets, bounds, px(-20.0), Axis::Vertical, |_| None),
+            Some(0)
+        );
+        assert_eq!(
+            bucket_at(&buckets, bounds, px(30.0), Axis::Vertical, |_| None),
+            Some(1)
+        );
+        assert_eq!(
+            bucket_at(&buckets, bounds, px(70.0), Axis::Vertical, |_| None),
+            Some(2)
+        );
+        assert_eq!(
+            bucket_at(&buckets, bounds, px(300.0), Axis::Vertical, |_| None),
+            Some(2)
+        );
+        assert_eq!(
+            bucket_at(&[], bounds, px(50.0), Axis::Vertical, |_| None),
+            None
+        );
+        assert_eq!(
+            bucket_at(
+                &buckets,
+                gpui::Bounds::default(),
+                px(50.0),
+                Axis::Vertical,
+                |_| None
+            ),
             None
         );
     }
@@ -822,12 +1088,24 @@ mod tests {
         assert_eq!(item_ratio(0, 4, &item_offset), 0.0);
         assert_eq!(item_ratio(4, 4, &item_offset), 1.0);
         assert_eq!(
-            bucket_at(&buckets, bounds, boundary - px(0.1), item_offset),
+            bucket_at(
+                &buckets,
+                bounds,
+                boundary - px(0.1),
+                Axis::Vertical,
+                item_offset
+            ),
             Some(0)
         );
-        assert_eq!(bucket_at(&buckets, bounds, boundary, item_offset), Some(1));
-        assert_eq!(bucket_at(&buckets, bounds, px(210.0), item_offset), Some(1));
-        let thumb = thumb_bounds(bounds, px(96.0), px(384.0), px(-96.0), 1.0);
+        assert_eq!(
+            bucket_at(&buckets, bounds, boundary, Axis::Vertical, item_offset),
+            Some(1)
+        );
+        assert_eq!(
+            bucket_at(&buckets, bounds, px(210.0), Axis::Vertical, item_offset),
+            Some(1)
+        );
+        let thumb = thumb_bounds(bounds, px(96.0), px(384.0), px(-96.0), 1.0, Axis::Vertical);
         assert_eq!(thumb.top(), boundary);
     }
 
@@ -835,20 +1113,47 @@ mod tests {
     fn heat_drag_keeps_pointer_anchor_when_content_height_or_track_changes() {
         let track = gpui::Bounds::new(point(px(0.0), px(10.0)), size(px(24.0), px(400.0)));
         for max_offset in [1600.0, 3200.0, 8000.0, 800.0] {
-            let thumb = thumb_bounds(track, px(400.0), px(max_offset), px(0.0), 1.0);
+            let thumb = thumb_bounds(
+                track,
+                px(400.0),
+                px(max_offset),
+                px(0.0),
+                1.0,
+                Axis::Vertical,
+            );
             for grip in [0.0, 0.25, 0.5, 1.0] {
-                let offset =
-                    pointer_offset(track, thumb.size.height, grip, px(210.0), px(max_offset));
-                let dragged = thumb_bounds(track, px(400.0), px(max_offset), offset, 1.0);
+                let offset = pointer_offset(
+                    track,
+                    thumb.size.height,
+                    grip,
+                    px(210.0),
+                    px(max_offset),
+                    Axis::Vertical,
+                );
+                let dragged = thumb_bounds(
+                    track,
+                    px(400.0),
+                    px(max_offset),
+                    offset,
+                    1.0,
+                    Axis::Vertical,
+                );
                 assert!(
                     f32::from(dragged.top() + dragged.size.height * grip - px(210.0)).abs() < 0.001
                 );
             }
         }
         let resized = gpui::Bounds::new(point(px(0.0), px(30.0)), size(px(24.0), px(600.0)));
-        let thumb = thumb_bounds(resized, px(600.0), px(3200.0), px(0.0), 1.0);
-        let offset = pointer_offset(resized, thumb.size.height, 0.25, px(210.0), px(3200.0));
-        let dragged = thumb_bounds(resized, px(600.0), px(3200.0), offset, 1.0);
+        let thumb = thumb_bounds(resized, px(600.0), px(3200.0), px(0.0), 1.0, Axis::Vertical);
+        let offset = pointer_offset(
+            resized,
+            thumb.size.height,
+            0.25,
+            px(210.0),
+            px(3200.0),
+            Axis::Vertical,
+        );
+        let dragged = thumb_bounds(resized, px(600.0), px(3200.0), offset, 1.0, Axis::Vertical);
         assert!(f32::from(dragged.top() + dragged.size.height * 0.25 - px(210.0)).abs() < 0.001);
     }
 }

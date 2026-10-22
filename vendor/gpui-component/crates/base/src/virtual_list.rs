@@ -348,6 +348,8 @@ fn rebuild_item_size_layout(
     gap: Pixels,
     items_count: usize,
 ) {
+    state.axis = Some(axis);
+    state.gap = gap;
     state.sizes = values
         .iter()
         .enumerate()
@@ -391,11 +393,13 @@ fn update_reorderable_item_size_layout(
         .is_some_and(|previous| previous.ptr_eq(&identity));
     let mut source = item_sizes.state.borrow_mut();
     let same_count = layout.sizes.len() == items_count && layout.origins.len() == items_count;
-    if same_source && same_count && layout.reorderable_sizes_version == source.version {
+    let same_axis = layout.axis == Some(axis) && layout.gap == gap;
+    if same_source && same_count && same_axis && layout.reorderable_sizes_version == source.version
+    {
         return;
     }
 
-    let moved_range = if same_source && same_count {
+    let moved_range = if same_source && same_count && same_axis {
         source.dirty_range.take()
     } else {
         None
@@ -430,6 +434,12 @@ impl Styled for VirtualList {
 }
 
 impl VirtualList {
+    /// 切换虚拟化主轴，复用局部尺寸更新和滚动定位逻辑。
+    pub fn with_axis(mut self, axis: Axis) -> Self {
+        self.axis = axis;
+        self
+    }
+
     pub fn track_scroll(mut self, scroll_handle: &VirtualListScrollHandle) -> Self {
         self.base = self.base.track_scroll(&scroll_handle);
         self.scroll_handle = scroll_handle.clone();
@@ -558,6 +568,8 @@ pub struct VirtualListFrameState {
 
 #[derive(Default, Clone)]
 pub struct ItemSizeLayout {
+    axis: Option<Axis>,
+    gap: Pixels,
     items_sizes: Rc<Vec<Size<Pixels>>>,
     reorderable_sizes_identity: Option<Weak<RefCell<ReorderableVirtualListSizesState>>>,
     reorderable_sizes_version: u64,
@@ -660,6 +672,8 @@ impl Element for VirtualList {
                             );
                         } else if state.reorderable_sizes_identity.is_some()
                             || state.items_sizes != self.item_sizes
+                            || state.axis != Some(self.axis)
+                            || state.gap != gap
                         {
                             state.items_sizes = self.item_sizes.clone();
                             state.reorderable_sizes_identity = None;
@@ -963,6 +977,24 @@ impl Element for VirtualList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changing_axis_rebuilds_reorderable_offsets_before_the_next_move() {
+        let sizes = ReorderableVirtualListSizes::new(vec![
+            size(px(30.0), px(10.0)),
+            size(px(50.0), px(20.0)),
+            size(px(70.0), px(40.0)),
+        ]);
+        let mut layout = ItemSizeLayout::default();
+        update_reorderable_item_size_layout(&mut layout, &sizes, Axis::Vertical, px(0.0), 3);
+        assert_eq!(layout.origins, vec![px(0.0), px(10.0), px(30.0)]);
+        update_reorderable_item_size_layout(&mut layout, &sizes, Axis::Horizontal, px(0.0), 3);
+        assert_eq!(layout.origins, vec![px(0.0), px(30.0), px(80.0)]);
+        sizes.move_item(0, 2);
+        update_reorderable_item_size_layout(&mut layout, &sizes, Axis::Horizontal, px(0.0), 3);
+        assert_eq!(layout.origins, vec![px(0.0), px(50.0), px(120.0)]);
+        assert_eq!(layout.content_size.width, px(150.0));
+    }
 
     use gpui::{Context, TestAppContext};
 

@@ -198,6 +198,7 @@
   "main.preview.info.source": "来源应用",
   "main.preview.info.captured_at": "最近复制",
   "main.preview.info.paste_count": "粘贴次数",
+  "main.preview.info.paste_count_value": "粘贴 {count} 次",
   "main.preview.info.status": "条目状态",
   "main.preview.info.available_formats": "可用格式",
   "main.preview.info.pinned": "已置顶",

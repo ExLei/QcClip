@@ -900,6 +900,41 @@ pub(crate) fn raise_window_to_topmost(_window: &Window) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn activate_window_preserving_bounds(window: &Window) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::{
+            Input::KeyboardAndMouse::{SetActiveWindow, SetFocus},
+            WindowsAndMessaging::{
+                HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow,
+                SetWindowPos,
+            },
+        };
+
+        let hwnd = window_hwnd(window)?;
+        // GPUI 首次激活会恢复创建时的尺寸，面板由原生 API 激活以保留滑动位置。
+        // SAFETY: hwnd 已通过 IsWindow 校验，只激活当前窗口，不修改其尺寸和位置。
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            )
+            .map_err(|error| format!("激活主窗口失败：{error}"))?;
+            let _ = SetActiveWindow(hwnd);
+            let _ = SetFocus(Some(hwnd));
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    window.activate_window();
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 pub(crate) fn set_window_shadow_visible(window: &Window, visible: bool) -> Result<(), String> {
     use windows::Win32::Graphics::Dwm::{

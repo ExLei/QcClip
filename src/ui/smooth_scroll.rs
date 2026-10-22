@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use gpui::{IsZero, Pixels, Point, ScrollHandle, ScrollWheelEvent, Window, px};
+use gpui::{Along as _, Axis, IsZero, Pixels, Point, ScrollHandle, ScrollWheelEvent, Window, px};
 use gpui_component::VirtualListScrollHandle;
 
 const SMOOTHING_SECONDS: f32 = 0.11;
@@ -43,8 +43,8 @@ impl SmoothScrollTarget for VirtualListScrollHandle {
 
 #[derive(Clone, Copy)]
 struct ScrollAnimation {
-    target_y: Pixels,
-    last_offset_y: Pixels,
+    target: Pixels,
+    last_offset: Pixels,
     last_frame_at: Instant,
 }
 
@@ -52,6 +52,7 @@ pub(crate) struct SmoothScroll {
     enabled: bool,
     animation: Option<ScrollAnimation>,
     frame_scheduled: bool,
+    axis: Axis,
 }
 
 impl SmoothScroll {
@@ -60,12 +61,20 @@ impl SmoothScroll {
             enabled,
             animation: None,
             frame_scheduled: false,
+            axis: Axis::Vertical,
         }
     }
 
     pub(crate) fn reset(&mut self) {
         self.animation = None;
         self.frame_scheduled = false;
+    }
+
+    pub(crate) fn set_axis(&mut self, axis: Axis) {
+        if self.axis != axis {
+            self.reset();
+            self.axis = axis;
+        }
     }
 
     pub(crate) fn handle_wheel<T: SmoothScrollTarget>(
@@ -75,41 +84,40 @@ impl SmoothScroll {
         window: &Window,
         animations_enabled: bool,
     ) -> bool {
-        let delta = event.delta.pixel_delta(window.line_height());
-        if delta.y.is_zero() {
+        let delta = wheel_delta(event.delta.pixel_delta(window.line_height()), self.axis);
+        if delta.is_zero() {
             return false;
         }
 
         let current_offset = scroll_handle.offset();
-        let max_offset = scroll_handle.max_offset();
+        let current = current_offset.along(self.axis);
+        let max_offset = scroll_handle.max_offset().along(self.axis);
         let should_smooth = self.enabled && animations_enabled && !event.delta.precise();
-        let target_y = if should_smooth {
-            let target_y = self
+        let target = if should_smooth {
+            let target = self
                 .animation
-                .filter(|animation| animation.last_offset_y == current_offset.y)
-                .map(|animation| animation.target_y)
-                .unwrap_or(current_offset.y);
-            (target_y + delta.y).clamp(-max_offset.y, Pixels::ZERO)
+                .filter(|animation| animation.last_offset == current)
+                .map(|animation| animation.target)
+                .unwrap_or(current);
+            (target + delta).clamp(-max_offset, Pixels::ZERO)
         } else {
-            (current_offset.y + delta.y).clamp(-max_offset.y, Pixels::ZERO)
+            (current + delta).clamp(-max_offset, Pixels::ZERO)
         };
 
         if should_smooth {
             let last_frame_at = self
                 .animation
-                .filter(|animation| animation.last_offset_y == current_offset.y)
+                .filter(|animation| animation.last_offset == current)
                 .map(|animation| animation.last_frame_at)
                 .unwrap_or_else(Instant::now);
             self.animation = Some(ScrollAnimation {
-                target_y,
-                last_offset_y: current_offset.y,
+                target,
+                last_offset: current,
                 last_frame_at,
             });
             self.schedule_next_frame(window);
         } else {
-            let mut offset = current_offset;
-            offset.y = target_y;
-            scroll_handle.set_offset(offset);
+            scroll_handle.set_offset(current_offset.apply_along(self.axis, |_| target));
             self.animation = None;
         }
 
@@ -123,30 +131,28 @@ impl SmoothScroll {
         };
 
         let current_offset = scroll_handle.offset();
-        if current_offset.y != animation.last_offset_y {
+        let current = current_offset.along(self.axis);
+        if current != animation.last_offset {
             return;
         }
 
-        let max_offset = scroll_handle.max_offset();
-        animation.target_y = animation.target_y.clamp(-max_offset.y, Pixels::ZERO);
+        let max_offset = scroll_handle.max_offset().along(self.axis);
+        animation.target = animation.target.clamp(-max_offset, Pixels::ZERO);
         let now = Instant::now();
         let elapsed = now
             .saturating_duration_since(animation.last_frame_at)
             .as_secs_f32()
             .min(MAX_FRAME_SECONDS);
         animation.last_frame_at = now;
-        let distance = animation.target_y - current_offset.y;
+        let distance = animation.target - current;
         if distance.abs() <= px(SETTLE_DISTANCE) {
-            let mut offset = current_offset;
-            offset.y = animation.target_y;
-            scroll_handle.set_offset(offset);
+            scroll_handle.set_offset(current_offset.apply_along(self.axis, |_| animation.target));
             return;
         }
 
-        let mut offset = current_offset;
         let progress = 1.0 - (-elapsed / SMOOTHING_SECONDS).exp();
-        offset.y += distance * progress;
-        animation.last_offset_y = offset.y;
+        let offset = current_offset.apply_along(self.axis, |value| value + distance * progress);
+        animation.last_offset = offset.along(self.axis);
         scroll_handle.set_offset(offset);
         self.animation = Some(animation);
         self.schedule_next_frame(window);
@@ -160,6 +166,41 @@ impl SmoothScroll {
         self.frame_scheduled = true;
         // 滚轮回调不一定处在视图渲染栈中，不能调用依赖 current_view 的动画帧 API。
         window.on_next_frame(|window, _| window.refresh());
+    }
+}
+
+fn wheel_delta(delta: Point<Pixels>, axis: Axis) -> Pixels {
+    match axis {
+        Axis::Vertical => delta.y,
+        // 横向触控板使用横轴，普通滚轮和以纵轴为主的手势映射到横轴。
+        Axis::Horizontal if delta.x.abs() > delta.y.abs() => delta.x,
+        Axis::Horizontal => delta.y,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn horizontal_scrolling_handles_mouse_wheel_and_trackpad_without_double_counting() {
+        for (x, y, expected) in [(0.0, -40.0, -40.0), (-30.0, -2.0, -30.0), (2.0, 30.0, 30.0)] {
+            let delta = Point { x: px(x), y: px(y) };
+            assert_eq!(wheel_delta(delta, Axis::Horizontal), px(expected));
+            assert_eq!(wheel_delta(delta, Axis::Vertical), px(y));
+        }
+    }
+
+    #[test]
+    fn switching_scroll_axis_cancels_the_previous_animation() {
+        let mut scroll = SmoothScroll::default();
+        scroll.animation = Some(ScrollAnimation {
+            target: px(-100.0),
+            last_offset: px(-20.0),
+            last_frame_at: Instant::now(),
+        });
+        scroll.set_axis(Axis::Horizontal);
+        assert!(scroll.animation.is_none());
     }
 }
 

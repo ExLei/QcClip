@@ -7,6 +7,7 @@ use gpui_component::ActiveTheme as _;
 use crate::{
     config::{ListItemHeight, TitlebarPosition},
     config_runtime,
+    ui::scale::ui_rem,
 };
 
 use super::{
@@ -24,6 +25,17 @@ fn is_sidebar_layout(window: &Window) -> bool {
     uses_sidebar_layout(
         f32::from(window.viewport_size().width) / crate::ui::scale::window_scale(window),
     )
+}
+
+fn effective_titlebar_position(
+    position: TitlebarPosition,
+    horizontal_list: bool,
+) -> TitlebarPosition {
+    if horizontal_list && position.is_vertical() {
+        TitlebarPosition::Top
+    } else {
+        position
+    }
 }
 
 impl Render for MainWindow {
@@ -55,6 +67,31 @@ impl Render for MainWindow {
             self.select_symbol_category(fallback, cx);
         }
         let clipboard = config_runtime::clipboard_config(cx);
+        let horizontal = clipboard.window_position.uses_horizontal_list();
+        self.list_smooth_scroll.set_axis(if horizontal {
+            gpui::Axis::Horizontal
+        } else {
+            gpui::Axis::Vertical
+        });
+        if self
+            .list_layout_cache
+            .as_ref()
+            .is_some_and(|cache| cache.key.horizontal != horizontal)
+        {
+            self.cancel_reorder_preview();
+            self.list_layout_cache = None;
+            self.list_scroll_handle
+                .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
+            self.heat_scrollbar = Default::default();
+            if let Some(index) = self
+                .selected_item_id
+                .and_then(|id| self.list_order_positions.get(&id))
+                .copied()
+            {
+                self.list_scroll_handle
+                    .scroll_to_item(index, gpui::ScrollStrategy::Nearest);
+            }
+        }
         let mut filters_changed = self.filters.retain_visible(layout);
         if is_blocked || !clipboard.filter_hover_switch {
             filters_changed |= self.filters.clear_hovered();
@@ -114,8 +151,9 @@ impl Render for MainWindow {
             },
             appearance.list_item_height == ListItemHeight::Adaptive,
         );
-        let titlebar_position = appearance.titlebar_position;
-        let sidebar_layout = is_sidebar_layout(window);
+        let titlebar_position =
+            effective_titlebar_position(appearance.titlebar_position, horizontal);
+        let sidebar_layout = !horizontal && is_sidebar_layout(window);
         if !sidebar_layout || !self.tags_panel_open {
             self.finish_tags_panel_resize(cx);
         }
@@ -166,16 +204,30 @@ impl Render for MainWindow {
                 ))
                 .into_any_element()
         };
-        let titlebar = title_bar::render(self, window, cx, titlebar_position).into_any_element();
-        let tab_bar = tab_bar::render(self, sidebar_layout, cx).into_any_element();
-        let workspace = if sidebar_layout {
+        let titlebar =
+            title_bar::render(self, window, cx, titlebar_position, horizontal).into_any_element();
+        let combined_width_rem =
+            f32::from(window.viewport_size().width) / f32::from(window.rem_size()) / 2.0;
+        let mut tab_bar = Some(
+            tab_bar::render(self, sidebar_layout, horizontal, combined_width_rem, cx)
+                .into_any_element(),
+        );
+        let workspace = if horizontal {
+            div()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(content)
+        } else if sidebar_layout {
             div()
                 .flex_1()
                 .min_w_0()
                 .min_h_0()
                 .flex()
                 .flex_row()
-                .child(tab_bar)
+                .children(tab_bar.take())
                 .child(tags_panel::render(self, window, cx, true))
                 .child(content)
         } else {
@@ -185,7 +237,7 @@ impl Render for MainWindow {
                 .min_h_0()
                 .flex()
                 .flex_col()
-                .child(tab_bar)
+                .children(tab_bar.take())
                 .child(content)
         };
 
@@ -195,16 +247,38 @@ impl Render for MainWindow {
             .flex()
             .relative()
             .track_focus(&self.focus_handle);
-        if !is_blocked {
+        if !is_blocked && !clipboard.window_position.is_screen_edge() {
             root = root.child(super::window_drag::event_listener(clipboard.edge_hide, cx));
         }
 
-        root = match titlebar_position {
-            TitlebarPosition::Top => root.flex_col().child(titlebar).child(workspace),
-            TitlebarPosition::Bottom => root.flex_col().child(workspace).child(titlebar),
-            TitlebarPosition::Left => root.flex_row().child(titlebar).child(workspace),
-            TitlebarPosition::Right => root.flex_row().child(workspace).child(titlebar),
-        };
+        root = root.flex_col();
+        if horizontal {
+            let combined_bar = div()
+                .w_full()
+                .h(ui_rem(super::components::symbol_sidebar::TAB_BAR_HEIGHT))
+                .flex_none()
+                .flex()
+                .items_center();
+            let combined_bar = combined_bar.child(titlebar).children(tab_bar.take());
+            match titlebar_position {
+                TitlebarPosition::Top => {
+                    root = root.child(combined_bar).child(workspace);
+                }
+                TitlebarPosition::Bottom => {
+                    root = root.child(workspace).child(combined_bar);
+                }
+                TitlebarPosition::Left | TitlebarPosition::Right => unreachable!(),
+            }
+        } else {
+            let body = div().flex_1().min_w_0().min_h_0().flex();
+            let body = match titlebar_position {
+                TitlebarPosition::Top => body.flex_col().child(titlebar).child(workspace),
+                TitlebarPosition::Bottom => body.flex_col().child(workspace).child(titlebar),
+                TitlebarPosition::Left => body.flex_row().child(titlebar).child(workspace),
+                TitlebarPosition::Right => body.flex_row().child(workspace).child(titlebar),
+            };
+            root = root.child(body).children(tab_bar);
+        }
 
         if !sidebar_layout {
             root = root.child(tags_panel::render(self, window, cx, false));
@@ -287,11 +361,35 @@ fn render_blocking_operation_overlay(title_key: &str, cx: &App) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::TitlebarPosition;
+
+    use super::effective_titlebar_position;
+
+    #[test]
+    fn horizontal_list_uses_horizontal_titlebar_position() {
+        assert_eq!(
+            effective_titlebar_position(TitlebarPosition::Left, true),
+            TitlebarPosition::Top
+        );
+        assert_eq!(
+            effective_titlebar_position(TitlebarPosition::Right, true),
+            TitlebarPosition::Top
+        );
+        assert_eq!(
+            effective_titlebar_position(TitlebarPosition::Bottom, true),
+            TitlebarPosition::Bottom
+        );
+        assert_eq!(
+            effective_titlebar_position(TitlebarPosition::Left, false),
+            TitlebarPosition::Left
+        );
+    }
+
     use super::super::uses_sidebar_layout;
 
     #[test]
     fn sidebar_layout_uses_logical_width_boundary() {
-        assert!(!uses_sidebar_layout(699.0));
-        assert!(uses_sidebar_layout(700.0));
+        assert!(!uses_sidebar_layout(499.0));
+        assert!(uses_sidebar_layout(500.0));
     }
 }

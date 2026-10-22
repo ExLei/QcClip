@@ -198,6 +198,7 @@
   "main.preview.info.source": "Source app",
   "main.preview.info.captured_at": "Last copied",
   "main.preview.info.paste_count": "Paste count",
+  "main.preview.info.paste_count_value": "Pasted {count} times",
   "main.preview.info.status": "Status",
   "main.preview.info.available_formats": "Formats",
   "main.preview.info.pinned": "Pinned",

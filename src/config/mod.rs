@@ -487,6 +487,20 @@ pub enum ClipboardWindowPosition {
 }
 
 impl ClipboardWindowPosition {
+    pub const fn is_screen_edge(self) -> bool {
+        matches!(
+            self,
+            Self::ScreenLeftCenter
+                | Self::ScreenRightCenter
+                | Self::ScreenTopCenter
+                | Self::ScreenBottomCenter
+        )
+    }
+
+    pub const fn uses_horizontal_list(self) -> bool {
+        matches!(self, Self::ScreenTopCenter | Self::ScreenBottomCenter)
+    }
+
     pub const ALL: [Self; 8] = [
         Self::MouseCenter,
         Self::MouseNearby,
@@ -982,6 +996,9 @@ impl ClipboardConfig {
     pub const TAB_BAR_HOVER_DELAY_DEFAULT_MS: u16 = 40;
 
     pub(crate) fn normalized(mut self) -> Self {
+        if self.window_position.is_screen_edge() {
+            self.edge_hide = false;
+        }
         self.page_hover_delay_ms = self.page_hover_delay_ms.clamp(
             Self::TAB_BAR_HOVER_DELAY_MIN_MS,
             Self::TAB_BAR_HOVER_DELAY_MAX_MS,
@@ -1751,6 +1768,19 @@ mod tests {
         QuickPasteConfig, SoundPreset, TitlebarPosition, WINDOW_MATERIAL_OPACITY_DEFAULT,
         WINDOW_MATERIAL_OPACITY_MAX, WindowMaterial,
     };
+
+    #[test]
+    fn screen_edge_positions_disable_edge_hide_without_changing_other_positions() {
+        for position in ClipboardWindowPosition::ALL {
+            let clipboard = super::ClipboardConfig {
+                window_position: position,
+                edge_hide: true,
+                ..Default::default()
+            }
+            .normalized();
+            assert_eq!(clipboard.edge_hide, !position.is_screen_edge());
+        }
+    }
 
     #[test]
     fn window_material_opacity_is_normalized_to_the_supported_range() {

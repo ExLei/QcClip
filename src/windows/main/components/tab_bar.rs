@@ -12,7 +12,7 @@ use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
 
 use crate::{
-    config::{TabBarButton, TabBarSection},
+    config::{ClipboardWindowPosition, TabBarButton, TabBarSection},
     config_runtime, i18n,
     ui::hover_icon,
     windows::main::{
@@ -76,6 +76,29 @@ fn tab_slot(element: impl IntoElement) -> impl IntoElement {
         .items_center()
         .px(ui_rem(TAB_SLOT_INSET))
         .child(element)
+}
+
+fn horizontal_labels_fit(
+    available_width_rem: f32,
+    share: f32,
+    button_count: usize,
+    labels: impl Iterator<Item = String>,
+) -> bool {
+    if button_count == 0 {
+        return false;
+    }
+
+    let widest_label_rem = labels
+        .map(|label| {
+            label
+                .chars()
+                .map(|character| if character.is_ascii() { 6.5 } else { 12.0 })
+                .sum::<f32>()
+                / 16.0
+        })
+        .fold(0.0_f32, f32::max);
+    let button_width_rem = available_width_rem * share / button_count as f32;
+    button_width_rem >= 1.0 + 0.5 + widest_label_rem + 0.5
 }
 
 fn horizontal_active_indicator(
@@ -245,6 +268,15 @@ fn tab_button(
         } else {
             button = button.justify_center().px_0();
         }
+    } else if show_label {
+        button = button.gap_1().px_1().child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(ui_rem(12.0))
+                .text_color(color)
+                .child(label),
+        );
     }
 
     if !active {
@@ -359,6 +391,15 @@ fn filter_button(
         } else {
             button = button.justify_center().px_0();
         }
+    } else if show_label {
+        button = button.gap_1().px_1().child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(ui_rem(12.0))
+                .text_color(color)
+                .child(label),
+        );
     }
 
     button
@@ -444,6 +485,15 @@ fn symbol_category_button(
         } else {
             button = button.justify_center().px_0();
         }
+    } else if show_label {
+        button = button.gap_1().px_1().child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(ui_rem(12.0))
+                .text_color(color)
+                .child(label),
+        );
     }
 
     if !active {
@@ -456,6 +506,8 @@ fn symbol_category_button(
 pub fn render(
     main: &MainWindow,
     sidebar_layout: bool,
+    combined_horizontal: bool,
+    combined_width_rem: f32,
     cx: &Context<MainWindow>,
 ) -> impl IntoElement {
     let theme = cx.theme().colors;
@@ -466,8 +518,6 @@ pub fn render(
     let main_tabs = ordered_tabs(&layout);
     let filters = ordered_filters(&layout);
     let symbol_categories = ordered_symbol_categories(&layout);
-    let tags_panel_open = main.tags_panel_open;
-    let sidebar_show_label = !main.sidebar_collapsed;
     let main_tab_index = main_tabs
         .iter()
         .position(|definition| definition.id == main.active_tab);
@@ -480,6 +530,40 @@ pub fn render(
         !filters.is_empty()
     };
     let tags_visible = layout.is_visible(TabBarButton::Tags) && main.active_tab != TabId::Emoji;
+    let horizontal_content_width_rem =
+        (combined_width_rem - if tags_visible { 4.5 } else { 0.0 } - 1.5).max(0.0);
+    let horizontal_pages_show_label = combined_horizontal
+        && horizontal_labels_fit(
+            horizontal_content_width_rem,
+            if middle_visible { 0.35 } else { 1.0 },
+            main_tabs.len(),
+            main_tabs
+                .iter()
+                .map(|definition| translator.translate(definition.label_key)),
+        );
+    let horizontal_filters_show_label = if main.active_tab == TabId::Emoji {
+        combined_horizontal
+            && horizontal_labels_fit(
+                horizontal_content_width_rem,
+                0.65,
+                symbol_categories.len(),
+                symbol_categories
+                    .iter()
+                    .map(|definition| translator.translate(definition.label_key)),
+            )
+    } else {
+        combined_horizontal
+            && horizontal_labels_fit(
+                horizontal_content_width_rem,
+                0.65,
+                filters.len(),
+                filters
+                    .iter()
+                    .map(|definition| translator.translate(definition.label_key)),
+            )
+    };
+    let tags_panel_open = main.tags_panel_open;
+    let sidebar_show_label = !main.sidebar_collapsed;
     let tags_button_color = if tags_panel_open {
         theme.primary_foreground
     } else {
@@ -761,8 +845,10 @@ pub fn render(
     }
 
     let mut tab_bar = div()
-        .h(ui_rem(TAB_BAR_HEIGHT))
-        .flex_none()
+        .when(!combined_horizontal, |this| {
+            this.h(ui_rem(TAB_BAR_HEIGHT)).flex_none()
+        })
+        .when(combined_horizontal, |this| this.h_full().flex_1().min_w_0())
         .flex()
         .items_center()
         .relative()
@@ -803,7 +889,7 @@ pub fn render(
                                 definition,
                                 definition.id == main.active_tab,
                                 false,
-                                true,
+                                horizontal_pages_show_label,
                                 cx,
                             ))
                         })),
@@ -839,7 +925,7 @@ pub fn render(
                                 definition,
                                 main.symbol_category == definition.id,
                                 false,
-                                true,
+                                horizontal_filters_show_label,
                                 cx,
                             ))
                         }))
@@ -857,7 +943,7 @@ pub fn render(
                                 main.filters.is_selected(definition.id),
                                 main.filters.is_hovered(definition.id),
                                 false,
-                                true,
+                                horizontal_filters_show_label,
                                 cx,
                             )
                         }))
@@ -882,7 +968,16 @@ pub fn render(
             .absolute()
             .left_0()
             .right_0()
-            .bottom_0()
+            .when(
+                config_runtime::clipboard_config(cx).window_position
+                    == ClipboardWindowPosition::ScreenBottomCenter,
+                |this| this.top_0(),
+            )
+            .when(
+                config_runtime::clipboard_config(cx).window_position
+                    != ClipboardWindowPosition::ScreenBottomCenter,
+                |this| this.bottom_0(),
+            )
             .h(px(0.5))
             .bg(theme.border),
     )

@@ -482,11 +482,18 @@ impl MainWindow {
         };
         // 目标位置是删除源项后的最终插入索引：无论向上还是向下，都是目标项当前索引。
         let destination_position = target_position;
-        let source_height = self
-            .adaptive_item_heights
-            .get(&target.source_id)
-            .copied()
-            .unwrap_or(estimated_row_height);
+        let source_height = if self
+            .list_layout_cache
+            .as_ref()
+            .is_some_and(|cache| cache.key.horizontal)
+        {
+            estimated_row_height
+        } else {
+            self.adaptive_item_heights
+                .get(&target.source_id)
+                .copied()
+                .unwrap_or(estimated_row_height)
+        };
         let source_shift = if source_position < target_position {
             source_height
         } else {

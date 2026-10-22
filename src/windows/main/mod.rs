@@ -435,6 +435,17 @@ impl MainWindowService {
         }
         cx.defer(move |cx| {
             let result = window.update(cx, |_, window, cx| {
+                window.on_window_should_close(cx, |_, cx| {
+                    if config_runtime::clipboard_config(cx)
+                        .window_position
+                        .is_screen_edge()
+                    {
+                        cx.defer(hide_main_window_explicitly);
+                        false
+                    } else {
+                        true
+                    }
+                });
                 let position_result =
                     window_visibility::position_initial_window(window, initial_logical_size, cx);
                 let hide_result =
@@ -631,6 +642,10 @@ impl MainWindowService {
 
     pub(crate) fn refresh_edge_hide_position(cx: &mut App) {
         window_visibility::refresh_edge_hide_position(cx);
+    }
+
+    pub(crate) fn refresh_window_position(cx: &mut App) {
+        cx.defer(window_visibility::refresh_window_position);
     }
 
     pub(crate) fn set_edge_hide_temporarily_blocked(blocked: bool, cx: &mut App) {

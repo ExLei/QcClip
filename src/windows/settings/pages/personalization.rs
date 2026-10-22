@@ -174,15 +174,27 @@ impl SettingsWindowView {
             cx,
         );
 
+        let horizontal_list = config_runtime::clipboard_config(cx)
+            .window_position
+            .uses_horizontal_list();
+        let titlebar_positions = TitlebarPosition::ALL
+            .into_iter()
+            .filter(|position| !horizontal_list || !position.is_vertical())
+            .collect::<Vec<_>>();
+        let titlebar_position = if horizontal_list && appearance.titlebar_position.is_vertical() {
+            TitlebarPosition::Top
+        } else {
+            appearance.titlebar_position
+        };
         let titlebar_position_selector = single_select(
             "settings-titlebar-position-select",
-            TitlebarPosition::ALL.into_iter().map(|position| {
+            titlebar_positions.into_iter().map(|position| {
                 SingleSelectOption::new(
                     position,
                     translator.translate(titlebar_position_label_key(position)),
                 )
             }),
-            appearance.titlebar_position,
+            titlebar_position,
             {
                 let view = view.clone();
                 let save_error = save_error.clone();

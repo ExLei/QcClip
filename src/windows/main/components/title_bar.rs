@@ -8,7 +8,10 @@ use gpui::{
 use gpui_component::{ActiveTheme as _, Sizable, input::Input};
 
 use crate::{
-    config::{ClipboardDisplayPriority, ClipboardPreviewPriority, TitlebarPosition},
+    config::{
+        ClipboardDisplayPriority, ClipboardPreviewPriority, ClipboardWindowPosition,
+        TitlebarPosition,
+    },
     config_runtime, i18n,
     ui::{hover_icon, titlebar_button},
     windows::main::state::MainWindow,
@@ -21,6 +24,7 @@ const NEW_TEXT_ACTION: &str = "main.more.new_text";
 const SETTINGS_ACTION: &str = "main.more.settings";
 const CLEAR_UNPINNED_HISTORY_ACTION: &str = "main.more.clear-unpinned-history";
 const CLEAR_ALL_HISTORY_ACTION: &str = "main.more.clear-all-history";
+const WINDOW_POSITION_ACTION_PREFIX: &str = "main.more.window-position.";
 const TITLEBAR_POSITION_ACTION_PREFIX: &str = "main.more.titlebar-position.";
 const DISPLAY_PRIORITY_ACTION_PREFIX: &str = "main.more.display-priority.";
 const PREVIEW_PRIORITY_ACTION_PREFIX: &str = "main.more.preview-priority.";
@@ -30,11 +34,15 @@ pub fn render(
     window: &Window,
     cx: &mut Context<MainWindow>,
     position: TitlebarPosition,
+    combined_horizontal: bool,
 ) -> impl IntoElement {
     let theme = cx.theme().colors;
     let translator = i18n::translator(cx);
     let edge_hide_enabled = config_runtime::clipboard_config(cx).edge_hide;
-    let is_vertical = position.is_vertical();
+    let edge_hide_locked = config_runtime::clipboard_config(cx)
+        .window_position
+        .is_screen_edge();
+    let is_vertical = position.is_vertical() && !combined_horizontal;
     let mut actions = div()
         .flex()
         .flex_1()
@@ -61,7 +69,7 @@ pub fn render(
         actions = actions.ml_2().items_center().justify_end();
     }
 
-    if main.search_expanded {
+    if combined_horizontal || main.search_expanded {
         let search_input = main
             .search_input
             .as_ref()
@@ -194,30 +202,32 @@ pub fn render(
         actions = actions.child(search_box);
     }
 
-    actions = actions.child(
-        div()
-            .id("titlebar-search-button")
-            .group("titlebar-search-button")
-            .size(ui_rem(28.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_lg()
-            .cursor_pointer()
-            .hover(|this| this.bg(theme.secondary_hover))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.toggle_search_input(window, cx);
-            }))
-            .child(hover_icon(
-                "titlebar-search-button",
-                "search",
-                16.0,
-                theme.foreground,
-            )),
-    );
+    if !combined_horizontal {
+        actions = actions.child(
+            div()
+                .id("titlebar-search-button")
+                .group("titlebar-search-button")
+                .size(ui_rem(28.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_lg()
+                .cursor_pointer()
+                .hover(|this| this.bg(theme.secondary_hover))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_search_input(window, cx);
+                }))
+                .child(hover_icon(
+                    "titlebar-search-button",
+                    "search",
+                    16.0,
+                    theme.foreground,
+                )),
+        );
+    }
 
     let more_button = div()
         .id("titlebar-more-button")
@@ -240,10 +250,16 @@ pub fn render(
                 edge_hide_enabled,
                 theme,
             )
+            .when(edge_hide_locked, |button| {
+                button.opacity(0.35).cursor_default()
+            })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, _, cx| {
                 let mut clipboard = config_runtime::clipboard_config(cx);
+                if clipboard.window_position.is_screen_edge() {
+                    return;
+                }
                 clipboard.edge_hide = !clipboard.edge_hide;
                 if let Err(error) = config_runtime::set_clipboard_config(clipboard, cx) {
                     tracing::error!("保存贴边隐藏设置失败：{error}");
@@ -333,7 +349,11 @@ pub fn render(
             .p_1()
             .flex_col();
     } else {
-        titlebar = titlebar.w_full().h(ui_rem(TITLEBAR_HEIGHT)).px_2();
+        titlebar = titlebar
+            .when(combined_horizontal, |this| this.flex_1().min_w_0())
+            .when(!combined_horizontal, |this| this.w_full())
+            .h(ui_rem(TITLEBAR_HEIGHT))
+            .px_2();
     }
 
     let border = match position {
@@ -418,8 +438,32 @@ fn build_more_menu(cx: &gpui::App) -> MenuModel {
     let translator = i18n::translator(cx);
     let appearance = config_runtime::appearance_config(cx);
     let clipboard = config_runtime::clipboard_config(cx);
+    let horizontal_list = clipboard.window_position.uses_horizontal_list();
+    let window_position_items = ClipboardWindowPosition::ALL
+        .into_iter()
+        .map(|window_position| {
+            let item = MenuItem::action(
+                MenuActionId::new(format!(
+                    "{WINDOW_POSITION_ACTION_PREFIX}{}",
+                    window_position.code()
+                )),
+                translator.translate(clipboard_window_position_label_key(window_position)),
+            );
+            if window_position == clipboard.window_position {
+                item.checked()
+            } else {
+                item
+            }
+        })
+        .collect();
+    let selected_position = if horizontal_list && appearance.titlebar_position.is_vertical() {
+        TitlebarPosition::Top
+    } else {
+        appearance.titlebar_position
+    };
     let titlebar_position_items = TitlebarPosition::ALL
         .into_iter()
+        .filter(|position| !horizontal_list || !position.is_vertical())
         .map(|position| {
             let item = MenuItem::action(
                 MenuActionId::new(format!(
@@ -428,7 +472,7 @@ fn build_more_menu(cx: &gpui::App) -> MenuModel {
                 )),
                 translator.translate(titlebar_position_label_key(position)),
             );
-            if position == appearance.titlebar_position {
+            if position == selected_position {
                 item.checked()
             } else {
                 item
@@ -471,6 +515,11 @@ fn build_more_menu(cx: &gpui::App) -> MenuModel {
         .collect();
 
     MenuModel::new(vec![
+        MenuItem::submenu(
+            translator.translate("settings.clipboard.window_position"),
+            window_position_items,
+        )
+        .with_icon(MenuIcon::svg("app-window.svg")),
         MenuItem::submenu(
             translator.translate("settings.personalization.titlebar_position"),
             titlebar_position_items,
@@ -568,6 +617,25 @@ fn handle_more_menu_action(action: MenuActionId, cx: &mut gpui::App) {
         return;
     }
 
+    if let Some(code) = action.as_str().strip_prefix(WINDOW_POSITION_ACTION_PREFIX) {
+        let Some(position) = ClipboardWindowPosition::ALL
+            .into_iter()
+            .find(|position| position.code() == code)
+        else {
+            return;
+        };
+
+        let mut clipboard = config_runtime::clipboard_config(cx);
+        if clipboard.window_position == position {
+            return;
+        }
+        clipboard.window_position = position;
+        if let Err(error) = config_runtime::set_clipboard_config(clipboard, cx) {
+            tracing::error!("保存窗口显示位置失败：{error}");
+        }
+        return;
+    }
+
     let Some(code) = action
         .as_str()
         .strip_prefix(TITLEBAR_POSITION_ACTION_PREFIX)
@@ -576,6 +644,12 @@ fn handle_more_menu_action(action: MenuActionId, cx: &mut gpui::App) {
     };
     let Some(position) = TitlebarPosition::ALL
         .into_iter()
+        .filter(|position| {
+            !config_runtime::clipboard_config(cx)
+                .window_position
+                .uses_horizontal_list()
+                || !position.is_vertical()
+        })
         .find(|position| position.code() == code)
     else {
         return;
@@ -597,6 +671,27 @@ const fn titlebar_position_label_key(position: TitlebarPosition) -> &'static str
         TitlebarPosition::Bottom => "settings.personalization.position.bottom",
         TitlebarPosition::Left => "settings.personalization.position.left",
         TitlebarPosition::Right => "settings.personalization.position.right",
+    }
+}
+
+const fn clipboard_window_position_label_key(position: ClipboardWindowPosition) -> &'static str {
+    match position {
+        ClipboardWindowPosition::MouseCenter => "settings.clipboard.window_position.mouse_center",
+        ClipboardWindowPosition::MouseNearby => "settings.clipboard.window_position.mouse_nearby",
+        ClipboardWindowPosition::Remember => "settings.clipboard.window_position.remember",
+        ClipboardWindowPosition::ScreenCenter => "settings.clipboard.window_position.screen_center",
+        ClipboardWindowPosition::ScreenLeftCenter => {
+            "settings.clipboard.window_position.screen_left_center"
+        }
+        ClipboardWindowPosition::ScreenRightCenter => {
+            "settings.clipboard.window_position.screen_right_center"
+        }
+        ClipboardWindowPosition::ScreenTopCenter => {
+            "settings.clipboard.window_position.screen_top_center"
+        }
+        ClipboardWindowPosition::ScreenBottomCenter => {
+            "settings.clipboard.window_position.screen_bottom_center"
+        }
     }
 }
 

@@ -36,6 +36,12 @@ pub(crate) enum VisibilitySource {
 }
 
 pub(crate) fn initialize_edge_hide_enabled(cx: &mut App) {
+    if config_runtime::clipboard_config(cx)
+        .window_position
+        .is_screen_edge()
+    {
+        return;
+    }
     let window = cx.read_global::<MainWindowService, _>(|service, _| service.window);
     let persisted_edge = state_runtime::state(cx).main_window.edge;
     let Some(window) = window else {
@@ -75,6 +81,7 @@ pub(crate) fn apply_imported_window_state(cx: &mut App) {
     };
     cx.update_global::<MainWindowService, _>(|service, _| {
         service.window_state.disable_edge_mode();
+        service.window_state.set_panel_attachment(None);
     });
 
     let result = window.update(cx, |_, window, cx| {
@@ -111,6 +118,18 @@ pub(crate) fn apply_imported_window_state(cx: &mut App) {
 }
 
 pub(crate) fn set_edge_hide_enabled(enabled: bool, cx: &mut App) {
+    if config_runtime::clipboard_config(cx)
+        .window_position
+        .is_screen_edge()
+        && (enabled
+            || cx
+                .global::<MainWindowService>()
+                .window_state
+                .edge_attachment()
+                .is_none())
+    {
+        return;
+    }
     if enabled {
         let (window, should_restore_normal_bounds, normal_bounds) = cx
             .read_global::<MainWindowService, _>(|service, _| {
@@ -349,6 +368,7 @@ enum VisibilityAnimation {
         from: platform_window::PhysicalClientBounds,
         to: platform_window::PhysicalClientBounds,
         show: bool,
+        hide_window: bool,
     },
     Normal {
         left: i32,
@@ -358,6 +378,85 @@ enum VisibilityAnimation {
         to_height: i32,
         show: bool,
     },
+}
+
+pub(crate) fn refresh_window_position(cx: &mut App) {
+    window_drag::sync_window_size_after_native_resize(cx);
+    record_normal_position(cx);
+    let (window, visible, previous_panel, normal_bounds) =
+        cx.read_global::<MainWindowService, _>(|service, _| {
+            (
+                service.window,
+                service.window_state.is_logically_visible(),
+                service.window_state.panel_attachment(),
+                service.window_state.normal_bounds(),
+            )
+        });
+    let Some(window) = window else { return };
+    let restored = state_runtime::state(cx).main_window.restored_size();
+    cx.update_global::<MainWindowService, _>(|service, _| {
+        service.window_state.disable_edge_mode();
+        service.window_state.set_panel_attachment(None);
+        service.window_state.set_visibility(visible);
+    });
+    let result = window.update(cx, |_, window, cx| {
+        platform_window::restore_window_drag_constraints_hook(window)?;
+        if previous_panel.is_some()
+            && !config_runtime::clipboard_config(cx)
+                .window_position
+                .is_screen_edge()
+            && let Some(bounds) = normal_bounds
+        {
+            platform_window::set_client_bounds(window, bounds)?;
+        }
+        position_initial_window(window, size(px(restored.width), px(restored.height)), cx)?;
+        if visible {
+            platform_window::set_window_opacity(window, 1.0)?;
+            platform_window::set_window_shadow_visible(window, true)?;
+            platform_window::set_window_rendering_enabled(window, true)?;
+            platform_window::set_window_visible(window, true)?;
+        } else {
+            hide_initial_window(window, true, cx)?;
+        }
+        window.refresh();
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::error!("更新主窗口定位失败：{error}"),
+        Err(error) => tracing::error!("更新主窗口定位失败：{error}"),
+    }
+    MainWindowService::notify_main_view(cx);
+    if config_runtime::clipboard_config(cx).edge_hide {
+        set_edge_hide_enabled(true, cx);
+    }
+    sync_mouse_leave_state(cx);
+}
+
+fn panel_attachment_for_bounds(
+    position: ClipboardWindowPosition,
+    bounds: platform_window::PhysicalClientBounds,
+    cx: &App,
+) -> Option<window_state::EdgeAttachment> {
+    let side = match position {
+        ClipboardWindowPosition::ScreenLeftCenter => window_state::EdgeSide::Left,
+        ClipboardWindowPosition::ScreenRightCenter => window_state::EdgeSide::Right,
+        ClipboardWindowPosition::ScreenTopCenter => window_state::EdgeSide::Top,
+        ClipboardWindowPosition::ScreenBottomCenter => window_state::EdgeSide::Bottom,
+        _ => return None,
+    };
+    let display = platform_window::display_for_physical_point(
+        cx,
+        Point {
+            x: (bounds.left as f32 + bounds.right as f32) / 2.0,
+            y: (bounds.top as f32 + bounds.bottom as f32) / 2.0,
+        },
+    )?;
+    Some(window_state::EdgeAttachment {
+        side,
+        client_bounds: bounds,
+        screen_bounds: display.bounds,
+    })
 }
 
 pub(crate) fn position_initial_window(
@@ -403,6 +502,28 @@ pub(crate) fn position_initial_window(
             platform_window::set_client_bounds(window, bounds)?;
         }
         window.bounds_changed(cx);
+        if position.is_screen_edge() {
+            if cx
+                .global::<MainWindowService>()
+                .window_state
+                .normal_bounds()
+                .is_none()
+            {
+                remember_normal_geometry(
+                    initial_bounds,
+                    (
+                        f32::from(initial_logical_size.width),
+                        f32::from(initial_logical_size.height),
+                    ),
+                    cx,
+                );
+            }
+            let panel = panel_attachment_for_bounds(position, bounds, cx);
+            cx.update_global::<MainWindowService, _>(|service, _| {
+                service.window_state.set_panel_attachment(panel);
+            });
+            return Ok(());
+        }
         remember_normal_geometry(
             bounds,
             (
@@ -430,7 +551,16 @@ pub(crate) fn hide_initial_window(
 ) -> Result<(), String> {
     let attachment =
         cx.read_global::<MainWindowService, _>(|service, _| service.window_state.edge_attachment());
-    if let Some(attachment) = attachment {
+    let panel = cx
+        .global::<MainWindowService>()
+        .window_state
+        .panel_attachment();
+    if let Some(panel) = panel {
+        platform_window::set_client_bounds(window, hidden_bounds(panel, 0))?;
+        window.bounds_changed(cx);
+        platform_window::set_window_shadow_visible(window, false)?;
+        platform_window::set_window_visible(window, false)?;
+    } else if let Some(attachment) = attachment {
         let hidden = hidden_bounds(
             attachment,
             edge_reveal_size(
@@ -536,6 +666,7 @@ pub(crate) fn set_visibility(
         transition_active,
         stored_normal_bounds,
         stored_normal_logical_size,
+        stored_panel,
         fixed,
     ) = cx.read_global::<MainWindowService, _>(|service, _| {
         (
@@ -545,6 +676,7 @@ pub(crate) fn set_visibility(
             service.window_state.is_visibility_transition_active(),
             service.window_state.normal_bounds(),
             service.window_state.normal_logical_size(),
+            service.window_state.panel_attachment(),
             service.window_state.is_fixed(),
         )
     });
@@ -580,8 +712,10 @@ pub(crate) fn set_visibility(
 
     let animation_enabled =
         config_runtime::animation_enabled(cx, crate::config::AnimationKind::WindowVisibility);
-    let show_edge = config_runtime::clipboard_config(cx).edge_hide_show_edge;
-    let (current_bounds, reveal_size, window_scale_factor, window_logical_size) = window
+    let clipboard = config_runtime::clipboard_config(cx);
+    let panel_mode = clipboard.window_position.is_screen_edge();
+    let show_edge = clipboard.edge_hide_show_edge;
+    let (current_bounds, mut reveal_size, window_scale_factor, window_logical_size) = window
         .update(cx, |_, window, _| {
             let current_bounds = platform_window::physical_client_bounds(window)?;
             Ok::<_, String>((
@@ -604,7 +738,12 @@ pub(crate) fn set_visibility(
             })
             .unwrap_or(window_logical_size)
     });
-    let (normal_bounds, normal_scale_factor) = if attachment.is_none() {
+    let (normal_bounds, normal_scale_factor) = if panel_mode
+        && (!visible || transition_active)
+        && let Some(panel) = stored_panel
+    {
+        (panel.client_bounds, window_scale_factor)
+    } else if attachment.is_none() {
         if visible {
             normal_bounds_for_position(
                 base_normal_bounds,
@@ -623,20 +762,39 @@ pub(crate) fn set_visibility(
         (base_normal_bounds, window_scale_factor)
     };
 
-    if !visible && attachment.is_none() {
+    let panel = panel_mode
+        .then(|| {
+            panel_attachment_for_bounds(clipboard.window_position, normal_bounds, cx)
+                .or(stored_panel)
+        })
+        .flatten();
+    if panel.is_some() {
+        reveal_size = 0;
+        cx.update_global::<MainWindowService, _>(|service, _| {
+            service.window_state.set_panel_attachment(panel);
+        });
+    }
+    let sliding_attachment = panel.or(attachment);
+
+    if !visible && sliding_attachment.is_none() {
         record_normal_position(cx);
         remember_normal_bounds(normal_bounds, cx);
     }
 
-    let animation = match attachment {
+    let animation = match sliding_attachment {
         Some(attachment) => VisibilityAnimation::Edge {
-            from: current_bounds,
+            from: if panel.is_some() && visible && !transition_active {
+                hidden_bounds(attachment, 0)
+            } else {
+                current_bounds
+            },
             to: if visible {
                 attachment.client_bounds
             } else {
                 hidden_bounds(attachment, reveal_size)
             },
             show: visible,
+            hide_window: panel.is_some(),
         },
         None => {
             let collapsed = collapsed_bounds(
@@ -660,11 +818,19 @@ pub(crate) fn set_visibility(
     };
 
     if !animation_enabled {
-        apply_immediate_visibility(window, attachment, visible, normal_bounds, reveal_size, cx)?;
+        apply_immediate_visibility(
+            window,
+            sliding_attachment,
+            panel.is_some(),
+            visible,
+            normal_bounds,
+            reveal_size,
+            cx,
+        )?;
         cx.update_global::<MainWindowService, _>(|service, _| {
             service.window_state.cancel_visibility_transition();
             service.window_state.set_visibility(visible);
-            if attachment.is_none() {
+            if sliding_attachment.is_none() {
                 service.window_state.remember_normal_bounds(normal_bounds);
             }
         });
@@ -711,7 +877,7 @@ pub(crate) fn set_visibility(
     }
 
     let generation = cx.update_global::<MainWindowService, _>(|service, _| {
-        if attachment.is_none() {
+        if sliding_attachment.is_none() {
             service.window_state.remember_normal_bounds(normal_bounds);
         }
         service.window_state.begin_visibility_transition(visible)
@@ -719,15 +885,21 @@ pub(crate) fn set_visibility(
     sync_mouse_leave_state(cx);
 
     let setup_result = window
-        .update(cx, |_, window, _| -> Result<_, String> {
+        .update(cx, |_, window, cx| -> Result<_, String> {
             platform_window::set_window_rendering_enabled(window, true)?;
             if attachment.is_none() || visible {
                 platform_window::set_window_shadow_visible(window, true)?;
             }
             match animation {
-                VisibilityAnimation::Edge { .. } => {
+                VisibilityAnimation::Edge {
+                    from, hide_window, ..
+                } => {
                     platform_window::set_window_opacity(window, 1.0)?;
-                    // 贴边状态始终保持系统窗口可见，只通过屏幕坐标实现隐藏。
+                    if hide_window {
+                        // 完整尺寸先放到动画起点，再显示，避免屏幕内闪现。
+                        platform_window::set_client_bounds(window, from)?;
+                        window.bounds_changed(cx);
+                    }
                     platform_window::set_window_visible(window, true)?;
                 }
                 VisibilityAnimation::Normal {
@@ -799,6 +971,7 @@ pub(crate) fn set_visibility(
 fn apply_immediate_visibility(
     window: gpui::AnyWindowHandle,
     attachment: Option<window_state::EdgeAttachment>,
+    hide_window: bool,
     visible: bool,
     normal_bounds: platform_window::PhysicalClientBounds,
     reveal_size: i32,
@@ -817,9 +990,18 @@ fn apply_immediate_visibility(
                     let hidden = hidden_bounds(attachment, reveal_size);
                     (hidden.left, hidden.top)
                 };
-                platform_window::set_client_position(window, x, y)?;
-                // 贴边状态始终保持系统窗口可见，只通过屏幕坐标实现隐藏。
-                platform_window::set_window_visible(window, true)
+                if hide_window {
+                    let bounds = if visible {
+                        attachment.client_bounds
+                    } else {
+                        hidden_bounds(attachment, 0)
+                    };
+                    platform_window::set_client_bounds(window, bounds)?;
+                    window.bounds_changed(cx);
+                } else {
+                    platform_window::set_client_position(window, x, y)?;
+                }
+                platform_window::set_window_visible(window, !hide_window || visible)
             } else {
                 platform_window::set_client_bounds(window, normal_bounds)?;
                 window.bounds_changed(cx);
@@ -925,7 +1107,9 @@ fn apply_visibility_animation_frame(
         },
     };
     match animation {
-        VisibilityAnimation::Edge { show, .. } => {
+        VisibilityAnimation::Edge {
+            show, hide_window, ..
+        } => {
             platform_window::set_client_position_with_target(
                 animation_target,
                 frame_bounds.left,
@@ -933,8 +1117,11 @@ fn apply_visibility_animation_frame(
             )?;
             if completed && !show {
                 platform_window::set_window_shadow_visible(window, false)?;
+                if hide_window {
+                    platform_window::set_window_visible(window, false)?;
+                }
             }
-            if completed {
+            if completed && (show || !hide_window) {
                 platform_window::raise_window_to_topmost(window)?;
             }
         }
@@ -996,22 +1183,28 @@ fn restore_visibility_after_animation_failure(
     visible: bool,
     cx: &mut App,
 ) -> Result<(), String> {
-    let (attachment, normal_bounds) = cx.read_global::<MainWindowService, _>(|service, _| {
-        (
-            service.window_state.edge_attachment(),
-            service.window_state.normal_bounds(),
-        )
-    });
-    if let Some(attachment) = attachment {
+    let (attachment, panel, normal_bounds) =
+        cx.read_global::<MainWindowService, _>(|service, _| {
+            (
+                service.window_state.edge_attachment(),
+                service.window_state.panel_attachment(),
+                service.window_state.normal_bounds(),
+            )
+        });
+    if let Some(attachment) = panel.or(attachment) {
         let bounds = if visible {
             attachment.client_bounds
         } else {
             hidden_bounds(
                 attachment,
-                edge_reveal_size(
-                    window.scale_factor(),
-                    config_runtime::clipboard_config(cx).edge_hide_show_edge,
-                ),
+                if panel.is_some() {
+                    0
+                } else {
+                    edge_reveal_size(
+                        window.scale_factor(),
+                        config_runtime::clipboard_config(cx).edge_hide_show_edge,
+                    )
+                },
             )
         };
         platform_window::set_client_position(window, bounds.left, bounds.top)?;
@@ -1289,6 +1482,24 @@ fn normal_bounds_for_position(
         return (base_bounds, fallback_scale_factor);
     };
     let converter = platform_window::CoordinateConverter::new(display.scale_factor);
+    let logical_size = if position.is_screen_edge() {
+        let state = state_runtime::state(cx);
+        let side = match position {
+            ClipboardWindowPosition::ScreenLeftCenter => state_runtime::PersistedEdgeSide::Left,
+            ClipboardWindowPosition::ScreenRightCenter => state_runtime::PersistedEdgeSide::Right,
+            ClipboardWindowPosition::ScreenTopCenter => state_runtime::PersistedEdgeSide::Top,
+            ClipboardWindowPosition::ScreenBottomCenter => state_runtime::PersistedEdgeSide::Bottom,
+            _ => unreachable!(),
+        };
+        let thickness = state.main_window.restored_edge_panel_size(side);
+        if position.uses_horizontal_list() {
+            (logical_size.0, thickness)
+        } else {
+            (thickness, logical_size.1)
+        }
+    } else {
+        logical_size
+    };
     let logical_bounds = positioned_bounds(
         logical_size,
         position,
@@ -1307,8 +1518,20 @@ fn positioned_bounds(
     screen: platform_window::LogicalDisplayBounds,
     cursor: Point<f32>,
 ) -> platform_window::LogicalClientBounds {
-    let width = logical_size.0.max(1.0);
-    let height = logical_size.1.max(1.0);
+    let width = if position.uses_horizontal_list() {
+        screen.width.max(1.0)
+    } else if position.is_screen_edge() {
+        logical_size.0.max(1.0).min((screen.width / 2.0).max(1.0))
+    } else {
+        logical_size.0.max(1.0)
+    };
+    let height = if position.is_screen_edge() && !position.uses_horizontal_list() {
+        screen.height.max(1.0)
+    } else if position.is_screen_edge() {
+        logical_size.1.max(1.0).min((screen.height / 2.0).max(1.0))
+    } else {
+        logical_size.1.max(1.0)
+    };
     let screen_right = screen.x + screen.width;
     let screen_bottom = screen.y + screen.height;
     let center_x = screen.x + screen.width / 2.0;
@@ -2112,7 +2335,80 @@ mod tests {
             Point { x: 2000.0, y: 0.0 },
         );
         assert_eq!(left.left, 1920.0);
-        assert_eq!(left.top, 180.0);
+        assert_eq!(left.top, -100.0);
+        assert_eq!(left.height, 1080.0);
+        assert_eq!(left.width, 360.0);
+        let capped = positioned_bounds(
+            (1200.0, 1400.0),
+            ClipboardWindowPosition::ScreenTopCenter,
+            platform_window::CoordinateConverter::new(1.0).logical_display_bounds(screen),
+            Point { x: 2000.0, y: 0.0 },
+        );
+        assert_eq!(capped.height, 540.0);
+        assert_eq!(capped.width, 1920.0);
+    }
+
+    #[test]
+    fn edge_panels_span_the_screen_and_slide_completely_outside_it() {
+        let screen = platform_window::PhysicalDisplayBounds {
+            x: -1920.0,
+            y: -100.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        for (position, side) in [
+            (
+                ClipboardWindowPosition::ScreenLeftCenter,
+                window_state::EdgeSide::Left,
+            ),
+            (
+                ClipboardWindowPosition::ScreenRightCenter,
+                window_state::EdgeSide::Right,
+            ),
+            (
+                ClipboardWindowPosition::ScreenTopCenter,
+                window_state::EdgeSide::Top,
+            ),
+            (
+                ClipboardWindowPosition::ScreenBottomCenter,
+                window_state::EdgeSide::Bottom,
+            ),
+        ] {
+            for scale in [1.0, 1.5, 2.0] {
+                let converter = platform_window::CoordinateConverter::new(scale);
+                let bounds = positioned_bounds(
+                    (360.0, 520.0),
+                    position,
+                    converter.logical_display_bounds(screen),
+                    Point { x: -500.0, y: 0.0 },
+                );
+                let bounds = platform_window::physical_client_bounds_from_logical(bounds, scale);
+                let panel = window_state::EdgeAttachment {
+                    side,
+                    client_bounds: bounds,
+                    screen_bounds: screen,
+                };
+                let hidden = hidden_bounds(panel, 0);
+                if position.uses_horizontal_list() {
+                    assert_eq!((bounds.left, bounds.right), (-1920, 0));
+                    assert_eq!(
+                        bounds.bottom - bounds.top,
+                        (520.0 * scale).min(screen.height / 2.0) as i32
+                    );
+                } else {
+                    assert_eq!((bounds.top, bounds.bottom), (-100, 980));
+                    assert_eq!(bounds.right - bounds.left, (360.0 * scale) as i32);
+                }
+                match side {
+                    window_state::EdgeSide::Left => assert_eq!(hidden.right, -1920),
+                    window_state::EdgeSide::Right => assert_eq!(hidden.left, 0),
+                    window_state::EdgeSide::Top => assert_eq!(hidden.bottom, -100),
+                    window_state::EdgeSide::Bottom => assert_eq!(hidden.top, 980),
+                }
+                assert_eq!(client_height(hidden), client_height(bounds));
+                assert_eq!(hidden.right - hidden.left, bounds.right - bounds.left);
+            }
+        }
     }
 
     #[test]

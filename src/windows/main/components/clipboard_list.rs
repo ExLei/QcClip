@@ -463,6 +463,26 @@ fn error_message(cx: &mut Context<MainWindow>) -> AnyElement {
         .into_any_element()
 }
 
+fn horizontal_header_enabled(display: &crate::config::ItemDisplayConfig) -> bool {
+    let toolbar_info_enabled = display.toolbar_visibility != ItemRegionVisibility::Hidden
+        && (display.enabled(ItemDisplayField::Source)
+            || display.enabled(ItemDisplayField::Shortcut));
+    let action_enabled = display.actions_visibility != ItemRegionVisibility::Hidden
+        && [
+            ItemDisplayField::Edit,
+            ItemDisplayField::Note,
+            ItemDisplayField::PastePlain,
+            ItemDisplayField::OpenDefault,
+            ItemDisplayField::OpenBrowser,
+            ItemDisplayField::Favorite,
+            ItemDisplayField::Pin,
+            ItemDisplayField::Delete,
+        ]
+        .into_iter()
+        .any(|field| display.enabled(field));
+    toolbar_info_enabled || action_enabled
+}
+
 fn render_rows(
     active_tab: TabId,
     can_reorder: bool,
@@ -491,10 +511,45 @@ fn render_rows(
 ) -> AnyElement {
     let translator = i18n::translator(cx);
     let hover_allowed = window.is_window_hovered() && MenuService::hover_animation_allowed(cx);
-    let list_width = window.viewport_size().width;
-    let preview_width = available_preview_width(list_width, list_item_style, window.rem_size());
+    let horizontal = config_runtime::clipboard_config(cx)
+        .window_position
+        .uses_horizontal_list();
+    let item_display = config_runtime::appearance_config(cx).item_display;
+    let show_horizontal_header = horizontal && horizontal_header_enabled(&item_display);
+    let viewport_height = scroll_handle.bounds().size.height;
+    let metrics = if horizontal {
+        metrics.with_horizontal_card(
+            if viewport_height > px(0.0) {
+                viewport_height
+            } else {
+                (window.viewport_size().height - metrics.rem_size * 5.25)
+                    .max(metrics.rem_size * 5.0)
+            },
+            show_horizontal_header,
+        )
+    } else {
+        metrics
+    };
+    let viewport_width = window.viewport_size().width;
+    let list_width = if horizontal {
+        metrics.horizontal_item_width()
+    } else {
+        viewport_width
+    };
+    let preview_width = if horizontal {
+        available_preview_width_with_card_inset(
+            list_width,
+            list_item_style,
+            window.rem_size(),
+            metrics.horizontal_card_inset,
+        )
+    } else {
+        available_preview_width(list_width, list_item_style, window.rem_size())
+    };
     let layout_key = ListLayoutCacheKey {
-        viewport_width: list_width,
+        viewport_width,
+        viewport_height: if horizontal { viewport_height } else { px(0.0) },
+        horizontal,
         rem_size: window.rem_size(),
         font_metrics: crate::ui::fonts::AppFontMetrics::from_window(window, cx),
         list_item_style,
@@ -503,6 +558,7 @@ fn render_rows(
         adaptive_max_lines: metrics.adaptive_max_lines as u8,
         only_show_notes: metrics.only_show_notes,
         show_info_row: metrics.show_meta,
+        show_horizontal_header,
         display_priority,
         query_generation,
         // 固定行高与已加载条目的内容无关，分页时无需重建全部行的布局数组。
@@ -525,7 +581,8 @@ fn render_rows(
                 || cache.key.adaptive_max_lines != layout_key.adaptive_max_lines
                 || cache.key.font_metrics != layout_key.font_metrics
                 || cache.key.only_show_notes != layout_key.only_show_notes
-                || cache.key.show_info_row != layout_key.show_info_row)
+                || cache.key.show_info_row != layout_key.show_info_row
+                || cache.key.show_horizontal_header != layout_key.show_horizontal_header)
     });
     let mut build_layout = || {
         let sizes = (0..total_item_count)
@@ -780,12 +837,17 @@ fn render_rows(
             rows
         },
     )
+    .with_axis(if horizontal {
+        gpui::Axis::Horizontal
+    } else {
+        gpui::Axis::Vertical
+    })
     .track_scroll(scroll_handle)
     .with_cross_axis_measurement(false)
     .overflow_hidden()
     .h_full()
     .w_full();
-    if list_item_style == ListItemStyle::Card {
+    if list_item_style == ListItemStyle::Card && !horizontal {
         list = list.py(metrics.card_vertical_inset);
     }
 
@@ -833,10 +895,25 @@ fn render_rows(
             heatmap.buckets(),
             heat_scrollbar,
             scroll_handle,
-            list_width,
+            viewport_width,
+            if horizontal {
+                gpui::Axis::Horizontal
+            } else {
+                gpui::Axis::Vertical
+            },
             window,
             cx,
         ));
+    let list_container = if horizontal {
+        let entity = cx.entity();
+        gpui_component::ElementExt::on_prepaint(list_container, move |bounds, _, cx| {
+            if bounds.size.height != viewport_height {
+                entity.update(cx, |_, cx| cx.notify());
+            }
+        })
+    } else {
+        list_container
+    };
 
     v_flex()
         .flex_grow_1()
@@ -859,7 +936,9 @@ fn render_rows(
             .size_full(),
         )
         .child(list_container)
-        .child(div().h(px(LIST_BOTTOM_BAR_HEIGHT)).w_full().flex_shrink_0())
+        .when(!horizontal, |this| {
+            this.child(div().h(px(LIST_BOTTOM_BAR_HEIGHT)).w_full().flex_shrink_0())
+        })
         .child(super::floating_toolbar::render(
             toolbar_bottom,
             toolbar_dragging,
@@ -930,6 +1009,7 @@ fn source_application_icon(
     image: Option<Arc<RenderImage>>,
     theme: ThemeColor,
     translator: &Translator,
+    horizontal: bool,
 ) -> AnyElement {
     let icon = image
         .map(|image| {
@@ -946,12 +1026,16 @@ fn source_application_icon(
         .map(str::to_owned)
         .unwrap_or_else(|| translator.translate("main.source.unknown"));
 
-    div()
+    let mut icon_container = div()
         .id(("source-application-icon", row_id as u64))
         .size(ui_rem(20.0))
         .flex()
         .items_center()
-        .justify_center()
+        .justify_center();
+    if horizontal {
+        icon_container = icon_container.relative().top(px(-1.0));
+    }
+    icon_container
         .child(icon)
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .into_any_element()
@@ -1703,6 +1787,7 @@ fn render_item_surface<T>(
                 source_app_icon,
                 theme,
                 &translator,
+                metrics.horizontal,
             ))
         })
         .when(show_shortcut, |this| {
@@ -1755,7 +1840,7 @@ fn render_item_surface<T>(
     if list_item_style == ListItemStyle::Card {
         info_bar = info_bar.rounded_tr(px(CARD_RADIUS));
     }
-    let inline_info_bar = !item.note_text.is_empty() && !metrics.show_meta;
+    let inline_info_bar = !metrics.horizontal && !item.note_text.is_empty() && !metrics.show_meta;
     if inline_info_bar {
         info_bar = info_bar.relative().h(metrics.preview_line_height);
     }
@@ -1802,6 +1887,13 @@ fn render_item_surface<T>(
                 .min_w_0()
                 .min_h_0()
                 .overflow_hidden()
+                .when(metrics.horizontal, |view| {
+                    view.flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_md()
+                        .bg(theme.background)
+                })
                 .child(
                     img(loaded.image)
                         .h(content_metrics.preview_height)
@@ -1879,6 +1971,7 @@ fn render_item_surface<T>(
             meta_row = meta_row.group_hover(row_hover_group.clone(), |style| style.visible());
         }
     }
+    let mut meta_row = Some(meta_row);
     let mut row = div()
         .h(metrics.content_height)
         .flex_none()
@@ -1893,8 +1986,56 @@ fn render_item_surface<T>(
         row.w_full()
     };
     row = row.px(ui_rem(10.0)).py(metrics.vertical_padding);
-    if metrics.show_meta {
-        row = row.child(meta_row);
+    let horizontal_material_enabled = metrics.horizontal
+        && crate::window_material::supported_material(
+            config_runtime::appearance_config(cx).window_material,
+        ) != crate::config::WindowMaterial::Disabled;
+    if metrics.horizontal {
+        let surface_theme = crate::window_material::excluded_window_theme(cx);
+        row = row.bg(if horizontal_material_enabled {
+            gpui::ColorExt::opacity(&surface_theme.background, 0.9)
+        } else if selected {
+            surface_theme.list_active
+        } else {
+            surface_theme.background
+        });
+        if has_toolbar {
+            row = row.child(
+                div()
+                    .w_full()
+                    .h(metrics.rem_size * 1.5)
+                    .mb(metrics.rem_size * 0.5)
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px(ui_rem(6.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(if show_source {
+                                item.source_app_name.clone().unwrap_or_default()
+                            } else {
+                                String::new()
+                            }),
+                    )
+                    .children(info_bar.take().map(|bar| {
+                        bar.relative()
+                            .h_full()
+                            .border_0()
+                            .rounded_none()
+                            .bg(gpui::transparent_black())
+                    })),
+            );
+        }
+    }
+    if metrics.show_meta && !metrics.horizontal {
+        row = row.children(meta_row.take());
     }
     if show_note_header {
         let mut header = div()
@@ -1919,8 +2060,19 @@ fn render_item_surface<T>(
         }
         row = row.child(header);
     }
+    row = row.child(preview);
+    if metrics.horizontal && metrics.show_meta {
+        row = row.children(meta_row.take().map(|mut meta| {
+            if item.paste_count > 0 {
+                meta = meta.child(div().flex_shrink_0().child(translator.translate_with_args(
+                    "main.preview.info.paste_count_value",
+                    &[("count", item.paste_count.to_string())],
+                )));
+            }
+            meta.mt(metrics.rem_size * 0.25)
+        }));
+    }
     row = row
-        .child(preview)
         .children(info_bar)
         .child(
             // 用于在预绘制阶段取得整行边界，滚动时鼠标不移动也能同步选中项。
@@ -1941,6 +2093,9 @@ fn render_item_surface<T>(
         cx.theme().border
     };
     row = match list_item_style {
+        ListItemStyle::Seamless if metrics.horizontal => {
+            row.border_r_1().border_color(item_border_color)
+        }
         ListItemStyle::Seamless => row.border_b_1().border_color(item_border_color),
         ListItemStyle::Card => row
             .overflow_hidden()
@@ -1949,14 +2104,24 @@ fn render_item_surface<T>(
             .border_color(item_border_color),
     };
     if !drag_preview && hover_allowed {
+        let hover_color = if metrics.horizontal {
+            let surface_theme = crate::window_material::excluded_window_theme(cx);
+            if horizontal_material_enabled {
+                gpui::ColorExt::opacity(&surface_theme.background, 1.0)
+            } else {
+                surface_theme.list_hover
+            }
+        } else {
+            theme.list_hover
+        };
         if crate::config_runtime::animation_enabled(cx, crate::config::AnimationKind::ListItemHover)
         {
             row = row.group_hover(
                 format!("clipboard-item-hover-{}", item.history_id),
-                |this| this.bg(theme.list_hover),
+                move |this| this.bg(hover_color),
             );
         } else {
-            row = row.hover(|this| this.bg(theme.list_hover));
+            row = row.hover(move |this| this.bg(hover_color));
         }
     }
     if selected && list_item_style == ListItemStyle::Seamless {
@@ -1987,12 +2152,22 @@ fn render_item_surface<T>(
 fn render_item_border(
     list_item_style: ListItemStyle,
     color: Option<gpui::Background>,
+    horizontal: bool,
 ) -> Option<AnyElement> {
     let color = color?;
 
-    let mut border = div().absolute().inset_0().border_l_3().border_color(color);
+    let mut border = div().absolute().inset_0().border_color(color);
+    border = if horizontal {
+        border.border_t_3()
+    } else {
+        border.border_l_3()
+    };
     if list_item_style == ListItemStyle::Seamless {
-        border = border.left(px(1.0));
+        border = if horizontal {
+            border.top(px(1.0))
+        } else {
+            border.left(px(1.0))
+        };
     }
     if list_item_style == ListItemStyle::Card {
         border = border.rounded(px(CARD_RADIUS));
@@ -2004,10 +2179,11 @@ fn item_border_color(
     is_pinned: bool,
     paste_count: u64,
     theme: ThemeColor,
+    horizontal: bool,
 ) -> Option<gpui::Background> {
     match (is_pinned, paste_count > 0) {
         (true, true) => Some(linear_gradient(
-            0.0,
+            if horizontal { 90.0 } else { 0.0 },
             linear_color_stop(theme.yellow, 0.49),
             linear_color_stop(theme.blue, 0.51),
         )),
@@ -2032,7 +2208,12 @@ fn render_drag_preview(
     let mut item = drag.item.clone();
     item.shortcut = shortcut.to_owned();
     let row_width = if drag.list_item_style == ListItemStyle::Card {
-        px((f32::from(preview_size.width) - CARD_HORIZONTAL_INSET * 2.0).max(1.0))
+        let inset = if drag.metrics.horizontal {
+            f32::from(drag.metrics.horizontal_card_inset)
+        } else {
+            CARD_HORIZONTAL_INSET
+        };
+        px((f32::from(preview_size.width) - inset * 2.0).max(1.0))
     } else {
         preview_size.width
     };
@@ -2067,14 +2248,24 @@ fn render_drag_preview(
         .child(surface)
         .children(render_item_border(
             drag.list_item_style,
-            item_border_color(item.is_pinned, item.paste_count, theme),
+            item_border_color(
+                item.is_pinned,
+                item.paste_count,
+                theme,
+                drag.metrics.horizontal,
+            ),
+            drag.metrics.horizontal,
         ));
     if drag.list_item_style == ListItemStyle::Card {
         div()
             .h(preview_size.height)
             .w(preview_size.width)
             .flex_none()
-            .px(px(CARD_HORIZONTAL_INSET))
+            .px(if drag.metrics.horizontal {
+                drag.metrics.horizontal_card_inset
+            } else {
+                px(CARD_HORIZONTAL_INSET)
+            })
             .py(drag.metrics.card_vertical_inset)
             .child(row)
             .into_any_element()
@@ -2508,8 +2699,15 @@ fn render_row(
                         .as_ref()
                         .map(current_reorder_animation_offsets)
                         .unwrap_or_default();
-                    if this.set_reorder_target(target, metrics.row_height, &current_visual_offsets)
-                    {
+                    if this.set_reorder_target(
+                        target,
+                        if metrics.horizontal {
+                            metrics.horizontal_item_width()
+                        } else {
+                            metrics.row_height
+                        },
+                        &current_visual_offsets,
+                    ) {
                         cx.notify();
                     }
                 },
@@ -2860,7 +3058,13 @@ fn render_row(
         .child(row)
         .children(render_item_border(
             list_item_style,
-            item_border_color(item.is_pinned, item.paste_count, cx.theme().colors),
+            item_border_color(
+                item.is_pinned,
+                item.paste_count,
+                cx.theme().colors,
+                metrics.horizontal,
+            ),
+            metrics.horizontal,
         ))
         .child(render_tag_indicators(
             &item,
@@ -2920,14 +3124,21 @@ fn render_row(
         row_id,
         reorder_animation,
         list_item_reorder_enabled,
+        metrics.horizontal,
     );
-    if list_item_style == ListItemStyle::Card {
+    if list_item_style == ListItemStyle::Card || metrics.horizontal {
         let mut card = div()
             .id(("clipboard-card", row_id as u64))
             .h(metrics.row_height)
             .w_full()
             .flex_none()
-            .px(px(CARD_HORIZONTAL_INSET))
+            .when(list_item_style == ListItemStyle::Card, |this| {
+                this.px(if metrics.horizontal {
+                    metrics.horizontal_card_inset
+                } else {
+                    px(CARD_HORIZONTAL_INSET)
+                })
+            })
             .py(metrics.card_vertical_inset)
             .group(hover_group)
             .map(|card| {
@@ -3019,6 +3230,7 @@ fn with_reorder_animation(
     row_id: HistoryItemId,
     reorder_animation: Option<(u64, Pixels)>,
     animations_enabled: bool,
+    horizontal: bool,
 ) -> AnyElement {
     let Some((generation, offset)) = reorder_animation.filter(|_| animations_enabled) else {
         return row;
@@ -3039,7 +3251,12 @@ fn with_reorder_animation(
         animation_id,
         Animation::new(LIST_REORDER_ANIMATION_DURATION).with_easing(gpui::ease_in_out),
         move |mut this, delta| {
-            this.offset = point(px(0.0), px(f32::from(offset) * (1.0 - delta)));
+            let offset = px(f32::from(offset) * (1.0 - delta));
+            this.offset = if horizontal {
+                point(offset, px(0.0))
+            } else {
+                point(px(0.0), offset)
+            };
             this
         },
     )
@@ -3192,12 +3409,18 @@ fn render_loading_row(
             .border_color(theme.border);
     }
 
-    if list_item_style == ListItemStyle::Card {
+    if list_item_style == ListItemStyle::Card || metrics.horizontal {
         div()
             .h(metrics.row_height)
             .w_full()
             .flex_none()
-            .px(px(CARD_HORIZONTAL_INSET))
+            .when(list_item_style == ListItemStyle::Card, |this| {
+                this.px(if metrics.horizontal {
+                    metrics.horizontal_card_inset
+                } else {
+                    px(CARD_HORIZONTAL_INSET)
+                })
+            })
             .py(metrics.card_vertical_inset)
             .child(row)
             .into_any_element()
@@ -3230,12 +3453,18 @@ fn render_placeholder_row(
         .h(metrics.content_height)
         .w_full()
         .flex_none();
-    if list_item_style == ListItemStyle::Card {
+    if list_item_style == ListItemStyle::Card || metrics.horizontal {
         div()
             .h(metrics.row_height)
             .w_full()
             .flex_none()
-            .px(px(CARD_HORIZONTAL_INSET))
+            .when(list_item_style == ListItemStyle::Card, |this| {
+                this.px(if metrics.horizontal {
+                    metrics.horizontal_card_inset
+                } else {
+                    px(CARD_HORIZONTAL_INSET)
+                })
+            })
             .py(metrics.card_vertical_inset)
             .child(surface)
             .into_any_element()

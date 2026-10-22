@@ -121,6 +121,8 @@ pub(crate) struct AdaptiveHeightCacheKey {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ListLayoutCacheKey {
     pub(crate) viewport_width: Pixels,
+    pub(crate) viewport_height: Pixels,
+    pub(crate) horizontal: bool,
     pub(crate) rem_size: Pixels,
     pub(crate) font_metrics: crate::ui::fonts::AppFontMetrics,
     pub(crate) list_item_style: ListItemStyle,
@@ -129,6 +131,7 @@ pub(crate) struct ListLayoutCacheKey {
     pub(crate) adaptive_max_lines: u8,
     pub(crate) only_show_notes: bool,
     pub(crate) show_info_row: bool,
+    pub(crate) show_horizontal_header: bool,
     pub(crate) display_priority: ClipboardDisplayPriority,
     pub(crate) query_generation: u64,
     pub(crate) layout_generation: u64,

@@ -6,6 +6,7 @@ pub(super) struct ListItemMetrics {
     pub(super) row_height: Pixels,
     pub(super) content_height: Pixels,
     pub(super) card_vertical_inset: Pixels,
+    pub(super) horizontal_card_inset: Pixels,
     pub(super) style: ListItemStyle,
     pub(super) vertical_padding: Pixels,
     pub(super) meta_row_height: Pixels,
@@ -18,6 +19,7 @@ pub(super) struct ListItemMetrics {
     pub(super) preview_line_count: usize,
     pub(super) show_meta: bool,
     pub(super) only_show_notes: bool,
+    pub(super) horizontal: bool,
     font_metrics: Option<crate::ui::fonts::AppFontMetrics>,
 }
 
@@ -47,6 +49,11 @@ impl ListItemMetrics {
             row_height: px(0.0),
             content_height: px(0.0),
             card_vertical_inset,
+            horizontal_card_inset: if style == ListItemStyle::Card {
+                px(card_item_gap.pixels() / 2.0)
+            } else {
+                px(0.0)
+            },
             style,
             vertical_padding,
             meta_row_height,
@@ -59,6 +66,7 @@ impl ListItemMetrics {
             preview_line_count,
             show_meta: height.shows_meta(),
             only_show_notes: false,
+            horizontal: false,
             font_metrics: None,
         };
         metrics.with_preview_line_count(preview_line_count)
@@ -295,8 +303,22 @@ pub(super) fn available_preview_width(
     style: ListItemStyle,
     rem_size: Pixels,
 ) -> Pixels {
+    available_preview_width_with_card_inset(
+        window_width,
+        style,
+        rem_size,
+        px(CARD_HORIZONTAL_INSET),
+    )
+}
+
+pub(super) fn available_preview_width_with_card_inset(
+    window_width: Pixels,
+    style: ListItemStyle,
+    rem_size: Pixels,
+    card_inset: Pixels,
+) -> Pixels {
     let card_inset = if style == ListItemStyle::Card {
-        CARD_HORIZONTAL_INSET * 2.0
+        f32::from(card_inset) * 2.0
     } else {
         0.0
     };
@@ -344,6 +366,46 @@ pub(super) fn resolve_row_height(
 }
 
 impl ListItemMetrics {
+    pub(super) fn with_horizontal_card(
+        mut self,
+        viewport_height: Pixels,
+        show_header: bool,
+    ) -> Self {
+        self.horizontal = true;
+        self.height = ListItemHeight::Large;
+        self.card_vertical_inset = px(12.0);
+        self.vertical_padding = self.rem_size * 0.75;
+        let header_height = if show_header {
+            self.rem_size * 2.25
+        } else {
+            px(0.0)
+        };
+        let chrome = self.vertical_padding * 2.0
+            + px(MAX_ROW_BORDER_WIDTH)
+            + if self.show_meta {
+                self.meta_row_height
+            } else {
+                px(0.0)
+            }
+            + header_height;
+        let preview_height = (viewport_height - self.card_vertical_inset * 2.0 - chrome)
+            .max(self.preview_line_height);
+        let lines = (f32::from(preview_height) / f32::from(self.preview_line_height))
+            .floor()
+            .max(1.0) as usize;
+        let mut metrics = self.with_preview_height(preview_height, lines);
+        metrics.content_height += header_height;
+        metrics.row_height += header_height;
+        if self.style == ListItemStyle::Seamless {
+            metrics.row_height += self.card_vertical_inset * 2.0;
+        }
+        metrics
+    }
+
+    pub(super) fn horizontal_item_width(self) -> Pixels {
+        self.rem_size * 18.0 + self.horizontal_card_inset * 2.0
+    }
+
     pub(super) fn with_info_row(mut self, show_meta: bool) -> Self {
         self.show_meta = show_meta;
         self.with_preview_height(self.preview_height, self.preview_line_count)
@@ -366,6 +428,9 @@ impl ListItemMetrics {
         available_width: Pixels,
         window: &Window,
     ) -> Self {
+        if self.horizontal {
+            return self;
+        }
         if self.shows_only_note(&item.note_text) {
             if self.height != ListItemHeight::Adaptive {
                 return self;
@@ -394,6 +459,62 @@ impl ListItemMetrics {
 #[cfg(test)]
 mod item_display_tests {
     use super::*;
+
+    #[test]
+    fn horizontal_card_uses_the_viewport_height_instead_of_the_vertical_line_limit() {
+        let metrics = ListItemMetrics::from_rem_size(
+            px(16.0),
+            ListItemStyle::Card,
+            CardItemGap::Eight,
+            ListItemHeight::ExtraSmall,
+            3,
+        )
+        .with_horizontal_card(px(420.0), true);
+        assert_eq!(metrics.row_height, px(420.0));
+        assert!(metrics.preview_line_count > 3);
+        assert!(metrics.preview_height < metrics.content_height);
+    }
+
+    #[test]
+    fn horizontal_seamless_items_have_no_card_inset_or_width_gap() {
+        let card = ListItemMetrics::from_rem_size(
+            px(16.0),
+            ListItemStyle::Card,
+            CardItemGap::Eight,
+            ListItemHeight::Large,
+            3,
+        )
+        .with_horizontal_card(px(420.0), true);
+        let seamless = ListItemMetrics::from_rem_size(
+            px(16.0),
+            ListItemStyle::Seamless,
+            CardItemGap::Eight,
+            ListItemHeight::Large,
+            3,
+        )
+        .with_horizontal_card(px(420.0), true);
+        let seamless_without_header = ListItemMetrics::from_rem_size(
+            px(16.0),
+            ListItemStyle::Seamless,
+            CardItemGap::Eight,
+            ListItemHeight::Large,
+            3,
+        )
+        .with_horizontal_card(px(420.0), false);
+
+        assert_eq!(seamless.style, ListItemStyle::Seamless);
+        assert_eq!(seamless.card_vertical_inset, px(12.0));
+        assert_eq!(seamless.row_height, px(420.0));
+        assert_eq!(seamless_without_header.row_height, px(420.0));
+        assert_eq!(
+            seamless_without_header.preview_height - seamless.preview_height,
+            px(36.0)
+        );
+        assert_eq!(
+            card.horizontal_item_width() - seamless.horizontal_item_width(),
+            px(CardItemGap::Eight.pixels())
+        );
+    }
 
     #[test]
     fn information_visibility_changes_height_independently_of_preview_lines() {
