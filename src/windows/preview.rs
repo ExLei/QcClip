@@ -51,6 +51,22 @@ const PREVIEW_CORNER_RADIUS: f32 = 8.0;
 const FILE_ICON_SIZE: u16 = 32;
 const IMAGE_PREVIEW_MAX_SIZE: (u32, u32) = (4096, 4096);
 
+fn preview_container_shadow() -> Vec<gpui::BoxShadow> {
+    vec![
+        gpui::BoxShadow::new(px(0.0), px(0.0), gpui::hsla(0.0, 0.0, 0.0, 0.28))
+            .blur_radius(px(12.0))
+            .spread_radius(px(0.0)),
+    ]
+}
+
+fn preview_information_shadow() -> Vec<gpui::BoxShadow> {
+    vec![
+        gpui::BoxShadow::new(px(0.0), px(0.0), gpui::hsla(0.0, 0.0, 0.0, 0.20))
+            .blur_radius(px(3.0))
+            .spread_radius(px(0.0)),
+    ]
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PreviewRect {
     pub(crate) left: f32,
@@ -1449,7 +1465,7 @@ impl PreviewWindow {
             .map(|metrics| metrics.line_height(font_size, px(22.0 * ui_scale)))
             .map(f32::from)
             .unwrap_or(22.0 * ui_scale);
-        let gap = 6.0 * ui_scale;
+        let gap = 8.0 * ui_scale;
         let chip_padding = 6.0 * ui_scale;
         let information = crate::config_runtime::preview_information_config(cx);
         let mut rows = Vec::new();
@@ -1680,7 +1696,8 @@ impl PreviewWindow {
                                 .rounded(px(4.0 * ui_scale))
                                 .border_1()
                                 .border_color(gpui::ColorExt::opacity(&theme.border, 0.75))
-                                .bg(gpui::ColorExt::opacity(&theme.background, 0.92))
+                                .bg(theme.background)
+                                .shadow(preview_information_shadow())
                                 .text_color(if *hint {
                                     theme.muted_foreground
                                 } else {
@@ -1698,7 +1715,6 @@ impl PreviewWindow {
             .text_color(theme.foreground)
             .text_size(ui_rem(11.0))
             .line_height(px(row_height))
-            .overflow_hidden()
             .child(content)
             .into_any_element();
         Some((strip, size(width, height)))
@@ -2080,9 +2096,8 @@ impl Render for PreviewWindow {
             .when(self.mode != Some(PreviewMode::Image), |this| {
                 this.border_1().border_color(theme.border)
             })
-            .when(self.mode != Some(PreviewMode::Image), |this| {
-                this.bg(gpui::ColorExt::opacity(&theme.background, 0.90))
-            })
+            .bg(theme.background)
+            .shadow(preview_container_shadow())
             .child(surface_content);
         let surface = if animations_enabled {
             surface
@@ -2198,7 +2213,6 @@ impl Render for PreviewWindow {
                             .top(px(rect.top))
                             .w(px(rect.width))
                             .h(px(rect.height))
-                            .overflow_hidden()
                             .child(strip),
                     )
                     .priority(3),
