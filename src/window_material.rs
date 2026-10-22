@@ -216,7 +216,16 @@ pub(crate) fn uses_custom_image_background(cx: &App) -> bool {
 }
 
 fn load_background_image(path: &std::path::Path) -> Option<Arc<RenderImage>> {
-    let image = match image::open(path) {
+    // 以文件内容为准识别格式，避免图片扩展名与真实格式不一致时加载失败。
+    let reader =
+        match image::ImageReader::open(path).and_then(|reader| reader.with_guessed_format()) {
+            Ok(reader) => reader,
+            Err(error) => {
+                tracing::warn!(%error, "加载背景图片失败，已使用纯色背景");
+                return None;
+            }
+        };
+    let image = match reader.decode() {
         Ok(image) => image.to_rgba8(),
         Err(error) => {
             tracing::warn!(%error, "加载背景图片失败，已使用纯色背景");
@@ -672,5 +681,16 @@ mod tests {
 
         let highest = material_window_color(base, 10.0);
         assert_eq!(highest.alpha, WINDOW_MATERIAL_OPACITY_MAX);
+    }
+
+    #[test]
+    fn background_image_uses_file_content_when_extension_is_wrong() {
+        let directory = tempfile::tempdir().expect("应创建临时目录");
+        let path = directory.path().join("背景 (3).png");
+        image::DynamicImage::new_rgb8(1, 1)
+            .save_with_format(&path, image::ImageFormat::Jpeg)
+            .expect("应写入测试图片");
+
+        assert!(load_background_image(&path).is_some());
     }
 }
