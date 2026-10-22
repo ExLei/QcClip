@@ -498,6 +498,7 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
         warnings,
     );
     ClipboardConfig {
+        capture_formats: read_group(object, "captureFormats", warnings, read_clipboard_formats),
         mouse_left_behavior: read_field(
             object,
             "mouseLeftBehavior",
@@ -643,6 +644,29 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             "searchEngines",
             "clipboard.searchEngines",
             default.search_engines,
+            warnings,
+        ),
+    }
+}
+
+fn read_clipboard_formats(
+    object: &Map<String, Value>,
+    warnings: &mut Vec<String>,
+) -> super::ClipboardFormatConfig {
+    let default = super::ClipboardFormatConfig::default();
+    super::ClipboardFormatConfig {
+        all: read_field(
+            object,
+            "all",
+            "clipboard.captureFormats.all",
+            default.all,
+            warnings,
+        ),
+        names: read_field(
+            object,
+            "names",
+            "clipboard.captureFormats.names",
+            default.names,
             warnings,
         ),
     }

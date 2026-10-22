@@ -1,6 +1,7 @@
 mod about;
 mod application_filter;
 mod clipboard;
+mod clipboard_formats;
 mod data_management;
 mod general;
 mod item_display_editor;

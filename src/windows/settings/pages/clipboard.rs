@@ -57,6 +57,13 @@ impl SettingsWindowView {
                     reset_error.clone()
                 });
                 if result.is_ok() {
+                    reset_view
+                        .read(cx)
+                        .clipboard_format_input
+                        .clone()
+                        .update(cx, |input, cx| {
+                            input.set_value("", window, cx);
+                        });
                     let default_delay = f32::from(ClipboardConfig::TAB_BAR_HOVER_DELAY_DEFAULT_MS);
                     reset_page_hover_delay_slider.update(cx, |slider, cx| {
                         slider.set_value(default_delay, window, cx);
@@ -446,6 +453,7 @@ impl SettingsWindowView {
                 translator.translate("settings.clipboard.description"),
                 reset_button,
             ))
+            .child(self.render_clipboard_formats(cx))
             .child(
                 self.setting_row(
                     theme,
@@ -999,7 +1007,7 @@ impl SettingsWindowView {
     }
 }
 
-fn persist_clipboard_change<F>(
+pub(super) fn persist_clipboard_change<F>(
     view: Entity<SettingsWindowView>,
     update: F,
     save_error: String,

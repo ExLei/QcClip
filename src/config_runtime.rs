@@ -61,12 +61,18 @@ impl ConfigRuntime {
     pub(crate) fn install(path: impl Into<PathBuf>, cx: &mut App) {
         let path = path.into();
         let config = load_config(&path);
+        crate::platform::clipboard::set_capture_format_config(
+            config.clipboard.capture_formats.clone(),
+        );
         cx.set_global(Self { config, path });
     }
 
     pub(crate) fn reload(path: impl Into<PathBuf>, cx: &mut App) -> ConfigReload {
         let path = path.into();
         let config = load_config(&path);
+        crate::platform::clipboard::set_capture_format_config(
+            config.clipboard.capture_formats.clone(),
+        );
         let previous = cx.update_global::<Self, _>(|runtime, _| {
             let previous = runtime.config.clone();
             runtime.config = config.clone();
@@ -678,8 +684,9 @@ pub(crate) fn set_clipboard_config(
     if window_position.uses_horizontal_list() && next.appearance.titlebar_position.is_vertical() {
         next.appearance.titlebar_position = crate::config::TitlebarPosition::Top;
     }
-    next.clipboard = clipboard;
+    next.clipboard = clipboard.clone();
     persist_config(&path, &next)?;
+    crate::platform::clipboard::set_capture_format_config(clipboard.capture_formats);
 
     cx.update_global::<ConfigRuntime, _>(|runtime, _| {
         runtime.config = next;
@@ -713,8 +720,9 @@ pub(crate) fn reset_clipboard_config(cx: &mut App) -> Result<bool, ConfigError> 
         return Ok(false);
     }
 
-    next.clipboard = default;
+    next.clipboard = default.clone();
     persist_config(&path, &next)?;
+    crate::platform::clipboard::set_capture_format_config(default.capture_formats);
 
     cx.update_global::<ConfigRuntime, _>(|runtime, _| {
         runtime.config = next;
@@ -796,7 +804,7 @@ pub(crate) fn reset_shortcuts_config(cx: &mut App) -> Result<bool, ConfigError> 
     Ok(true)
 }
 
-fn load_config(path: &Path) -> AppConfig {
+pub(crate) fn load_config(path: &Path) -> AppConfig {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -921,6 +929,27 @@ mod tests {
                 .expect("无法读取配置文件")
                 .ends_with('\n')
         );
+    }
+
+    #[test]
+    fn native_format_preferences_survive_disk_save_and_mode_changes() {
+        let directory = tempdir().expect("无法创建临时目录");
+        let path = directory.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"schemaVersion":1,"clipboard":{"autoFocusSearch":true}}"#,
+        )
+        .expect("无法写入已发布版本的配置");
+        let mut config = load_config(&path);
+        config.clipboard.capture_formats.names = vec!["Biff12".into(), "Embed Source".into()];
+        for all in [false, true, false] {
+            config.clipboard.capture_formats.all = all;
+            persist_config(&path, &config).expect("无法保存原生格式配置");
+            assert_eq!(load_config(&path), config);
+        }
+        config.clipboard.capture_formats.names.clear();
+        persist_config(&path, &config).expect("无法保存空格式名单");
+        assert_eq!(load_config(&path), config);
     }
 
     #[test]

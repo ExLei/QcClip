@@ -506,6 +506,18 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Clipboard,
+            title_key: "settings.clipboard.capture_formats",
+            description_key: Some("settings.clipboard.capture_formats_description"),
+            ratio: 0.04,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
+            title_key: "settings.clipboard.capture_all_formats",
+            description_key: Some("settings.clipboard.capture_all_formats_description"),
+            ratio: 0.04,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
             title_key: "settings.clipboard.move_pasted_to_first_in_clipboard",
             description_key: Some(
                 "settings.clipboard.move_pasted_to_first_in_clipboard_description",
@@ -1056,6 +1068,8 @@ struct SettingsWindowView {
     paste_volume_slider: Entity<SliderState>,
     quick_paste_scroll_volume_slider: Entity<SliderState>,
     search_engine_name_input: Entity<InputState>,
+    clipboard_format_input: Entity<InputState>,
+    clipboard_formats_expanded: bool,
     search_engine_url_input: Entity<InputState>,
     /// 待添加引擎已选择的图标本地路径；为空则用内置品牌图标或通用图标。
     pending_search_engine_icon: Option<String>,
@@ -1456,6 +1470,11 @@ impl SettingsWindowView {
             cx,
             |clipboard, delay| clipboard.filter_hover_delay_ms = delay,
         );
+        let clipboard_format_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(
+                i18n::translator(cx).translate("settings.clipboard.native_format_placeholder"),
+            )
+        });
         let search_engine_name_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(
                 i18n::translator(cx).translate("settings.clipboard.search_engine_name_placeholder"),
@@ -1562,6 +1581,8 @@ impl SettingsWindowView {
             page_hover_delay_slider,
             filter_hover_delay_slider,
             search_engine_name_input,
+            clipboard_format_input,
+            clipboard_formats_expanded: false,
             search_engine_url_input,
             pending_search_engine_icon: None,
             search_engines_expanded: false,

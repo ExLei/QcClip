@@ -1,11 +1,13 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+mod clipboard_formats;
 mod item_display;
 pub mod load;
 mod notification;
 mod preview_information;
 mod tab_bar;
 
+pub use clipboard_formats::ClipboardFormatConfig;
 pub use item_display::{
     ItemDisplayConfig, ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility,
 };
@@ -711,6 +713,7 @@ fn default_search_engines() -> Vec<SearchEngine> {
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
 pub struct ClipboardConfig {
+    pub capture_formats: ClipboardFormatConfig,
     pub mouse_left_behavior: ClipboardMouseLeftBehavior,
     pub mouse_middle_behavior: ClipboardMouseMiddleBehavior,
     pub display_priority: ClipboardDisplayPriority,
@@ -965,6 +968,7 @@ impl Default for QuickPasteConfig {
 impl Default for ClipboardConfig {
     fn default() -> Self {
         Self {
+            capture_formats: ClipboardFormatConfig::default(),
             mouse_left_behavior: ClipboardMouseLeftBehavior::default(),
             mouse_middle_behavior: ClipboardMouseMiddleBehavior::default(),
             display_priority: ClipboardDisplayPriority::default(),
@@ -996,6 +1000,7 @@ impl ClipboardConfig {
     pub const TAB_BAR_HOVER_DELAY_DEFAULT_MS: u16 = 40;
 
     pub(crate) fn normalized(mut self) -> Self {
+        self.capture_formats = self.capture_formats.normalized();
         if self.window_position.is_screen_edge() {
             self.edge_hide = false;
         }

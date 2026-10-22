@@ -113,6 +113,12 @@ pub fn run() {
         _raw_blob_store.clone(),
         clipboard_write_suppressor.clone(),
     );
+    let config_path = app_paths.config_path();
+    crate::platform::clipboard::set_capture_format_config(
+        crate::config_runtime::load_config(&config_path)
+            .clipboard
+            .capture_formats,
+    );
     let (clipboard_monitor, clipboard_events) =
         match ClipboardMonitor::start(clipboard_write_suppressor.clone()) {
             Ok((monitor, receiver)) => {
@@ -132,7 +138,6 @@ pub fn run() {
 
     let mut clipboard_monitor = clipboard_monitor;
     let mut clipboard_events = clipboard_events;
-    let config_path = app_paths.config_path();
     let state_path = app_paths.state_path();
     gpui_platform::application()
         .with_assets(Assets::new())

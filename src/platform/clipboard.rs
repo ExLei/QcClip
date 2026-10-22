@@ -1,13 +1,33 @@
 use std::{
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, OnceLock, RwLock,
         atomic::{AtomicU64, Ordering},
         mpsc::Receiver,
     },
     time::{Duration, Instant},
 };
 
+use crate::config::ClipboardFormatConfig;
 use crate::domain::capture::CapturedClipboard;
+
+static CAPTURE_FORMAT_CONFIG: OnceLock<RwLock<ClipboardFormatConfig>> = OnceLock::new();
+
+pub(crate) fn set_capture_format_config(config: ClipboardFormatConfig) {
+    let mut current = CAPTURE_FORMAT_CONFIG
+        .get_or_init(|| RwLock::new(ClipboardFormatConfig::default()))
+        .write()
+        .unwrap_or_else(|error| error.into_inner());
+    *current = config.normalized();
+}
+
+#[cfg(target_os = "windows")]
+fn capture_format_config() -> ClipboardFormatConfig {
+    CAPTURE_FORMAT_CONFIG
+        .get_or_init(|| RwLock::new(ClipboardFormatConfig::default()))
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
 
 #[cfg(target_os = "windows")]
 mod transient;
@@ -208,6 +228,8 @@ mod windows_clipboard {
         }
 
         pub fn capture_current(&self) -> Result<Option<CapturedClipboard>, SystemClipboardError> {
+            // 先释放配置锁，再访问系统剪贴板，避免延迟渲染阻塞设置保存。
+            let config = super::capture_format_config();
             // 枚举、原始格式和文件摘要共用一次打开，避免外部工具在读取中途替换内容。
             let clipboard =
                 ClipboardGuard::open_for_capture().map_err(SystemClipboardError::Enumerate)?;
@@ -219,65 +241,12 @@ mod windows_clipboard {
                 return Ok(None);
             }
             let source_application = source_application();
-            let mut formats = Vec::with_capacity(native_formats.len());
-            for (order, native_format) in native_formats.into_iter().enumerate() {
-                let kind = classify_format(native_format.id, &native_format.name);
-                let key = stable_format_key(native_format.id, &native_format.name);
-                if classify_format_role(kind, &key, &native_format.name) == FormatRole::Internal {
-                    continue;
-                }
-                let unsupported = uses_non_global_handle(native_format.id);
-                let read_result = if unsupported {
-                    None
-                } else {
-                    Some(clipboard.read_buffer(native_format.id))
-                };
-
-                let mut format = match read_result {
-                    None => RawFormat::unsupported(
-                        "windows",
-                        key,
-                        native_format.name,
-                        kind,
-                        order as u32,
-                        "native_handle_unsupported",
-                        "该格式使用平台句柄，当前不能保存为可恢复字节",
-                    ),
-                    Some(Ok(bytes)) => {
-                        let bytes = normalize_text_bytes("windows", &key, &bytes).to_vec();
-                        RawFormat::captured(
-                            "windows",
-                            key,
-                            native_format.name,
-                            kind,
-                            bytes,
-                            order as u32,
-                            is_restorable(native_format.id, kind),
-                        )
-                    }
-                    Some(Err(error)) => {
-                        tracing::warn!(format_id = native_format.id, format_key = %key,
-                            source = ?source_application, %error, "无法读取剪贴板格式");
-                        RawFormat::failed(
-                            "windows",
-                            key,
-                            native_format.name,
-                            kind,
-                            order as u32,
-                            "clipboard_read_failed",
-                            format!("无法读取该格式：{error}"),
-                        )
-                    }
-                };
-                format.native_format_id = Some(native_format.id);
-                format.mime_type = mime_type(kind).map(str::to_owned);
-                if native_format.id == 13 {
-                    format.encoding = Some("utf-16le".to_owned());
-                }
-                formats.push(format);
+            let mut formats = capture_native_formats(native_formats, &config, |format_id| {
+                clipboard.read_buffer(format_id)
+            });
+            if formats.is_empty() {
+                return Ok(None);
             }
-
-            let primary_format_identity = select_primary_identity(&formats);
             let preview_candidate = if formats.iter().any(|format| {
                 format.format_kind == FormatKind::FileList && format.capture_state.has_data()
             }) {
@@ -291,6 +260,16 @@ mod windows_clipboard {
             } else {
                 None
             };
+            drop(clipboard);
+
+            // 关闭剪贴板后再扫描文本，直接截短原缓冲区，避免持锁期间重复复制大块数据。
+            for format in &mut formats {
+                if let Some(bytes) = &mut format.bytes {
+                    let length = normalize_text_bytes("windows", &format.format_key, bytes).len();
+                    bytes.truncate(length);
+                }
+            }
+            let primary_format_identity = select_primary_identity(&formats);
 
             Ok(Some(CapturedClipboard {
                 formats,
@@ -577,6 +556,68 @@ mod windows_clipboard {
         name: String,
     }
 
+    fn capture_native_formats(
+        native_formats: Vec<NativeFormat>,
+        config: &crate::config::ClipboardFormatConfig,
+        mut read_buffer: impl FnMut(u32) -> Result<Vec<u8>, String>,
+    ) -> Vec<RawFormat> {
+        let mut formats = Vec::with_capacity(native_formats.len());
+        for (order, native_format) in native_formats.into_iter().enumerate() {
+            if !config.includes(&native_format.name) {
+                continue;
+            }
+            let kind = classify_format(native_format.id, &native_format.name);
+            let key = stable_format_key(native_format.id, &native_format.name);
+            if classify_format_role(kind, &key, &native_format.name) == FormatRole::Internal {
+                continue;
+            }
+            let mut format = if uses_non_global_handle(native_format.id) {
+                RawFormat::unsupported(
+                    "windows",
+                    key,
+                    native_format.name,
+                    kind,
+                    order as u32,
+                    "native_handle_unsupported",
+                    "该格式使用平台句柄，当前不能保存为可恢复字节",
+                )
+            } else {
+                // 所选格式逐项读取，不因同类内容、累计耗时或体积而静默跳过。
+                match read_buffer(native_format.id) {
+                    Ok(bytes) => RawFormat::captured(
+                        "windows",
+                        key,
+                        native_format.name,
+                        kind,
+                        bytes,
+                        order as u32,
+                        is_restorable(native_format.id, kind),
+                    ),
+                    Err(error) => {
+                        tracing::warn!(format_id = native_format.id, format_key = %key,
+                            %error, "无法读取剪贴板格式");
+                        RawFormat::failed(
+                            "windows",
+                            key,
+                            native_format.name,
+                            kind,
+                            order as u32,
+                            "clipboard_read_failed",
+                            format!("无法读取该格式：{error}"),
+                        )
+                    }
+                }
+            };
+            format.native_format_id = Some(native_format.id);
+            format.mime_type = mime_type(kind).map(str::to_owned);
+            if native_format.id == 13 {
+                format.encoding = Some("utf-16le".to_owned());
+            }
+            formats.push(format);
+        }
+        formats
+    }
+
     fn should_ignore_clipboard(
         formats: &[NativeFormat],
         mut read_buffer: impl FnMut(u32) -> Result<Vec<u8>, String>,
@@ -795,7 +836,9 @@ mod windows_clipboard {
             15 => FormatKind::FileList,
             _ if lower_name.contains("html") => FormatKind::Html,
             _ if lower_name.contains("rich text") || lower_name.contains("rtf") => FormatKind::Rtf,
-            _ if lower_name == "png" || lower_name.contains("image/") => FormatKind::Image,
+            _ if matches!(lower_name.as_str(), "png" | "jfif") || lower_name.contains("image/") => {
+                FormatKind::Image
+            }
             _ if format_id >= 0xc000 => FormatKind::Custom,
             _ => FormatKind::Unknown,
         }
@@ -927,6 +970,198 @@ mod windows_clipboard {
                 id: 49_152,
                 name: name.to_owned(),
             }
+        }
+
+        fn format_with_id(id: u32, name: &str) -> NativeFormat {
+            NativeFormat {
+                id,
+                name: name.to_owned(),
+            }
+        }
+
+        #[test]
+        fn default_capture_reads_common_formats_and_images_without_private_exports() {
+            let mut reads = Vec::new();
+            let captured = capture_native_formats(
+                vec![
+                    format_with_id(49_152, "Embed Source"),
+                    format_with_id(49_153, "HTML Format"),
+                    format_with_id(13, "CF_UNICODETEXT"),
+                    format_with_id(49_154, "Rich Text Format"),
+                    format_with_id(8, "CF_DIB"),
+                    format_with_id(1, "CF_TEXT"),
+                    format_with_id(17, "CF_DIBV5"),
+                    format_with_id(49_155, "PNG"),
+                ],
+                &crate::config::ClipboardFormatConfig::default(),
+                |id| {
+                    reads.push(id);
+                    Ok(vec![65; 32])
+                },
+            );
+            assert_eq!(reads, [49_153, 13, 49_154, 8, 1, 17, 49_155]);
+            assert_eq!(captured.len(), reads.len());
+            assert!(
+                captured
+                    .iter()
+                    .all(|format| format.capture_state.has_data())
+            );
+            assert_eq!(captured[0].format_order, 1);
+            assert_eq!(captured[0].native_format_id, Some(49_153));
+            assert_eq!(
+                select_primary_identity(&captured),
+                Some(("windows".into(), "CF_UNICODETEXT".into()))
+            );
+        }
+
+        #[test]
+        fn custom_capture_matches_exact_native_names_without_category_mapping() {
+            let config = crate::config::ClipboardFormatConfig {
+                all: false,
+                names: vec!["biff12".into(), "Embed Source".into()],
+            };
+            let mut reads = Vec::new();
+            let captured = capture_native_formats(
+                vec![
+                    format_with_id(13, "CF_UNICODETEXT"),
+                    format_with_id(49_152, "Biff12"),
+                    format_with_id(49_153, "Embed Source"),
+                    format_with_id(49_154, "Biff"),
+                ],
+                &config,
+                |id| {
+                    reads.push(id);
+                    Ok(vec![1; 32])
+                },
+            );
+            assert_eq!(reads, [49_152, 49_153]);
+            assert_eq!(captured.len(), 2);
+            assert_eq!(captured[0].format_key, "registered:Biff12");
+            assert!(
+                captured
+                    .iter()
+                    .all(|format| format.capture_state.has_data())
+            );
+        }
+
+        #[test]
+        fn all_mode_reads_private_and_multiple_text_and_image_formats() {
+            let config = crate::config::ClipboardFormatConfig {
+                all: true,
+                names: Vec::new(),
+            };
+            let mut reads = Vec::new();
+            let captured = capture_native_formats(
+                vec![
+                    format_with_id(49_152, "Embed Source"),
+                    format_with_id(13, "CF_UNICODETEXT"),
+                    format_with_id(1, "CF_TEXT"),
+                    format_with_id(49_153, "Biff12"),
+                    format_with_id(49_154, "PNG"),
+                    format_with_id(17, "CF_DIBV5"),
+                    format_with_id(8, "CF_DIB"),
+                ],
+                &config,
+                |id| {
+                    reads.push(id);
+                    Ok(vec![65; 32])
+                },
+            );
+            assert_eq!(reads, [49_152, 13, 1, 49_153, 49_154, 17, 8]);
+            assert!(
+                captured
+                    .iter()
+                    .all(|format| format.capture_state.has_data())
+            );
+        }
+
+        #[test]
+        fn selected_formats_keep_full_large_data_and_continue_after_read_failure() {
+            let config = crate::config::ClipboardFormatConfig {
+                all: true,
+                names: Vec::new(),
+            };
+            let large = vec![65; 2 * 1024 * 1024];
+            let mut reads = Vec::new();
+            let captured = capture_native_formats(
+                vec![
+                    format_with_id(13, "CF_UNICODETEXT"),
+                    format_with_id(49_152, "Biff12"),
+                    format_with_id(8, "CF_DIB"),
+                ],
+                &config,
+                |id| {
+                    reads.push(id);
+                    if id == 49_152 {
+                        Err("模拟读取失败".into())
+                    } else {
+                        Ok(large.clone())
+                    }
+                },
+            );
+            assert_eq!(reads, [13, 49_152, 8]);
+            assert_eq!(captured[0].bytes.as_ref().unwrap(), &large);
+            assert_eq!(
+                captured[1].error_code.as_deref(),
+                Some("clipboard_read_failed")
+            );
+            assert_eq!(captured[2].bytes.as_ref().unwrap(), &large);
+        }
+
+        #[test]
+        fn empty_selection_does_not_request_any_data() {
+            let config = crate::config::ClipboardFormatConfig {
+                all: false,
+                names: Vec::new(),
+            };
+            let captured = capture_native_formats(
+                vec![
+                    format_with_id(13, "CF_UNICODETEXT"),
+                    native_format("Biff12"),
+                ],
+                &config,
+                |_| panic!("空名单不应请求数据"),
+            );
+            assert!(captured.is_empty());
+        }
+
+        #[test]
+        fn unselected_private_only_content_is_not_read() {
+            let captured = capture_native_formats(
+                vec![native_format("Biff12")],
+                &crate::config::ClipboardFormatConfig::default(),
+                |_| panic!("未选择的格式不应请求数据"),
+            );
+            assert!(captured.is_empty());
+        }
+
+        #[test]
+        fn all_mode_keeps_handle_limitations_and_omits_internal_formats() {
+            let config = crate::config::ClipboardFormatConfig {
+                all: true,
+                names: Vec::new(),
+            };
+            let mut reads = Vec::new();
+            let captured = capture_native_formats(
+                vec![
+                    format_with_id(2, "CF_BITMAP"),
+                    format_with_id(49_152, "DataObject"),
+                    format_with_id(15, "CF_HDROP"),
+                ],
+                &config,
+                |id| {
+                    reads.push(id);
+                    Ok(vec![1; 32])
+                },
+            );
+            assert_eq!(reads, [15]);
+            assert_eq!(captured.len(), 2);
+            assert_eq!(
+                captured[0].error_code.as_deref(),
+                Some("native_handle_unsupported")
+            );
+            assert_eq!(captured[1].format_kind, FormatKind::FileList);
+            assert!(captured[1].capture_state.has_data());
         }
 
         #[test]
