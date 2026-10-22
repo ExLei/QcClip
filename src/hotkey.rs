@@ -40,6 +40,7 @@ pub(crate) struct HotkeyRuntime {
     clipboard_monitor_hotkey: Option<HotKey>,
     plain_text_paste_hotkey: Option<HotKey>,
     quick_paste_hotkey: Option<HotKey>,
+    add_favorite_hotkey: Option<HotKey>,
     quick_paste_index_hotkeys: HashMap<u32, HotKey>,
     failed_quick_paste_index_hotkeys: HashMap<String, String>,
     quick_paste_navigation_hotkeys: HashMap<u32, QuickPasteNavigationRegistration>,
@@ -55,6 +56,7 @@ pub(crate) struct HotkeyRuntime {
     suspended_clipboard_monitor_status: Option<RegistrationStatus>,
     suspended_plain_text_paste_status: Option<RegistrationStatus>,
     suspended_quick_paste_status: Option<RegistrationStatus>,
+    suspended_add_favorite_status: Option<RegistrationStatus>,
     suspended_quick_paste_index_status: Option<RegistrationStatus>,
     suspended_session_statuses: HashMap<SessionShortcutId, RegistrationStatus>,
     suspended: bool,
@@ -64,6 +66,7 @@ pub(crate) struct HotkeyRuntime {
     clipboard_monitor_status: RegistrationStatus,
     plain_text_paste_status: RegistrationStatus,
     quick_paste_status: RegistrationStatus,
+    add_favorite_status: RegistrationStatus,
     quick_paste_index_status: RegistrationStatus,
     active_commands: Arc<RwLock<HashMap<u32, ActiveHotkey>>>,
     next_generation: u64,
@@ -77,6 +80,7 @@ enum HotkeyCommand {
     ToggleClipboardMonitor,
     PlainTextPaste,
     QuickPaste,
+    AddFavorite,
     QuickPasteIndex(usize),
     QuickPasteNavigation(QuickPasteNavigation),
     Session(SessionShortcutId),
@@ -181,6 +185,7 @@ impl HotkeyRuntime {
             clipboard_monitor_hotkey: None,
             plain_text_paste_hotkey: None,
             quick_paste_hotkey: None,
+            add_favorite_hotkey: None,
             quick_paste_index_hotkeys: HashMap::new(),
             failed_quick_paste_index_hotkeys: HashMap::new(),
             quick_paste_navigation_hotkeys: HashMap::new(),
@@ -196,6 +201,7 @@ impl HotkeyRuntime {
             suspended_clipboard_monitor_status: None,
             suspended_plain_text_paste_status: None,
             suspended_quick_paste_status: None,
+            suspended_add_favorite_status: None,
             suspended_quick_paste_index_status: None,
             suspended_session_statuses: HashMap::new(),
             suspended: false,
@@ -205,6 +211,7 @@ impl HotkeyRuntime {
             clipboard_monitor_status: RegistrationStatus::Disabled,
             plain_text_paste_status: RegistrationStatus::Disabled,
             quick_paste_status: RegistrationStatus::Disabled,
+            add_favorite_status: RegistrationStatus::Disabled,
             quick_paste_index_status: RegistrationStatus::Disabled,
             active_commands,
             next_generation: 0,
@@ -227,6 +234,9 @@ impl HotkeyRuntime {
         }
         if let Err(error) = runtime.apply_quick_paste(shortcuts.quick_paste.as_ref()) {
             tracing::error!("注册便捷粘贴快捷键失败：{error}");
+        }
+        if let Err(error) = runtime.apply_add_favorite(shortcuts.add_favorite.as_ref()) {
+            tracing::error!("注册快捷收藏快捷键失败：{error}");
         }
         runtime.apply_quick_paste_index(&shortcuts.quick_paste_1_to_9);
         cx.set_global(runtime);
@@ -333,6 +343,18 @@ impl HotkeyRuntime {
                                     );
                                 }
                             }
+                        }
+                        (HotkeyCommand::AddFavorite, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            set_add_favorite_trigger_key(event, cx);
+                            crate::services::quick_favorite::QuickFavoriteService::open(true, cx);
+                        }
+                        (HotkeyCommand::AddFavorite, HotKeyState::Released)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            #[cfg(target_os = "windows")]
+                            crate::platform::input::clear_trigger_key();
                         }
                         (HotkeyCommand::Session(id), HotKeyState::Pressed)
                             if is_hotkey_event_active(event, cx) =>
@@ -646,6 +668,51 @@ impl HotkeyRuntime {
         Ok(())
     }
 
+    fn apply_add_favorite(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
+        let next = binding.map(binding_to_hotkey).transpose()?;
+
+        if self.add_favorite_hotkey == next {
+            self.add_favorite_status = if next.is_some() {
+                RegistrationStatus::Registered
+            } else {
+                RegistrationStatus::Disabled
+            };
+            return Ok(());
+        }
+
+        if self.manager.is_none() && next.is_some() {
+            self.add_favorite_status = RegistrationStatus::Failed;
+            return Err("全局快捷键管理器不可用".to_owned());
+        }
+
+        if let Some(current) = self.add_favorite_hotkey {
+            self.remove_active_command(current.id());
+            self.unregister(current)?;
+            self.add_favorite_hotkey = None;
+        }
+
+        let Some(next) = next else {
+            self.add_favorite_status = RegistrationStatus::Disabled;
+            return Ok(());
+        };
+        if self.has_active_command(next.id()) {
+            self.add_favorite_status = RegistrationStatus::Failed;
+            return Err("快捷键与另一条快捷键重复".to_owned());
+        }
+        let Some(manager) = self.manager.as_ref() else {
+            self.add_favorite_status = RegistrationStatus::Failed;
+            return Err("全局快捷键管理器不可用".to_owned());
+        };
+        manager
+            .register(next)
+            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
+
+        self.add_favorite_hotkey = Some(next);
+        self.set_active_command(next.id(), Some(HotkeyCommand::AddFavorite));
+        self.add_favorite_status = RegistrationStatus::Registered;
+        Ok(())
+    }
+
     fn apply_quick_paste_index(&mut self, config: &QuickPasteShortcutConfig) {
         if !self.global_enabled {
             self.quick_paste_index_status = RegistrationStatus::Disabled;
@@ -943,6 +1010,12 @@ impl HotkeyRuntime {
                 first_error.get_or_insert(error);
             }
         }
+        if let Some(current) = self.add_favorite_hotkey.take() {
+            self.remove_active_command(current.id());
+            if let Err(error) = self.unregister(current) {
+                first_error.get_or_insert(error);
+            }
+        }
         for current in std::mem::take(&mut self.quick_paste_index_hotkeys).into_values() {
             self.remove_active_command(current.id());
             if let Err(error) = self.unregister(current) {
@@ -972,6 +1045,7 @@ impl HotkeyRuntime {
         let plain_text_paste_result =
             self.apply_plain_text_paste(shortcuts.plain_text_paste.as_ref());
         let quick_paste_result = self.apply_quick_paste(shortcuts.quick_paste.as_ref());
+        let add_favorite_result = self.apply_add_favorite(shortcuts.add_favorite.as_ref());
         self.apply_quick_paste_index(&shortcuts.quick_paste_1_to_9);
         let session_result = self.sync_session(shortcuts, window_visible, pointer_inside);
         main_result
@@ -979,6 +1053,7 @@ impl HotkeyRuntime {
             .and(clipboard_monitor_result)
             .and(plain_text_paste_result)
             .and(quick_paste_result)
+            .and(add_favorite_result)
             .and(session_result)
     }
 
@@ -1014,6 +1089,7 @@ impl HotkeyRuntime {
         self.suspended_clipboard_monitor_status = Some(self.clipboard_monitor_status);
         self.suspended_plain_text_paste_status = Some(self.plain_text_paste_status);
         self.suspended_quick_paste_status = Some(self.quick_paste_status);
+        self.suspended_add_favorite_status = Some(self.add_favorite_status);
         self.suspended_quick_paste_index_status = Some(self.quick_paste_index_status);
         self.suspended_session_statuses = SessionShortcutId::ALL
             .into_iter()
@@ -1044,6 +1120,7 @@ impl HotkeyRuntime {
         self.suspended_clipboard_monitor_status = None;
         self.suspended_plain_text_paste_status = None;
         self.suspended_quick_paste_status = None;
+        self.suspended_add_favorite_status = None;
         self.suspended_quick_paste_index_status = None;
         self.suspended_session_statuses.clear();
         if !self.global_enabled {
@@ -1304,12 +1381,15 @@ fn plain_text_paste_is_physically_pressed(event: HotkeyEvent, cx: &App) -> bool 
     }
 }
 
-fn set_quick_paste_trigger_key(event: HotkeyEvent, cx: &App) {
+fn set_trigger_key_for(
+    event: HotkeyEvent,
+    cx: &App,
+    select: impl Fn(&HotkeyRuntime) -> Option<HotKey>,
+) {
     #[cfg(target_os = "windows")]
     {
         let trigger_key = cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
-            runtime
-                .quick_paste_hotkey
+            select(runtime)
                 .filter(|hotkey| hotkey.id() == event.id)
                 .map(|hotkey| hotkey.key)
         });
@@ -1317,6 +1397,19 @@ fn set_quick_paste_trigger_key(event: HotkeyEvent, cx: &App) {
             crate::platform::input::set_trigger_key_code(trigger_key);
         }
     }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (event, cx, select);
+    }
+}
+
+fn set_quick_paste_trigger_key(event: HotkeyEvent, cx: &App) {
+    set_trigger_key_for(event, cx, |runtime| runtime.quick_paste_hotkey);
+}
+
+fn set_add_favorite_trigger_key(event: HotkeyEvent, cx: &App) {
+    set_trigger_key_for(event, cx, |runtime| runtime.add_favorite_hotkey);
 }
 
 fn quick_paste_is_physically_pressed(event: HotkeyEvent, cx: &App) -> bool {
@@ -1575,6 +1668,20 @@ pub(crate) fn quick_paste_registration_status(cx: &App) -> RegistrationStatus {
     })
 }
 
+pub(crate) fn add_favorite_registration_status(cx: &App) -> RegistrationStatus {
+    cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
+        if !runtime.global_enabled {
+            RegistrationStatus::Disabled
+        } else if runtime.suspended {
+            runtime
+                .suspended_add_favorite_status
+                .unwrap_or(runtime.add_favorite_status)
+        } else {
+            runtime.add_favorite_status
+        }
+    })
+}
+
 pub(crate) fn session_registration_status(id: SessionShortcutId, cx: &App) -> RegistrationStatus {
     let configured = crate::config_runtime::shortcuts_config(cx)
         .session(id)
@@ -1809,6 +1916,35 @@ pub(crate) fn set_plain_text_paste_shortcut(
     Ok(())
 }
 
+pub(crate) fn set_add_favorite_shortcut(
+    binding: Option<ShortcutBinding>,
+    cx: &mut App,
+) -> Result<(), String> {
+    let mut shortcuts = crate::config_runtime::shortcuts_config(cx);
+    shortcuts.add_favorite = binding;
+    validate_shortcuts_config(&shortcuts)?;
+    crate::config_runtime::set_shortcuts_config(shortcuts, cx)
+        .map_err(|error| error.to_string())?;
+    synchronize_shortcuts(cx)?;
+    cx.refresh_windows();
+    Ok(())
+}
+
+pub(crate) fn set_add_favorite_open_editor_on_empty(
+    enabled: bool,
+    cx: &mut App,
+) -> Result<(), String> {
+    let mut shortcuts = crate::config_runtime::shortcuts_config(cx);
+    if shortcuts.add_favorite_open_editor_on_empty == enabled {
+        return Ok(());
+    }
+    shortcuts.add_favorite_open_editor_on_empty = enabled;
+    crate::config_runtime::set_shortcuts_config(shortcuts, cx)
+        .map_err(|error| error.to_string())?;
+    cx.refresh_windows();
+    Ok(())
+}
+
 pub(crate) fn set_quick_paste_shortcut(
     binding: Option<ShortcutBinding>,
     cx: &mut App,
@@ -1886,7 +2022,7 @@ pub(crate) fn set_all_session_shortcuts_only_in_window(
 
 fn validate_shortcuts_config(shortcuts: &ShortcutsConfig) -> Result<(), String> {
     let mut registered = HashMap::new();
-    let mut bindings = Vec::with_capacity(SessionShortcutId::ALL.len() + 5);
+    let mut bindings = Vec::with_capacity(SessionShortcutId::ALL.len() + 6);
     bindings.push(("全局显示/隐藏窗口", shortcuts.toggle_main_window.as_ref()));
     bindings.push(("全局打开设置", shortcuts.open_settings.as_ref()));
     bindings.push((
@@ -1895,6 +2031,7 @@ fn validate_shortcuts_config(shortcuts: &ShortcutsConfig) -> Result<(), String> 
     ));
     bindings.push(("全局纯文本粘贴", shortcuts.plain_text_paste.as_ref()));
     bindings.push(("全局便捷粘贴", shortcuts.quick_paste.as_ref()));
+    bindings.push(("全局快捷收藏", shortcuts.add_favorite.as_ref()));
     bindings.extend(
         SessionShortcutId::ALL
             .into_iter()
@@ -1940,6 +2077,10 @@ pub(crate) fn reset_plain_text_paste_shortcut(cx: &mut App) -> Result<(), String
 
 pub(crate) fn reset_quick_paste_shortcut(cx: &mut App) -> Result<(), String> {
     set_quick_paste_shortcut(None, cx)
+}
+
+pub(crate) fn reset_add_favorite_shortcut(cx: &mut App) -> Result<(), String> {
+    set_add_favorite_shortcut(None, cx)
 }
 
 pub(crate) fn reset_session_shortcut_binding(
@@ -2016,6 +2157,16 @@ pub(crate) fn reject_plain_text_paste_recording(cx: &mut App) {
     }
     cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
         runtime.plain_text_paste_status = RegistrationStatus::Failed
+    });
+    cx.refresh_windows();
+}
+
+pub(crate) fn reject_add_favorite_recording(cx: &mut App) {
+    if let Err(error) = cancel_toggle_main_window_recording(cx) {
+        tracing::warn!(%error, "拒绝新快捷键后恢复原快捷键失败");
+    }
+    cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+        runtime.add_favorite_status = RegistrationStatus::Failed
     });
     cx.refresh_windows();
 }
