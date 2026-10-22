@@ -1061,31 +1061,41 @@ pub fn render(
         let panel_left = (anchor - panel_width / 2.0)
             .max(content_left)
             .min(content_right - panel_width);
+        let tags_button_bounds = main.tags_button_bounds;
+        let panel_below_tags_button = tags_button_bounds
+            .map(|bounds| bounds.center().y < window.viewport_size().height / 2.0)
+            .unwrap_or(clipboard.window_position != ClipboardWindowPosition::ScreenBottomCenter);
         panel = panel
             .absolute()
             .left(panel_left)
             .w(panel_width)
             .max_h(relative(0.70));
-        panel = if clipboard.window_position == ClipboardWindowPosition::ScreenBottomCenter {
-            panel
-                .bottom(ui_rem(super::symbol_sidebar::TAB_BAR_HEIGHT))
-                .border_b_0()
-                .rounded_tl(px(16.0))
-                .rounded_tr(px(16.0))
-        } else {
-            panel
-                .top(
+        panel = if panel_below_tags_button {
+            let top = tags_button_bounds
+                .map(|bounds| bounds.origin.y + bounds.size.height)
+                .unwrap_or_else(|| {
                     if clipboard.window_position == ClipboardWindowPosition::ScreenTopCenter {
                         px(super::symbol_sidebar::TAB_BAR_HEIGHT * scale)
                     } else if titlebar_position.is_vertical() {
                         px(34.5 * scale)
                     } else {
                         px(70.5 * scale)
-                    },
-                )
+                    }
+                });
+            panel
+                .top(top)
                 .border_t_0()
                 .rounded_bl(px(16.0))
                 .rounded_br(px(16.0))
+        } else {
+            let bottom = tags_button_bounds
+                .map(|bounds| window.viewport_size().height - bounds.origin.y)
+                .unwrap_or(px(super::symbol_sidebar::TAB_BAR_HEIGHT * scale));
+            panel
+                .bottom(bottom)
+                .border_b_0()
+                .rounded_tl(px(16.0))
+                .rounded_tr(px(16.0))
         };
     }
 
