@@ -21,9 +21,8 @@ use crate::{
 
 /// `appearance.background_image_blur` 非有限值时的兜底。
 const BACKGROUND_IMAGE_BLUR_FALLBACK: f32 = BACKGROUND_IMAGE_BLUR_DEFAULT;
-/// 背景图解码后允许的最长边。模糊是低通滤波，降采样视觉无损，
-/// 但能降低 CPU 内存与每窗口 GPU 纹理占用。
-const BACKGROUND_IMAGE_MAX_DIMENSION: u32 = 1280;
+
+const BACKGROUND_IMAGE_MAX_DIMENSION: u32 = 1080;
 
 #[derive(Default)]
 struct WindowMaterialRuntime {
@@ -138,8 +137,8 @@ pub(crate) fn window_frame() -> impl IntoElement {
     .inset_0()
 }
 
-pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement {
-    let background = backdrop_element(window, cx);
+pub(crate) fn background_element(_window: &Window, cx: &App) -> gpui::AnyElement {
+    let background = backdrop_element(cx);
     let appearance = crate::config_runtime::appearance_config(cx);
     if supported_material(appearance.window_material) == WindowMaterial::Disabled {
         return background;
@@ -157,7 +156,7 @@ pub(crate) fn background_element(window: &Window, cx: &App) -> gpui::AnyElement 
         .into_any_element()
 }
 
-fn backdrop_element(window: &Window, cx: &App) -> gpui::AnyElement {
+fn backdrop_element(cx: &App) -> gpui::AnyElement {
     let appearance = crate::config_runtime::appearance_config(cx);
     let custom_image = uses_custom_image_background(cx);
     let blur_radius = if appearance.background_image_blur.is_finite() {
@@ -182,53 +181,12 @@ fn backdrop_element(window: &Window, cx: &App) -> gpui::AnyElement {
     else {
         return div().absolute().inset_0().into_any_element();
     };
-    let window_bounds = window.bounds();
-    let window_scale = f64::from(window.scale_factor());
-    // 像桌面壁纸：每台显示器各铺满一张完整图。GPUI 的 display.bounds() 按各自
-    // DPI 归一化，多屏 scale 不同时逻辑 bounds 会重叠，故改用 raw-input 的物理
-    // 坐标（rcMonitor，连续不重叠）对齐：段位置/尺寸 = 物理值 / 窗口 scale。
-    let window_physical_left = f64::from(window_bounds.origin.x) * window_scale;
-    let window_physical_top = f64::from(window_bounds.origin.y) * window_scale;
-    let window_physical_right =
-        window_physical_left + f64::from(window_bounds.size.width) * window_scale;
-    let window_physical_bottom =
-        window_physical_top + f64::from(window_bounds.size.height) * window_scale;
-    let segments = raw_input::Display::get_available_monitors()
-        .into_iter()
-        .filter(|m| {
-            // 只渲染与窗口物理 bounds 相交的显示器。
-            let m_right = m.offset.0 + m.size.0;
-            let m_bottom = m.offset.1 + m.size.1;
-            m.offset.0 < window_physical_right
-                && m_right > window_physical_left
-                && m.offset.1 < window_physical_bottom
-                && m_bottom > window_physical_top
-        })
-        .map(|m| {
-            let x = ((m.offset.0 - window_physical_left) / window_scale) as f32;
-            let y = ((m.offset.1 - window_physical_top) / window_scale) as f32;
-            let width = (m.size.0 / window_scale) as f32;
-            let height = (m.size.1 / window_scale) as f32;
-            div()
-                .absolute()
-                .left(px(x))
-                .top(px(y))
-                .w(px(width))
-                .h(px(height))
-                .overflow_hidden()
-                .child(
-                    img(image.clone())
-                        .size_full()
-                        .object_fit(gpui::ObjectFit::Fill)
-                        .blur(px(blur_radius)),
-                )
-                .into_any_element()
-        })
-        .collect::<Vec<_>>();
-    if segments.is_empty() {
-        return div().absolute().inset_0().into_any_element();
-    }
-    let mut container = div().absolute().inset_0().children(segments);
+    let mut container = div().absolute().inset_0().overflow_hidden().child(
+        img(image)
+            .size_full()
+            .object_fit(gpui::ObjectFit::Cover)
+            .blur(px(blur_radius)),
+    );
     if let Some(color) = brightness_overlay(brightness).map(gpui::rgba) {
         container = container.child(div().absolute().inset_0().bg(color));
     }
