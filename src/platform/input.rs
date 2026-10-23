@@ -70,7 +70,13 @@ mod windows_input {
     };
 
     use raw_input::{Display, Event, Listen, MouseButton, Simulate, SubscriptionHandle};
-    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    use windows::Win32::UI::{
+        Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU,
+            VK_RSHIFT, VK_RWIN,
+        },
+        WindowsAndMessaging::GetForegroundWindow,
+    };
 
     use super::{GlobalMouseEvent, PointerButtons, PointerRegionWatch, PointerSnapshot};
 
@@ -78,11 +84,26 @@ mod windows_input {
     static CURRENT_TRIGGER_KEY: Mutex<Option<TriggerKey>> = Mutex::new(None);
     static PASTE_SIMULATION_LOCK: Mutex<()> = Mutex::new(());
     const PHYSICAL_KEY_COUNT: usize = raw_input::Key::Unidentified as usize + 1;
-    static PHYSICAL_KEY_STATE: OnceLock<Mutex<[bool; PHYSICAL_KEY_COUNT]>> = OnceLock::new();
+    static PHYSICAL_KEY_STATE: OnceLock<Mutex<PhysicalKeySnapshot>> = OnceLock::new();
 
     #[derive(Clone, Copy)]
     struct TriggerKey {
         key: raw_input::Key,
+    }
+
+    #[derive(Clone, Copy)]
+    struct PhysicalKeySnapshot {
+        pressed: [bool; PHYSICAL_KEY_COUNT],
+        releases: [u64; PHYSICAL_KEY_COUNT],
+    }
+
+    impl Default for PhysicalKeySnapshot {
+        fn default() -> Self {
+            Self {
+                pressed: [false; PHYSICAL_KEY_COUNT],
+                releases: [0; PHYSICAL_KEY_COUNT],
+            }
+        }
     }
 
     struct InputState {
@@ -145,16 +166,20 @@ mod windows_input {
         result
     }
 
-    fn physical_key_state() -> &'static Mutex<[bool; PHYSICAL_KEY_COUNT]> {
-        PHYSICAL_KEY_STATE.get_or_init(|| Mutex::new([false; PHYSICAL_KEY_COUNT]))
+    fn physical_key_state() -> &'static Mutex<PhysicalKeySnapshot> {
+        PHYSICAL_KEY_STATE.get_or_init(|| Mutex::new(PhysicalKeySnapshot::default()))
     }
 
     fn update_physical_key(key: raw_input::Key, pressed: bool) {
         let index = key as usize;
         if index < PHYSICAL_KEY_COUNT {
-            match physical_key_state().lock() {
-                Ok(mut state) => state[index] = pressed,
-                Err(poisoned) => poisoned.into_inner()[index] = pressed,
+            let mut state = match physical_key_state().lock() {
+                Ok(state) => state,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            state.pressed[index] = pressed;
+            if !pressed {
+                state.releases[index] = state.releases[index].wrapping_add(1);
             }
         }
     }
@@ -162,9 +187,25 @@ mod windows_input {
     fn is_physical_key_pressed(key: raw_input::Key) -> bool {
         let index = key as usize;
         match physical_key_state().lock() {
-            Ok(state) => state[index],
-            Err(poisoned) => poisoned.into_inner()[index],
+            Ok(state) => state.pressed[index],
+            Err(poisoned) => poisoned.into_inner().pressed[index],
         }
+    }
+
+    fn modifier_is_physically_pressed(key: raw_input::Key) -> bool {
+        let virtual_key = match key {
+            raw_input::Key::ControlLeft => VK_LCONTROL,
+            raw_input::Key::ControlRight => VK_RCONTROL,
+            raw_input::Key::AltLeft => VK_LMENU,
+            raw_input::Key::AltRight => VK_RMENU,
+            raw_input::Key::ShiftLeft => VK_LSHIFT,
+            raw_input::Key::ShiftRight => VK_RSHIFT,
+            raw_input::Key::MetaLeft => VK_LWIN,
+            raw_input::Key::MetaRight => VK_RWIN,
+            _ => return is_physical_key_pressed(key),
+        };
+        // GetAsyncKeyState 的高位表示当前按下状态，不依赖 Raw Input 是否漏掉了边沿。
+        unsafe { GetAsyncKeyState(virtual_key.0 as i32) < 0 }
     }
 
     pub(crate) fn subscribe_mouse_events() -> (u64, async_channel::Receiver<GlobalMouseEvent>) {
@@ -369,17 +410,17 @@ mod windows_input {
             return false;
         }
         (!modifiers.contains(global_hotkey::hotkey::Modifiers::CONTROL)
-            || is_physical_key_pressed(raw_input::Key::ControlLeft)
-            || is_physical_key_pressed(raw_input::Key::ControlRight))
+            || modifier_is_physically_pressed(raw_input::Key::ControlLeft)
+            || modifier_is_physically_pressed(raw_input::Key::ControlRight))
             && (!modifiers.contains(global_hotkey::hotkey::Modifiers::ALT)
-                || is_physical_key_pressed(raw_input::Key::AltLeft)
-                || is_physical_key_pressed(raw_input::Key::AltRight))
+                || modifier_is_physically_pressed(raw_input::Key::AltLeft)
+                || modifier_is_physically_pressed(raw_input::Key::AltRight))
             && (!modifiers.contains(global_hotkey::hotkey::Modifiers::SHIFT)
-                || is_physical_key_pressed(raw_input::Key::ShiftLeft)
-                || is_physical_key_pressed(raw_input::Key::ShiftRight))
+                || modifier_is_physically_pressed(raw_input::Key::ShiftLeft)
+                || modifier_is_physically_pressed(raw_input::Key::ShiftRight))
             && (!modifiers.contains(global_hotkey::hotkey::Modifiers::SUPER)
-                || is_physical_key_pressed(raw_input::Key::MetaLeft)
-                || is_physical_key_pressed(raw_input::Key::MetaRight))
+                || modifier_is_physically_pressed(raw_input::Key::MetaLeft)
+                || modifier_is_physically_pressed(raw_input::Key::MetaRight))
     }
 
     pub(crate) fn simulate_ctrl_v() {
@@ -410,42 +451,49 @@ mod windows_input {
 
     #[derive(Clone, Copy)]
     struct ModifierState {
-        control_left: bool,
-        control_right: bool,
-        alt_left: bool,
-        alt_right: bool,
-        shift_left: bool,
-        shift_right: bool,
-        win_left: bool,
-        win_right: bool,
+        keys: [ModifierKeyState; 8],
+    }
+
+    #[derive(Clone, Copy)]
+    struct ModifierKeyState {
+        key: raw_input::Key,
+        was_pressed: bool,
+        release_generation: u64,
     }
 
     impl ModifierState {
         fn record() -> Self {
+            let keys = [
+                raw_input::Key::ControlLeft,
+                raw_input::Key::ControlRight,
+                raw_input::Key::AltLeft,
+                raw_input::Key::AltRight,
+                raw_input::Key::ShiftLeft,
+                raw_input::Key::ShiftRight,
+                raw_input::Key::MetaLeft,
+                raw_input::Key::MetaRight,
+            ];
+            let physical_state = match physical_key_state().lock() {
+                Ok(state) => *state,
+                Err(poisoned) => *poisoned.into_inner(),
+            };
             Self {
-                control_left: is_physical_key_pressed(raw_input::Key::ControlLeft),
-                control_right: is_physical_key_pressed(raw_input::Key::ControlRight),
-                alt_left: is_physical_key_pressed(raw_input::Key::AltLeft),
-                alt_right: is_physical_key_pressed(raw_input::Key::AltRight),
-                shift_left: is_physical_key_pressed(raw_input::Key::ShiftLeft),
-                shift_right: is_physical_key_pressed(raw_input::Key::ShiftRight),
-                win_left: is_physical_key_pressed(raw_input::Key::MetaLeft),
-                win_right: is_physical_key_pressed(raw_input::Key::MetaRight),
+                keys: keys.map(|key| ModifierKeyState {
+                    key,
+                    was_pressed: modifier_is_physically_pressed(key),
+                    release_generation: physical_state.releases[key as usize],
+                }),
             }
         }
 
         fn release_conflicting(&self) {
             let mut released = false;
-            for (key, pressed) in [
-                (raw_input::Key::ControlLeft, self.control_left),
-                (raw_input::Key::ControlRight, self.control_right),
-                (raw_input::Key::ShiftLeft, self.shift_left),
-                (raw_input::Key::ShiftRight, self.shift_right),
-                (raw_input::Key::MetaLeft, self.win_left),
-                (raw_input::Key::MetaRight, self.win_right),
-            ] {
-                if pressed {
-                    Simulate::keyboard(key, false);
+            for modifier in self.keys {
+                if modifier.was_pressed
+                    && modifier.key != raw_input::Key::AltLeft
+                    && modifier.key != raw_input::Key::AltRight
+                {
+                    Simulate::keyboard(modifier.key, false);
                     released = true;
                 }
             }
@@ -455,31 +503,42 @@ mod windows_input {
         }
 
         fn release_alt(&self) {
-            if self.alt_left {
-                Simulate::keyboard(raw_input::Key::AltLeft, false);
-            }
-            if self.alt_right {
-                Simulate::keyboard(raw_input::Key::AltRight, false);
+            for modifier in self.keys {
+                if modifier.was_pressed
+                    && matches!(
+                        modifier.key,
+                        raw_input::Key::AltLeft | raw_input::Key::AltRight
+                    )
+                {
+                    Simulate::keyboard(modifier.key, false);
+                }
             }
         }
 
         fn restore_physical(&self) {
             // 临时用于 Ctrl+V 的左 Ctrl 不属于物理状态，只恢复粘贴前已按下的修饰键。
-            for (key, touched) in [
-                (raw_input::Key::ControlLeft, self.control_left),
-                (raw_input::Key::ControlRight, self.control_right),
-                (raw_input::Key::ShiftLeft, self.shift_left),
-                (raw_input::Key::ShiftRight, self.shift_right),
-                (raw_input::Key::AltLeft, self.alt_left),
-                (raw_input::Key::AltRight, self.alt_right),
-                (raw_input::Key::MetaLeft, self.win_left),
-                (raw_input::Key::MetaRight, self.win_right),
-            ] {
-                if touched {
-                    Simulate::keyboard(key, is_physical_key_pressed(key));
+            let physical_state = match physical_key_state().lock() {
+                Ok(state) => *state,
+                Err(poisoned) => *poisoned.into_inner(),
+            };
+            for modifier in self.keys {
+                if should_restore_modifier(
+                    modifier.was_pressed,
+                    modifier.release_generation,
+                    physical_state.releases[modifier.key as usize],
+                ) {
+                    Simulate::keyboard(modifier.key, true);
                 }
             }
         }
+    }
+
+    fn should_restore_modifier(
+        was_pressed: bool,
+        release_generation: u64,
+        current_release_generation: u64,
+    ) -> bool {
+        was_pressed && release_generation == current_release_generation
     }
 
     fn lock_trigger_key() -> std::sync::MutexGuard<'static, Option<TriggerKey>> {
@@ -628,6 +687,13 @@ mod windows_input {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn modifier_restore_respects_physical_release_during_paste() {
+            assert!(!should_restore_modifier(true, 4, 5));
+            assert!(should_restore_modifier(true, 4, 4));
+            assert!(!should_restore_modifier(false, 4, 4));
+        }
 
         #[test]
         fn normal_hidden_mouse_moves_keep_sequence_without_reading_position_or_sending_events() {
