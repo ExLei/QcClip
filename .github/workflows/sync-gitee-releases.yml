@@ -10,6 +10,11 @@ on:
         required: false
         default: false
         type: boolean
+      tag:
+        description: '只同步指定版本标签，例如 v1.0.0-beta.4；留空则同步全部版本'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -28,6 +33,7 @@ jobs:
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
       GH_TOKEN: ${{ github.token }}
       REORDER_RELEASES: ${{ inputs.reorder || false }}
+      SYNC_TAG: ${{ inputs.tag || '' }}
 
     steps:
       - name: 检出完整标签历史
@@ -44,6 +50,8 @@ jobs:
             exit 1
           fi
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --retry 4 --retry-delay 5 --retry-connrefused \
+            --connect-timeout 30 --max-time 60 \
             --get --data-urlencode "access_token=${GITEE_TOKEN}" \
             'https://gitee.com/api/v5/user')"
           if [[ "${status}" != '200' ]]; then
@@ -57,7 +65,12 @@ jobs:
           set -euo pipefail
           remote="https://oauth2:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git"
           if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
-            git push --quiet "${remote}" --tags
+            if [[ -n "${SYNC_TAG}" ]]; then
+              git push --quiet "${remote}" \
+                "refs/tags/${SYNC_TAG}:refs/tags/${SYNC_TAG}"
+            else
+              git push --quiet "${remote}" --tags
+            fi
           elif [[ "${GITHUB_EVENT_NAME}" != 'release' || "${{ github.event.action }}" != 'deleted' ]]; then
             git push --quiet "${remote}" \
               "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"

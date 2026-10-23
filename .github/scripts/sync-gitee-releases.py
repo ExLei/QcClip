@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +25,22 @@ GITEE_TOKEN = os.environ["GITEE_TOKEN"]
 EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
 EVENT_PATH = Path(os.environ["GITHUB_EVENT_PATH"])
 REORDER_RELEASES = os.environ.get("REORDER_RELEASES", "false").lower() == "true"
+SYNC_TAG = os.environ.get("SYNC_TAG", "").strip()
+API_RETRY_COUNT = 4
+RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+def _retry_delay(attempt: int) -> int:
+    """使用有限的指数退避，避免短时间内持续冲击 Gitee。"""
+    return 2 ** attempt
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in RETRYABLE_HTTP_STATUS
+    if isinstance(error, urllib.error.URLError):
+        return True
+    return isinstance(error, TimeoutError)
 
 
 def request_json(
@@ -47,17 +64,28 @@ def request_json(
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            content = response.read()
-            return json.loads(content) if content else None
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(
-            f"API 请求失败：{method} {path}，HTTP {error.code}，{detail}"
-        ) from error
-    except urllib.error.URLError as error:
-        raise RuntimeError(f"网络请求失败：{method} {path}，{error.reason}") from error
+    retryable = method in {"GET", "HEAD", "PATCH", "DELETE"}
+    for attempt in range(API_RETRY_COUNT):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                content = response.read()
+                return json.loads(content) if content else None
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+            if not retryable or not _is_retryable_error(error) or attempt == API_RETRY_COUNT - 1:
+                if isinstance(error, urllib.error.HTTPError):
+                    detail = error.read().decode("utf-8", errors="replace")[:500]
+                    raise RuntimeError(
+                        f"API 请求失败：{method} {path}，HTTP {error.code}，{detail}"
+                    ) from error
+                reason = error.reason if isinstance(error, urllib.error.URLError) else error
+                raise RuntimeError(f"网络请求失败：{method} {path}，{reason}") from error
+            delay = _retry_delay(attempt)
+            print(
+                f"API 请求暂时失败，将在 {delay} 秒后重试（{attempt + 1}/{API_RETRY_COUNT - 1}）："
+                f"{method} {path}",
+                flush=True,
+            )
+            time.sleep(delay)
 
 
 def request_form(path: str, token: str, method: str, payload: dict) -> dict:
@@ -74,17 +102,28 @@ def request_form(path: str, token: str, method: str, payload: dict) -> dict:
         },
         method=method,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            content = response.read()
-            return json.loads(content) if content else {}
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(
-            f"API 请求失败：{method} {path}，HTTP {error.code}，{detail}"
-        ) from error
-    except urllib.error.URLError as error:
-        raise RuntimeError(f"网络请求失败：{method} {path}，{error.reason}") from error
+    retryable = method in {"HEAD", "PATCH", "DELETE"}
+    for attempt in range(API_RETRY_COUNT):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                content = response.read()
+                return json.loads(content) if content else {}
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+            if not retryable or not _is_retryable_error(error) or attempt == API_RETRY_COUNT - 1:
+                if isinstance(error, urllib.error.HTTPError):
+                    detail = error.read().decode("utf-8", errors="replace")[:500]
+                    raise RuntimeError(
+                        f"API 请求失败：{method} {path}，HTTP {error.code}，{detail}"
+                    ) from error
+                reason = error.reason if isinstance(error, urllib.error.URLError) else error
+                raise RuntimeError(f"网络请求失败：{method} {path}，{reason}") from error
+            delay = _retry_delay(attempt)
+            print(
+                f"API 请求暂时失败，将在 {delay} 秒后重试（{attempt + 1}/{API_RETRY_COUNT - 1}）："
+                f"{method} {path}",
+                flush=True,
+            )
+            time.sleep(delay)
 
 
 def github_releases() -> list[dict]:
@@ -95,8 +134,14 @@ def github_releases() -> list[dict]:
         capture_output=True,
         text=True,
     ).stdout
+    tags = sorted(filter(None, tag_output.splitlines()))
+    if SYNC_TAG:
+        if SYNC_TAG not in tags:
+            raise RuntimeError(f"检出内容中没有指定标签：{SYNC_TAG}")
+        tags = [SYNC_TAG]
+
     releases = []
-    for tag in sorted(filter(None, tag_output.splitlines())):
+    for tag in tags:
         encoded_tag = urllib.parse.quote(tag, safe="")
         try:
             release = request_json(
@@ -335,6 +380,8 @@ def delete_all_releases(releases: list[dict]) -> None:
 def main() -> None:
     if not GITEE_TOKEN:
         raise RuntimeError("环境变量 GITEE_TOKEN 为空")
+    if SYNC_TAG and REORDER_RELEASES:
+        raise RuntimeError("指定版本同步不能同时重建全部 Release 顺序")
     target_releases = gitee_releases()
     event = event_release()
     if EVENT_NAME == "release" and event and event.get("action") == "deleted":
@@ -371,7 +418,7 @@ def main() -> None:
         if REORDER_RELEASES:
             delete_all_releases(target_releases)
             target_releases = []
-        else:
+        elif not SYNC_TAG:
             delete_stale_releases(releases, target_releases)
     errors = []
     for release in releases:
