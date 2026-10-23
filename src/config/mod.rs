@@ -593,6 +593,37 @@ pub enum ClipboardPreviewPriority {
     ImageHtmlText,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClipboardPreviewType {
+    Text,
+    Html,
+    Image,
+    File,
+}
+
+impl ClipboardPreviewType {
+    pub const ALL: [Self; 4] = [Self::Text, Self::Html, Self::Image, Self::File];
+
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Html => "html",
+            Self::Image => "image",
+            Self::File => "file",
+        }
+    }
+
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::Text => "settings.clipboard.preview_type.text",
+            Self::Html => "settings.clipboard.preview_type.html",
+            Self::Image => "settings.clipboard.preview_type.image",
+            Self::File => "settings.clipboard.preview_type.file",
+        }
+    }
+}
+
 impl ClipboardPreviewPriority {
     pub const ALL: [Self; 7] = [
         Self::FollowDisplay,
@@ -718,6 +749,7 @@ pub struct ClipboardConfig {
     pub mouse_middle_behavior: ClipboardMouseMiddleBehavior,
     pub display_priority: ClipboardDisplayPriority,
     pub preview_priority: ClipboardPreviewPriority,
+    pub preview_types: Vec<ClipboardPreviewType>,
     pub hover_preview_enabled: bool,
     pub heat_scrollbar_enabled: bool,
     pub page_hover_switch: bool,
@@ -974,6 +1006,7 @@ impl Default for ClipboardConfig {
             mouse_middle_behavior: ClipboardMouseMiddleBehavior::default(),
             display_priority: ClipboardDisplayPriority::default(),
             preview_priority: ClipboardPreviewPriority::default(),
+            preview_types: ClipboardPreviewType::ALL.to_vec(),
             hover_preview_enabled: true,
             heat_scrollbar_enabled: true,
             page_hover_switch: false,
@@ -1003,6 +1036,9 @@ impl ClipboardConfig {
 
     pub(crate) fn normalized(mut self) -> Self {
         self.capture_formats = self.capture_formats.normalized();
+        self.preview_types
+            .retain(|preview_type| ClipboardPreviewType::ALL.contains(preview_type));
+        self.preview_types.dedup();
         if self.window_position.is_screen_edge() {
             self.edge_hide = false;
         }
@@ -1045,6 +1081,17 @@ impl ClipboardConfig {
             default_search_engines()
         } else {
             self.search_engines.clone()
+        }
+    }
+
+    pub fn preview_type_enabled(&self, preview_type: ClipboardPreviewType) -> bool {
+        self.preview_types.contains(&preview_type)
+    }
+
+    pub fn set_preview_type_enabled(&mut self, preview_type: ClipboardPreviewType, enabled: bool) {
+        self.preview_types.retain(|value| *value != preview_type);
+        if enabled {
+            self.preview_types.push(preview_type);
         }
     }
 }
@@ -1857,6 +1904,8 @@ mod tests {
         assert_eq!(value["general"]["language"], "zh-CN");
         assert_eq!(value["general"]["globalNotificationEnabled"], true);
         assert_eq!(value["clipboard"]["displayPriority"], "text-html-image");
+        assert_eq!(value["clipboard"]["previewTypes"][0], "text");
+        assert_eq!(value["clipboard"]["previewTypes"][3], "file");
         assert_eq!(value["clipboard"]["mouseLeftBehavior"], "single-paste");
         assert_eq!(value["clipboard"]["pageHoverDelayMs"], 40);
         assert_eq!(value["clipboard"]["filterHoverDelayMs"], 40);

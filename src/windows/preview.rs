@@ -13,12 +13,15 @@ use gpui::{
 use gpui_component::ActiveTheme as _;
 
 use crate::{
-    config::{ClipboardDisplayPriority, ClipboardWindowPosition, PreviewInformationField},
+    config::{
+        ClipboardDisplayPriority, ClipboardPreviewType, ClipboardWindowPosition,
+        PreviewInformationField,
+    },
     domain::{
         capture::FormatRole,
         clipboard::{
             ClipboardListItem, ContentKind, FormatPreview, HistoryItemId, ImagePreviewSource,
-            select_user_visible_previews_with_priority,
+            select_user_visible_previews_with_priority_and_filter,
         },
     },
     i18n,
@@ -469,10 +472,12 @@ impl PreviewWindowService {
         let Some(image_preview_service) = self.image_preview_service.clone() else {
             return;
         };
+        let clipboard_config = crate::config_runtime::clipboard_config(cx);
         if item.note_text.is_empty()
-            && select_user_visible_previews_with_priority(
+            && select_preview_options(
                 &item.preview_options,
                 &display_priority_roles(display_priority),
+                &clipboard_config.preview_types,
             )
             .iter()
             .all(|preview| mode_for_preview(preview).is_none())
@@ -691,9 +696,10 @@ impl PreviewWindow {
             .item
             .as_ref()
             .map(|item| {
-                select_user_visible_previews_with_priority(
+                select_preview_options(
                     &item.preview_options,
                     &display_priority_roles(self.display_priority),
+                    &crate::config_runtime::clipboard_config(cx).preview_types,
                 )
             })
             .unwrap_or_default();
@@ -3007,6 +3013,16 @@ fn mode_for_preview(preview: &FormatPreview) -> Option<PreviewMode> {
     }
 }
 
+fn preview_type_for_preview(preview: &FormatPreview) -> Option<ClipboardPreviewType> {
+    match mode_for_preview(preview) {
+        Some(PreviewMode::Text) => Some(ClipboardPreviewType::Text),
+        Some(PreviewMode::Html) => Some(ClipboardPreviewType::Html),
+        Some(PreviewMode::Image) => Some(ClipboardPreviewType::Image),
+        Some(PreviewMode::File) => Some(ClipboardPreviewType::File),
+        None => None,
+    }
+}
+
 fn display_priority_roles(priority: ClipboardDisplayPriority) -> [FormatRole; 3] {
     match priority {
         ClipboardDisplayPriority::TextHtmlImage => {
@@ -3030,6 +3046,16 @@ fn display_priority_roles(priority: ClipboardDisplayPriority) -> [FormatRole; 3]
     }
 }
 
+fn select_preview_options(
+    previews: &[FormatPreview],
+    preferred_roles: &[FormatRole],
+    preview_types: &[ClipboardPreviewType],
+) -> Vec<FormatPreview> {
+    select_user_visible_previews_with_priority_and_filter(previews, preferred_roles, |preview| {
+        preview_type_for_preview(preview).is_some_and(|kind| preview_types.contains(&kind))
+    })
+}
+
 trait ScrollWheelDelta {
     fn delta_y(&self, line_height: Pixels) -> f32;
 }
@@ -3048,10 +3074,69 @@ mod tests {
         information_areas, information_max_width, information_max_width_for_alignment,
         information_rect, information_rect_with_alignment, information_row_ranges,
         interpolate_reveal_size, intersect_logical_rect, preview_reveal_start_size,
-        resolve_best_connector, resolve_preview_max_height, resolve_preview_max_height_for_window,
-        resolve_preview_max_width, resolve_preview_max_width_for_window, text_line_ranges,
+        preview_type_for_preview, resolve_best_connector, resolve_preview_max_height,
+        resolve_preview_max_height_for_window, resolve_preview_max_width,
+        resolve_preview_max_width_for_window, select_preview_options, text_line_ranges,
     };
+    use crate::config::ClipboardPreviewType;
+    use crate::domain::capture::{FormatKind, FormatRole};
+    use crate::domain::clipboard::{ContentKind, FormatPreview, ImagePreviewSource};
     use gpui::{Anchor, point};
+
+    fn file_preview(content_kind: ContentKind) -> FormatPreview {
+        FormatPreview {
+            format_namespace: "windows".to_owned(),
+            format_key: "CF_HDROP".to_owned(),
+            format_name: "CF_HDROP".to_owned(),
+            format_order: 0,
+            format_kind: FormatKind::FileList,
+            text: String::new(),
+            char_count: 0,
+            content_kind,
+            html_content: None,
+            image_source: Some(ImagePreviewSource::External {
+                sha256: [0; 32],
+                byte_length: 1,
+                relative_path: "preview.bin".to_owned(),
+            }),
+            image_dimensions: None,
+            is_restorable: true,
+        }
+    }
+
+    #[test]
+    fn image_file_uses_image_preview_type() {
+        assert_eq!(
+            preview_type_for_preview(&file_preview(ContentKind::Image)),
+            Some(ClipboardPreviewType::Image)
+        );
+        assert_eq!(
+            preview_type_for_preview(&file_preview(ContentKind::FileList)),
+            Some(ClipboardPreviewType::File)
+        );
+        assert_eq!(
+            FormatRole::FileList,
+            file_preview(ContentKind::Image).role()
+        );
+        let image_file = file_preview(ContentKind::Image);
+        assert_eq!(
+            select_preview_options(
+                &[image_file.clone()],
+                &[FormatRole::Image],
+                &[ClipboardPreviewType::Image],
+            )
+            .len(),
+            1
+        );
+        assert!(
+            select_preview_options(
+                &[image_file],
+                &[FormatRole::Image],
+                &[ClipboardPreviewType::File],
+            )
+            .is_empty()
+        );
+    }
 
     #[test]
     fn preview_prefers_the_larger_side_of_the_main_window() {

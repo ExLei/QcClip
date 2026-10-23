@@ -118,6 +118,39 @@ pub fn select_user_visible_previews_with_priority(
     previews: &[FormatPreview],
     preferred_roles: &[FormatRole],
 ) -> Vec<FormatPreview> {
+    select_user_visible_previews_with_priority_and_allowed_roles(
+        previews,
+        preferred_roles,
+        &[
+            FormatRole::PlainText,
+            FormatRole::Html,
+            FormatRole::Rtf,
+            FormatRole::Image,
+            FormatRole::FileList,
+            FormatRole::VirtualFile,
+            FormatRole::Custom,
+        ],
+    )
+}
+
+pub fn select_user_visible_previews_with_priority_and_allowed_roles(
+    previews: &[FormatPreview],
+    preferred_roles: &[FormatRole],
+    allowed_roles: &[FormatRole],
+) -> Vec<FormatPreview> {
+    select_user_visible_previews_with_priority_and_filter(previews, preferred_roles, |preview| {
+        allowed_roles.contains(&preview.role())
+    })
+}
+
+pub fn select_user_visible_previews_with_priority_and_filter<F>(
+    previews: &[FormatPreview],
+    preferred_roles: &[FormatRole],
+    allowed: F,
+) -> Vec<FormatPreview>
+where
+    F: Fn(&FormatPreview) -> bool,
+{
     const VISIBLE_ROLES: &[FormatRole] = &[
         FormatRole::PlainText,
         FormatRole::Html,
@@ -137,6 +170,9 @@ pub fn select_user_visible_previews_with_priority(
         .chain(VISIBLE_ROLES.iter().copied())
     {
         if selected_roles.contains(&role)
+            || !previews
+                .iter()
+                .any(|preview| preview.role() == role && allowed(preview))
             || role == FormatRole::VirtualFile && !virtual_file_complete
         {
             continue;
@@ -144,7 +180,8 @@ pub fn select_user_visible_previews_with_priority(
         if let Some(preview) = previews
             .iter()
             .filter(|preview| {
-                preview.role() == role
+                allowed(preview)
+                    && preview.role() == role
                     && (!is_empty_textual_preview(preview)
                         || crate::domain::capture::is_custom_text_format(
                             &preview.format_namespace,
@@ -170,7 +207,8 @@ pub fn select_user_visible_previews_with_priority(
         && let Some(preview) = previews
             .iter()
             .filter(|preview| {
-                preview.role() == FormatRole::Custom
+                allowed(preview)
+                    && preview.role() == FormatRole::Custom
                     && !is_empty_textual_preview(preview)
                     && !is_redundant_html_image(preview, native_image_available)
             })
@@ -491,6 +529,28 @@ mod tests {
                 .map(|preview| preview.format_key.as_str())
                 .collect::<Vec<_>>(),
             ["CF_DIBV5", "CF_UNICODETEXT", "registered:HTML Format"]
+        );
+    }
+
+    #[test]
+    fn user_visible_previews_filter_by_allowed_roles() {
+        let previews = vec![
+            preview("registered:HTML Format", FormatKind::Html, 0, true),
+            preview("CF_DIBV5", FormatKind::Image, 1, true),
+            preview("CF_UNICODETEXT", FormatKind::Text, 2, true),
+        ];
+
+        let selected = select_user_visible_previews_with_priority_and_allowed_roles(
+            &previews,
+            &[FormatRole::PlainText, FormatRole::Html, FormatRole::Image],
+            &[FormatRole::Image],
+        );
+        assert_eq!(
+            selected
+                .iter()
+                .map(|preview| preview.format_key.as_str())
+                .collect::<Vec<_>>(),
+            ["CF_DIBV5"]
         );
     }
 

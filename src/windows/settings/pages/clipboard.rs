@@ -6,25 +6,30 @@ use gpui::{AnyElement, App, ColorExt as _, Context, Entity, div, img, px};
 
 use super::super::{
     SettingsWindowView,
-    components::{settings_dropdown, settings_error_row, settings_page_header},
+    components::{
+        clickable_setting_row, settings_dropdown, settings_error_row, settings_page_header,
+    },
 };
 use crate::ui::{hover_icon, icon};
 use crate::{
     config::{
         ClipboardConfig, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
-        ClipboardMouseMiddleBehavior, ClipboardPreviewPriority, ClipboardWindowPosition,
-        SearchEngine,
+        ClipboardMouseMiddleBehavior, ClipboardPreviewPriority, ClipboardPreviewType,
+        ClipboardWindowPosition, SearchEngine,
     },
     config_runtime, i18n,
     windows::menu::{DropdownItem, DropdownItemId},
 };
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::checkbox::Checkbox;
 use gpui_component::input::Input;
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::slider::Slider;
 use gpui_component::switch::Switch;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, collapsible::Collapsible, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, collapsible::Collapsible,
+    h_flex, v_flex,
 };
 
 #[derive(Clone, Copy)]
@@ -552,6 +557,26 @@ impl SettingsWindowView {
                             .into(),
                     ),
                     preview_priority_selector,
+                ),
+            )
+            .child(
+                self.highlight_element(
+                    theme,
+                    translator.translate("settings.clipboard.preview_types"),
+                    clickable_setting_row(
+                        "settings-clipboard-preview-types",
+                        theme,
+                        translator.translate("settings.clipboard.preview_types"),
+                        Some(
+                            translator
+                                .translate("settings.clipboard.preview_types_description")
+                                .into(),
+                        ),
+                        {
+                            let view = view.clone();
+                            move |_, window, cx| open_preview_types_sheet(view.clone(), window, cx)
+                        },
+                    ),
                 ),
             )
             .child(
@@ -1085,6 +1110,59 @@ fn search_engine_icon(engine: &SearchEngine, theme: gpui_component::ThemeColor) 
 /// 允许作为搜索引擎图标的图片扩展名，与 rfd 的 add_filter 保持一致。
 const SEARCH_ENGINE_ICON_EXTENSIONS: &[&str] =
     &["png", "jpg", "jpeg", "svg", "ico", "webp", "bmp", "gif"];
+
+fn open_preview_types_sheet(
+    view: Entity<SettingsWindowView>,
+    window: &mut gpui::Window,
+    cx: &mut App,
+) {
+    let save_error = i18n::translator(cx).translate("settings.clipboard.save_error");
+    window.open_sheet(cx, move |sheet, _, cx| {
+        let theme = cx.theme().colors;
+        let translator = i18n::translator(cx);
+        let clipboard = config_runtime::clipboard_config(cx);
+        let background = gpui::ColorExt::opacity(
+            &crate::window_material::excluded_window_theme(cx).background,
+            0.9,
+        );
+        let mut content = v_flex().size_full().min_h_0().overflow_y_scrollbar();
+        for preview_type in ClipboardPreviewType::ALL {
+            let label = translator.translate(preview_type.label_key());
+            let checkbox = Checkbox::new(format!(
+                "settings-clipboard-preview-type-{}",
+                preview_type.code()
+            ))
+            .checked(clipboard.preview_type_enabled(preview_type))
+            .accessibility_label(label)
+            .on_click({
+                let view = view.clone();
+                let save_error = save_error.clone();
+                move |checked, _, cx| {
+                    persist_clipboard_change(
+                        view.clone(),
+                        move |clipboard| {
+                            clipboard.set_preview_type_enabled(preview_type, *checked);
+                        },
+                        save_error.clone(),
+                        cx,
+                    );
+                }
+            });
+            content = content.child(super::super::components::compact_setting_row(
+                theme,
+                translator.translate(preview_type.label_key()),
+                checkbox,
+            ));
+        }
+        sheet
+            .title(translator.translate("settings.clipboard.preview_types"))
+            .size(ui_rem(420.0))
+            .resizable(false)
+            .shadow_none()
+            .bg(background)
+            .child(content)
+    });
+}
 
 /// 弹出文件选择框让用户为新引擎挑选图标，限定图片扩展名，暂存到 pending_search_engine_icon。
 fn choose_search_engine_icon(view: Entity<SettingsWindowView>, cx: &mut App) {

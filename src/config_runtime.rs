@@ -681,6 +681,7 @@ pub(crate) fn set_clipboard_config(
     let edge_hide_show_edge = clipboard.edge_hide_show_edge;
     let window_position = clipboard.window_position;
     let hover_preview_enabled = clipboard.hover_preview_enabled;
+    let preview_types = clipboard.preview_types.clone();
     if window_position.uses_horizontal_list() && next.appearance.titlebar_position.is_vertical() {
         next.appearance.titlebar_position = crate::config::TitlebarPosition::Top;
     }
@@ -700,7 +701,9 @@ pub(crate) fn set_clipboard_config(
     if current.window_position != window_position {
         crate::windows::main::MainWindowService::refresh_window_position(cx);
     }
-    if current.hover_preview_enabled && !hover_preview_enabled {
+    if (current.hover_preview_enabled && !hover_preview_enabled)
+        || current.preview_types != preview_types
+    {
         crate::windows::main::MainWindowService::cancel_hover_preview(cx);
     }
     cx.refresh_windows();

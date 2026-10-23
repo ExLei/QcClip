@@ -500,6 +500,12 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Clipboard,
+            title_key: "settings.clipboard.preview_types",
+            description_key: Some("settings.clipboard.preview_types_description"),
+            ratio: 0.93,
+        },
+        SearchTargetSpec {
+            page: Clipboard,
             title_key: "settings.clipboard.search_engines",
             description_key: Some("settings.clipboard.search_engines_description"),
             ratio: 0.96,

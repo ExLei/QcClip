@@ -527,6 +527,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.preview_priority,
             warnings,
         ),
+        preview_types: read_field(
+            object,
+            "previewTypes",
+            "clipboard.previewTypes",
+            default.preview_types,
+            warnings,
+        ),
         hover_preview_enabled: read_field(
             object,
             "hoverPreviewEnabled",
