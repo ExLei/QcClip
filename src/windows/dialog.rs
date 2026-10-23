@@ -229,8 +229,8 @@ fn restore_owner_window(owner: AnyWindowHandle, cx: &mut App) {
     match owner.update(cx, |_, window, _| {
         if let Err(error) = window::set_window_enabled(window, true) {
             tracing::error!("恢复调用方窗口失败：{error}");
-        } else {
-            window.activate_window();
+        } else if let Err(error) = window::activate_window_preserving_bounds(window) {
+            tracing::error!("激活调用方窗口失败：{error}");
         }
     }) {
         Ok(()) => {}
