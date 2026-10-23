@@ -1,47 +1,75 @@
-# 版本更新检查
+# 自动更新
 
-应用优先读取 `https://api.github.com/repos/mosheng1/QcClip/releases`，包括正式版与预发布版，排除草稿，并按版本号选择最新版本。GitHub 请求失败或超时后，会立即改用 `https://gitee.com/api/v5/repos/mk-mo-sheng/QcClip/releases`；两个来源都失败时才报告检查失败。发现的版本会打开实际成功来源的发布页，不下载或安装。
+Windows x64、ARM64 支持完整的自动更新流程：定时检查 → 后台下载 → 通知用户点击安装 → 显示安装进度 → 自动重启。安装不会在用户点击前开始。安装版使用 NSIS 安装包，便携版使用 portable ZIP，按当前程序架构匹配附件，不会把便携版转换成安装版。其他平台保留版本检查和发布页入口。
 
-版本比较采用 SemVer 优先级，支持 `v` / `V` 前缀、`alpha`、`beta`、`rc`、`nightly`、`preview` 等后缀。紧凑后缀如 `beta2`、`beta10` 会规范化为 `beta.2`、`beta.10` 后比较，数字按数值排序；同一基础版本的正式版高于预发布版，`+build` 元数据不影响优先级。无法识别的标签会跳过。GitHub 标签中的未知后缀按 SemVer 字符排序，不根据发布时间推测版本顺序。
+## 关于页
 
-默认每天检查，可选择每3天、每周或永不更新。成功检查的时间、最新版本及已通知版本保存在数据目录的 `config.updates.json`；检查失败保留已有更新提示，自动检查1小时后重试。手动检查不受频率和重试等待限制。自动通知同一版本只弹一次。
+“自动下载最新版”默认开启，旧配置缺少此字段时也默认开启，对应 `updates.autoDownload`。关闭后只按原有频率检查更新，可以手动点击“下载 / 重试下载”；关闭时会取消正在进行的下载，已经完成的更新包仍可安装。
 
-“发现新版本提醒”统一放在“常规 → 通知偏好”，沿用原有更新通知配置值，只控制自动检查发现新版本时的弹窗；关闭后更新标识仍然显示。手动检查始终在关于页显示结果，其普通结果弹窗受“操作结果提示”控制，失败弹窗受“警告与错误提示”控制，所有弹窗仍受全局通知总开关控制。关于页保留检查频率、代理和手动检查入口。
+关于页显示下载来源、百分比、已下载大小和总大小。服务器未提供大小时显示已下载大小与进行中状态。下载可取消，失败可重试；自动下载失败后等待一小时再试，取消下载后本次运行不会自动重试同一版本。重新开启自动下载或手动下载可恢复。
 
-代理设置支持跟随系统、直连、自定义 HTTP 代理，HTTPS 更新接口通过 HTTP CONNECT 隧道访问。跟随系统优先使用代理环境变量，Windows 上没有代理环境变量时读取系统手动代理；PAC 自动代理脚本不执行，可改用自定义代理。选择自定义代理后填写地址并点击“保存代理”生效。
+下载完成后，通知和关于页都提供“安装并重启”。通知关闭或消失后，关于页仍保留安装入口；重启应用时会校验并恢复已下载的更新包，关闭自动下载也不会隐藏已有安装入口。
 
-GitHub 未认证 API 的额度按网络出口 IP 计算，共用代理节点可能耗尽额度，而直连仍可正常检查。额度耗尽时会继续尝试 Gitee；两个来源都不可用时显示失败原因。代理设置会同时用于 GitHub 和 Gitee，不会自动绕过用户选择的代理。
+检查频率默认每天，可选择每三天、每周或不自动检查。此设置控制定时检查，不限制手动检查。成功检查的时间、最新版本和已通知标签保存在数据目录的 `config.updates.json`；检查失败保留已有更新提示，一小时后重试。
 
-## 本地测试
+## 网络与校验
 
-需要 Python 3。第一个 PowerShell 窗口启动服务：
+检查优先访问 `https://api.github.com/repos/mosheng1/QcClip/releases`，失败或超时后使用 `https://gitee.com/api/v5/repos/mk-mo-sheng/QcClip/releases`。单次检查请求最多二十秒；下载连接最多八秒，读取连续十五秒无响应即失败，单次传输最多一小时。
+
+GitHub 下载失败、包不完整或校验失败时，从 Gitee 读取**同一标签**的发布信息并重新下载同名附件。镜像尚未同步时保留失败状态，不会安装较旧版本。GitHub 提供 SHA-256 摘要和大小时，切换镜像后仍沿用这些信息。两个来源都失败时显示双方的错误。
+
+只接受官方仓库的 HTTPS 附件入口，允许服务重定向到实际附件 CDN。更新包限 512 MB，通过临时文件下载，完成后检查大小、包格式及可用的发布摘要，再原子保存。缓存记录保留本地 SHA-256，复用缓存和安装前重新校验，失败后必须重新下载。缓存位于 `config.updates.cache`，成功下载新版本后清理旧更新包，成功安装后删除已使用的包。
+
+代理支持跟随系统、直连和自定义 HTTP 代理，检查与下载使用相同设置。跟随系统优先读取代理环境变量；Windows 没有代理环境变量时读取系统手动代理，不执行 PAC 脚本。GitHub API 限流后同样尝试 Gitee，不会绕过用户选择的代理。
+
+版本比较采用 SemVer，包含正式版和预发布版，排除草稿。支持 `v` / `V` 前缀，`beta2` 等紧凑后缀会转换为 `beta.2`，确保 `beta10` 高于 `beta2`；正式版高于同基础版本的预发布版，构建元数据不影响优先级。
+
+## 安装过程
+
+主程序先校验下载缓存，将自身及所需运行库复制到独立工作目录，使用 `--apply-update` 启动更新进程。更新窗口成功绘制、校验文件并打开父进程句柄后发送就绪信号；主程序确认后才保存状态并退出。准备失败或三十秒内未就绪时，主程序保持运行。
+
+更新进程等待主程序彻底退出，并持有单实例锁，避免更新时启动另一个 QcClip。安装成功后自动重启并关闭更新窗口；失败时保留错误说明、错误文件和重新打开程序的按钮。
+
+- 安装版：以 `/P /NS /D=原安装目录` 启动 NSIS。被动模式直接显示真实安装进度，跳过欢迎页、目录选择和完成确认，完成后自动关闭。独立更新窗口同时显示当前安装阶段，不伪造百分比。
+- 便携版：先在程序目录内解压暂存，校验程序架构，只允许替换主程序、便携标记和指定运行库，逐文件显示进度。保留 `QcClipData` 和其他用户文件；替换失败恢复原文件，恢复不完整时保留备份并显示路径。
+
+更新进程的工作目录位于缓存中的 `.worker-*`；主程序后台清理超过一天的旧工作目录。自动更新使用现有发布产物，无需额外发布更新器，也不改变用户数据格式。
+
+“常规 → 通知偏好 → 发现新版本提醒”控制自动检查、自动下载开始和完成的通知；手动操作受操作结果提示控制，错误受警告与错误提示控制，所有通知受全局总开关控制。关闭通知不影响关于页的进度、错误和安装入口。
+
+## 本地验证
+
+需要 Python 3.11 或更新版本。启动本地服务，使用比当前程序更高的标签，并提供对应版本的真实更新包：
 
 ```powershell
-py -3 scripts/update_test_server.py --scenario update --version v1.0.0-beta.2
+py -3 scripts/update_test_server.py --version v1.0.0-beta.4 --package-directory target/packages/x86_64-pc-windows-msvc --chunk-delay 0.05
 ```
 
-第二个 PowerShell 窗口设置临时环境变量并启动 debug 包：
+包名必须匹配模拟版本和架构；服务不会改名、生成或执行安装包。仅检查界面时可省略 `--package-directory`，此时手动下载会提示缺少匹配附件。使用与程序匹配的真实新版本测试安装，便携更新可在独立测试目录中验证。
+
+在另一个 PowerShell 窗口启动 debug 包：
 
 ```powershell
 $env:QCCLIP_UPDATE_TEST_URL = 'http://127.0.0.1:18765/releases'
+$env:QCCLIP_UPDATE_TEST_GITEE_URL = 'http://127.0.0.1:18765/mirror/releases'
 cargo run
 Remove-Item Env:QCCLIP_UPDATE_TEST_URL
+Remove-Item Env:QCCLIP_UPDATE_TEST_GITEE_URL
 ```
 
-只有 `debug_assertions` 编译开启时读取该变量，且只接受本机 HTTP 地址。release 编译完全排除环境变量入口，始终请求 GitHub。debug 本地测试使用独立的 `config.test-updates.json`，不会污染正式检查记录。
+环境变量仅在 debug 编译生效，只接受本机 HTTP 地址；本地镜像入口还要求已设置本地检查入口。release 编译排除这些入口。本地测试使用独立的 `config.test-updates.json` 和 `config.test-updates.cache`，不会修改正式检查记录或下载缓存。
 
-可用场景：`update`（发现更新）、`current`（当前版本）、`empty`（空列表）、`prerelease`（测试版）、`mixed`（版本乱序、草稿和无效标签）、`paginated`（多页）、`not-found`（尚未建立仓库）、`rate-limit`（限流）、`error`（服务错误）、`invalid`（数据格式错误）。`--delay 3` 可观察检查中的状态，`--delay 25` 可测试超时。
-
-服务运行时可切换场景，再从托盘或关于页点击“检查更新”：
+通过 `/control` 切换场景，再点击检查或下载：
 
 ```powershell
-Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=mixed'
-Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=update&version=v1.0.0-rc2'
+Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=download-error'
+Invoke-RestMethod 'http://127.0.0.1:18765/control?scenario=fallback'
 ```
 
-发现更新后检查托盘底部绿色居中项、设置侧边栏“更新”标识、关于页版本对比、主窗口图标上的绿色向上箭头、全局通知中的发布页按钮。测试场景的跳转仍使用真实 GitHub 发布页，尚未发布的模拟标签可能显示 GitHub 404。
+场景包括原有的 `update`、`current`、`empty`、`prerelease`、`mixed`、`paginated`、`not-found`、`rate-limit`、`error`、`invalid`，以及 `fallback`（主检查接口失败）、`download-error`（主下载返回错误）、`download-truncated`（主下载中断）、`download-corrupt`（主下载摘要不匹配）。后三种场景的镜像下载正常，用于验证回退。`--delay 25` 只延迟主检查接口，可验证超时后回退；`--chunk-delay` 用于观察进度和取消。
 
 ```powershell
 py -3 scripts/update_test_server.py --self-test
 cargo test --test update_check
+cargo fmt --check
 ```

@@ -68,6 +68,13 @@ pub fn from_str(content: &str) -> Result<LoadedConfig, ConfigLoadError> {
 fn read_updates(object: &Map<String, Value>, warnings: &mut Vec<String>) -> super::UpdateConfig {
     let default = super::UpdateConfig::default();
     super::UpdateConfig {
+        auto_download: read_field(
+            object,
+            "autoDownload",
+            "updates.autoDownload",
+            default.auto_download,
+            warnings,
+        ),
         frequency: read_field(
             object,
             "frequency",
@@ -1052,6 +1059,7 @@ mod tests {
         use super::super::{AppConfig, UpdateConfig, UpdateFrequency, UpdateProxyMode};
         let mut config = AppConfig::default();
         config.updates = UpdateConfig {
+            auto_download: false,
             frequency: UpdateFrequency::EveryThreeDays,
             notification_enabled: false,
             proxy_mode: UpdateProxyMode::Custom,
@@ -1065,6 +1073,10 @@ mod tests {
         let never = super::from_str(r#"{"updates":{"frequency":"never"}}"#).unwrap();
         assert_eq!(never.config.updates.frequency, UpdateFrequency::Never);
         assert!(never.warnings.is_empty());
+        assert!(never.config.updates.auto_download);
+        let invalid = super::from_str(r#"{"updates":{"autoDownload":"invalid"}}"#).unwrap();
+        assert!(invalid.config.updates.auto_download);
+        assert!(!invalid.warnings.is_empty());
         let loaded =
             super::from_str(r#"{"updates":{"frequency":"invalid","notificationEnabled":false}}"#)
                 .unwrap();

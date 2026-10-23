@@ -311,16 +311,14 @@ pub fn render(
                 .when(
                     crate::services::updates::UpdateService::available(cx).is_some(),
                     |view| {
-                        let tooltip = i18n::translator(cx).translate("updates.open_release");
+                        let tooltip = i18n::translator(cx).translate("updates.view_progress");
                         view.cursor_pointer()
                             .tooltip(move |_, cx| {
                                 cx.new(|_| gpui_component::tooltip::Tooltip::new(tooltip.clone()))
                                     .into()
                             })
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(|_, _, cx| {
-                                crate::services::updates::UpdateService::open_release(cx)
-                            })
+                            .on_click(|_, _, cx| crate::windows::settings::open_about_window(cx))
                             .child(
                                 div()
                                     .absolute()

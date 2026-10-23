@@ -862,5 +862,21 @@
   "updates.status.current": "当前已是最新版本",
   "updates.status.empty": "仓库尚未发布版本",
   "updates.status.failed": "检查失败，请稍后重试",
-  "updates.save_error": "保存更新设置失败"
+  "updates.save_error": "保存更新设置失败",
+  "updates.auto_download": "自动下载最新版",
+  "updates.auto_download_detail": "开启后在检查到新版本时后台下载，完成后由你点击安装；关闭后仅检查更新。",
+  "updates.download": "下载 / 重试下载",
+  "updates.downloading": "正在下载更新",
+  "updates.download_started": "更新包正在后台下载，可在关于页查看进度。",
+  "updates.view_progress": "查看更新",
+  "updates.cancel_download": "取消下载",
+  "updates.ready": "新版本已下载完成",
+  "updates.ready_detail": "点击安装后将保存数据并退出，更新窗口会显示进度，完成后自动重启。",
+  "updates.install": "安装并重启",
+  "updates.installing": "正在准备安装…",
+  "updates.download_failed": "更新下载失败",
+  "updates.retry": "前往重试",
+  "updates.install_failed": "更新安装失败",
+  "updates.cancelling": "正在取消…",
+  "updates.wait_for_operation": "请等待当前数据操作完成后再安装更新。"
 }

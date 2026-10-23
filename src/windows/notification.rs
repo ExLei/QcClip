@@ -106,6 +106,12 @@ pub(crate) enum NotificationContent {
 }
 
 #[derive(Clone)]
+pub(crate) enum NotificationAction {
+    OpenUpdates,
+    InstallUpdate(String),
+}
+
+#[derive(Clone)]
 pub(crate) struct NotificationRequest {
     pub(crate) kind: NotificationKind,
     pub(crate) title: Option<String>,
@@ -116,6 +122,7 @@ pub(crate) struct NotificationRequest {
     pub(crate) max_lines: Option<usize>,
     pub(crate) duration: Duration,
     pub(crate) action_url: Option<String>,
+    pub(crate) action: Option<NotificationAction>,
     pub(crate) action_label: Option<String>,
 }
 
@@ -131,6 +138,7 @@ impl NotificationRequest {
             max_lines: Some(2),
             duration: DEFAULT_DURATION,
             action_url: None,
+            action: None,
             action_label: None,
         }
     }
@@ -189,6 +197,7 @@ fn clipboard_notification_request(
         max_lines: Some(2),
         duration: DEFAULT_DURATION,
         action_url: None,
+        action: None,
         action_label: None,
     }
 }
@@ -583,17 +592,25 @@ impl NotificationWindow {
             .text_color(theme.foreground)
             .child(progress_bar)
             .child(content)
-            .when_some(self.request.action_url.clone(), |view, url| {
+            .when(self.request.action_url.is_some() || self.request.action.is_some(), |view| {
                 let label = self.request.action_label.clone().unwrap_or_default();
+                let url = self.request.action_url.clone();
+                let action = self.request.action.clone();
                 view.child(
                     div().px_3().pb_2().child(
-                        gpui_component::button::Button::new("notification-open-release")
+                        gpui_component::button::Button::new("notification-action")
                             .small()
-                            .icon(crate::ui::icon("external-link", 14.0, theme.foreground))
                             .label(label)
                             .on_click(cx.listener(move |view, _, window, cx| {
-                                cx.open_url(&url);
                                 view.dismiss(window, cx);
+                                match &action {
+                                    Some(NotificationAction::OpenUpdates) => crate::windows::settings::open_about_window(cx),
+                                    Some(NotificationAction::InstallUpdate(tag)) => {
+                                        crate::windows::settings::open_about_window(cx);
+                                        crate::services::updates::UpdateService::install_downloaded(Some(tag), cx);
+                                    },
+                                    None => { if let Some(url) = &url { cx.open_url(url); } }
+                                }
                             })),
                     ),
                 )
@@ -736,6 +753,7 @@ impl NotificationService {
                 max_lines: Some(3),
                 duration: DEFAULT_DURATION,
                 action_url: None,
+                action: None,
                 action_label: None,
             },
             cx,
@@ -807,6 +825,7 @@ impl NotificationService {
                 max_lines: Some(1),
                 duration: DEFAULT_DURATION,
                 action_url: None,
+                action: None,
                 action_label: None,
             },
             cx,

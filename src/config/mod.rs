@@ -95,6 +95,7 @@ pub enum UpdateProxyMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UpdateConfig {
+    pub auto_download: bool,
     pub frequency: UpdateFrequency,
     pub notification_enabled: bool,
     pub proxy_mode: UpdateProxyMode,
@@ -104,6 +105,7 @@ pub struct UpdateConfig {
 impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
+            auto_download: true,
             frequency: UpdateFrequency::default(),
             notification_enabled: true,
             proxy_mode: UpdateProxyMode::default(),

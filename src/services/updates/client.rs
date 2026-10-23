@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::config::{UpdateConfig, UpdateProxyMode};
 
 pub(super) const RELEASES_API: &str = "https://api.github.com/repos/mosheng1/QcClip/releases";
-const GITEE_RELEASES_API: &str = "https://gitee.com/api/v5/repos/mk-mo-sheng/QcClip/releases";
+pub(super) const GITEE_RELEASES_API: &str =
+    "https://gitee.com/api/v5/repos/mk-mo-sheng/QcClip/releases";
 const RELEASES_PAGE: &str = "https://github.com/mosheng1/QcClip/releases";
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -21,14 +22,26 @@ pub(crate) struct Release {
     #[serde(default)]
     pub prerelease: bool,
     #[serde(default)]
-    source: ReleaseSource,
+    pub(super) source: ReleaseSource,
+    #[serde(default)]
+    pub(super) assets: Vec<ReleaseAsset>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-enum ReleaseSource {
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub(super) enum ReleaseSource {
     #[default]
     GitHub,
     Gitee,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(super) struct ReleaseAsset {
+    pub name: String,
+    pub browser_download_url: String,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 impl Release {
@@ -38,20 +51,25 @@ impl Release {
 
     pub(crate) fn url(&self) -> String {
         // 发布页由仓库地址与标签构造，不信任响应中的任意跳转地址。
-        let mut tag = String::new();
-        for byte in self.tag_name.bytes() {
-            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                tag.push(char::from(byte));
-            } else {
-                tag.push_str(&format!("%{byte:02X}"));
-            }
-        }
+        let tag = encode_path_segment(&self.tag_name);
         let releases_page = match &self.source {
             ReleaseSource::GitHub => RELEASES_PAGE,
             ReleaseSource::Gitee => "https://gitee.com/mk-mo-sheng/QcClip/releases",
         };
         format!("{releases_page}/tag/{tag}")
     }
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 pub(super) fn newer_than_current(release: &Release) -> bool {
@@ -148,10 +166,26 @@ fn valid_test_api_url(value: &str) -> bool {
     })
 }
 
+fn fallback_api_url() -> String {
+    #[cfg(debug_assertions)]
+    if api_url() != RELEASES_API
+        && let Ok(value) = std::env::var("QCCLIP_UPDATE_TEST_GITEE_URL")
+        && valid_test_api_url(&value)
+    {
+        return value;
+    }
+    GITEE_RELEASES_API.to_owned()
+}
+
 pub(super) fn fetch_latest(config: &UpdateConfig) -> Result<Option<Release>, String> {
     let github_api = api_url();
     if github_api != RELEASES_API {
-        return fetch_releases(config, &github_api);
+        let fallback = fallback_api_url();
+        return if fallback != GITEE_RELEASES_API {
+            fetch_with_fallback(config, &github_api, &fallback)
+        } else {
+            fetch_releases(config, &github_api)
+        };
     }
     fetch_with_fallback(config, RELEASES_API, GITEE_RELEASES_API)
 }
@@ -172,9 +206,12 @@ fn fetch_with_fallback(
     }
 }
 
-fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, String> {
-    let mut builder = ureq::AgentBuilder::new().timeout(Duration::from_secs(20));
-    if api != RELEASES_API && api != GITEE_RELEASES_API {
+pub(super) fn http_agent(config: &UpdateConfig, local_test: bool) -> Result<ureq::Agent, String> {
+    let mut builder = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(15))
+        .timeout_write(Duration::from_secs(15));
+    if local_test {
         builder = builder.try_proxy_from_env(false);
     } else {
         builder = match config.proxy_mode {
@@ -198,11 +235,16 @@ fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, S
             }
         };
     }
-    let agent = builder.build();
+    Ok(builder.build())
+}
+
+fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, String> {
+    let agent = http_agent(config, api != RELEASES_API && api != GITEE_RELEASES_API)?;
     let mut latest: Option<(Version, Release)> = None;
     for page in 1..=20 {
         let response = match agent
             .get(api)
+            .timeout(Duration::from_secs(20))
             .query("per_page", "100")
             .query("page", &page.to_string())
             .set("User-Agent", concat!("QcClip/", env!("CARGO_PKG_VERSION")))
@@ -210,7 +252,9 @@ fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, S
             .call()
         {
             Ok(response) => response,
-            Err(ureq::Error::Status(404, _)) if page == 1 => return Ok(None),
+            Err(ureq::Error::Status(404, _)) if page == 1 && api != RELEASES_API => {
+                return Ok(None);
+            }
             Err(ureq::Error::Status(status @ (403 | 429), response)) => {
                 return Err(access_error(service_name(api), status, &response));
             }
@@ -253,7 +297,7 @@ fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, S
 }
 
 fn source_for_api(api: &str) -> ReleaseSource {
-    if api == GITEE_RELEASES_API {
+    if api == GITEE_RELEASES_API || api == fallback_api_url() {
         ReleaseSource::Gitee
     } else {
         ReleaseSource::GitHub
@@ -339,6 +383,41 @@ fn system_proxy() -> Option<ureq::Proxy> {
     None
 }
 
+pub(super) fn fetch_mirror(tag: &str, config: &UpdateConfig) -> Result<Release, String> {
+    let api = fallback_api_url();
+    #[cfg(debug_assertions)]
+    if api_url() != RELEASES_API && api == GITEE_RELEASES_API {
+        return Err("未配置本地 Gitee 镜像测试地址".into());
+    }
+    fetch_release_tag(config, &api, tag)
+}
+
+fn fetch_release_tag(config: &UpdateConfig, api: &str, tag: &str) -> Result<Release, String> {
+    let endpoint = format!("{api}/tags/{}", encode_path_segment(tag));
+    let response = http_agent(config, api != GITEE_RELEASES_API && api != RELEASES_API)?
+        .get(&endpoint)
+        .timeout(Duration::from_secs(20))
+        .set("User-Agent", concat!("QcClip/", env!("CARGO_PKG_VERSION")))
+        .call()
+        .map_err(|e| format!("读取同版本镜像失败，可能尚未同步：{e}"))?;
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("读取镜像发布信息失败：{e}"))?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err("镜像发布信息过大".into());
+    }
+    let mut release: Release =
+        serde_json::from_slice(&bytes).map_err(|_| "镜像发布信息格式错误")?;
+    if release.draft || release.tag_name != tag {
+        return Err("镜像版本不一致或尚未发布".into());
+    }
+    release.source = ReleaseSource::Gitee;
+    Ok(release)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +467,7 @@ mod tests {
             draft: false,
             prerelease: true,
             source: ReleaseSource::default(),
+            assets: Vec::new(),
         };
         assert_eq!(
             release.url(),
@@ -431,7 +511,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).unwrap();
+            assert!(stream.read(&mut request).unwrap() > 0);
             stream.write_all(response.as_bytes()).unwrap();
         });
         let result = fetch_releases(&UpdateConfig::default(), &url);
@@ -454,13 +534,13 @@ mod tests {
         let primary_server = std::thread::spawn(move || {
             let (mut stream, _) = primary_listener.accept().unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).unwrap();
+            assert!(stream.read(&mut request).unwrap() > 0);
             stream.write_all(primary_response.as_bytes()).unwrap();
         });
         let fallback_server = std::thread::spawn(move || {
             let (mut stream, _) = fallback_listener.accept().unwrap();
             let mut request = [0; 2048];
-            stream.read(&mut request).unwrap();
+            assert!(stream.read(&mut request).unwrap() > 0);
             stream.write_all(fallback_response.as_bytes()).unwrap();
         });
         let result = fetch_with_fallback(&UpdateConfig::default(), &primary_url, &fallback_url);
@@ -530,11 +610,41 @@ mod tests {
             draft: false,
             prerelease: false,
             source: ReleaseSource::Gitee,
+            assets: Vec::new(),
         };
         assert_eq!(
             release.url(),
             "https://gitee.com/mk-mo-sheng/QcClip/releases/tag/v1.2.0"
         );
+    }
+
+    #[test]
+    fn mirror_lookup_requires_the_exact_published_tag() {
+        use std::net::TcpListener;
+        for body in [
+            r#"{"tag_name":"v1.2.0"}"#,
+            r#"{"tag_name":"v1.1.0"}"#,
+            r#"{"tag_name":"v1.2.0","draft":true}"#,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let api = format!("http://{}/releases", listener.local_addr().unwrap());
+            let response = mock_response(200, body);
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 2048];
+                let count = stream.read(&mut request).unwrap();
+                assert!(
+                    String::from_utf8_lossy(&request[..count]).contains("/releases/tags/v1.2.0")
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            });
+            let result = fetch_release_tag(&UpdateConfig::default(), &api, "v1.2.0");
+            server.join().unwrap();
+            assert_eq!(
+                result.is_ok(),
+                !body.contains("v1.1.0") && !body.contains("draft")
+            );
+        }
     }
 
     #[test]

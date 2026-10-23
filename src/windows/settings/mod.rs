@@ -77,6 +77,18 @@ impl SettingsWindowService {
     }
 }
 
+pub(crate) fn open_about_window(cx: &mut App) {
+    open_settings_window(cx);
+    let view = cx.global::<SettingsWindowService>().view.clone();
+    if let Some(view) = view {
+        view.update(cx, |view, cx| {
+            view.active_page = SettingsPage::About;
+            view.clear_search_highlight();
+            cx.notify();
+        });
+    }
+}
+
 pub(crate) fn open_settings_window(cx: &mut App) {
     let existing = cx.read_global::<SettingsWindowService, _>(|service, _| service.window);
     if let Some(window) = existing

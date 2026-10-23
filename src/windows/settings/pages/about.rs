@@ -10,6 +10,7 @@ use gpui::{
 use gpui_component::Disableable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
+use gpui_component::switch::Switch;
 use gpui_component::{ActiveTheme as _, Root, Sizable as _, h_flex, v_flex};
 
 use super::super::SettingsWindowView;
@@ -19,7 +20,7 @@ use crate::windows::notification::{NotificationLevel, NotificationService};
 use crate::{
     config::{UpdateFrequency, UpdateProxyMode},
     config_runtime,
-    services::updates::UpdateService,
+    services::updates::{DownloadState, UpdateService},
 };
 use crate::{
     i18n,
@@ -213,7 +214,7 @@ impl SettingsWindowView {
         let translator = i18n::translator(cx);
         let updates = config_runtime::update_config(cx);
         let service = cx.try_global::<UpdateService>();
-        let checking = service.is_some_and(|service| service.checking);
+        let checking = service.is_some_and(|service| service.busy());
         let has_error = service.is_some_and(|service| service.error.is_some());
         let status = service
             .map(|service| {
@@ -223,6 +224,40 @@ impl SettingsWindowView {
                     .unwrap_or_else(|| translator.translate(service.status_key))
             })
             .unwrap_or_default();
+        let installing = service.is_some_and(|service| service.installing);
+        let cancelling = service.is_some_and(|service| service.cancelling());
+        let downloading = service
+            .is_some_and(|service| matches!(service.download, DownloadState::Downloading(_)));
+        let latest = UpdateService::available(cx);
+        let ready = service.is_some_and(|service| matches!(&service.download,
+            DownloadState::Ready(cached) if latest.as_ref().is_some_and(|r| r.tag_name == cached.tag)));
+        let status = if installing {
+            translator.translate("updates.installing")
+        } else if ready {
+            translator.translate("updates.ready")
+        } else {
+            status
+        };
+        let download_error = service.and_then(|service| match &service.download {
+            DownloadState::Failed(error) => Some(error.clone()),
+            _ => None,
+        });
+        let progress = service.and_then(|service| match &service.download {
+            DownloadState::Downloading(progress) => Some(progress.clone()),
+            _ => None,
+        });
+        let auto_download = Switch::new("about-auto-download")
+            .small()
+            .checked(updates.auto_download)
+            .accessibility_label(translator.translate("updates.auto_download"))
+            .on_click({
+                let view = cx.entity();
+                move |checked, _, cx| {
+                    let mut config = config_runtime::update_config(cx);
+                    config.auto_download = *checked;
+                    save_update_settings(&view, config, cx);
+                }
+            });
         let frequency_menu = settings_dropdown(
             "about-update-frequency",
             updates.frequency.label_key(),
@@ -312,12 +347,51 @@ impl SettingsWindowView {
                     .child(translator.translate("updates.settings")),
             )
             .child(
-                Button::new("about-check-updates")
-                    .small()
-                    .disabled(checking)
-                    .icon(icon("refresh", 14.0, theme.foreground))
-                    .label(translator.translate("updates.check"))
-                    .on_click(|_, _, cx| UpdateService::check(true, cx)),
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("about-check-updates")
+                            .small()
+                            .disabled(checking)
+                            .icon(icon("refresh", 14.0, theme.foreground))
+                            .label(translator.translate("updates.check"))
+                            .on_click(|_, _, cx| UpdateService::check(true, cx)),
+                    )
+                    .when(latest.is_some() && !downloading, |view| {
+                        view.child(
+                            Button::new("about-download-install-update")
+                                .small()
+                                .primary()
+                                .disabled(checking)
+                                .label(translator.translate(if installing {
+                                    "updates.installing"
+                                } else if ready {
+                                    "updates.install"
+                                } else {
+                                    "updates.download"
+                                }))
+                                .on_click(move |_, _, cx| {
+                                    if ready {
+                                        UpdateService::install_downloaded(None, cx);
+                                    } else {
+                                        UpdateService::start_download(true, cx);
+                                    }
+                                }),
+                        )
+                    })
+                    .when(downloading && !installing, |view| {
+                        view.child(
+                            Button::new("about-cancel-update-download")
+                                .small()
+                                .disabled(cancelling)
+                                .label(translator.translate(if cancelling {
+                                    "updates.cancelling"
+                                } else {
+                                    "updates.cancel_download"
+                                }))
+                                .on_click(|_, _, cx| UpdateService::cancel_download(cx)),
+                        )
+                    }),
             )
             .into_any_element();
         let frequency = about_update_row(
@@ -333,9 +407,6 @@ impl SettingsWindowView {
             .flex_1()
             .min_w_0()
             .child(heading)
-            .child(frequency)
-            .child(proxy)
-            .when_some(proxy_editor, |view, editor| view.child(editor))
             .child(
                 div()
                     .w_full()
@@ -348,6 +419,70 @@ impl SettingsWindowView {
                     })
                     .child(status),
             )
+            .when_some(progress, |view, progress| {
+                let fraction = (progress.total != 0)
+                    .then(|| (progress.downloaded as f32 / progress.total as f32).clamp(0.0, 1.0));
+                let text = if let Some(fraction) = fraction {
+                    format!(
+                        "{} · {:.0}% · {:.1} / {:.1} MB",
+                        progress.source,
+                        fraction * 100.0,
+                        progress.downloaded as f64 / 1048576.0,
+                        progress.total as f64 / 1048576.0
+                    )
+                } else {
+                    format!(
+                        "{} · {} · {:.1} MB",
+                        progress.source,
+                        translator.translate("updates.downloading"),
+                        progress.downloaded as f64 / 1048576.0
+                    )
+                };
+                view.child(
+                    v_flex()
+                        .w_full()
+                        .gap_2()
+                        .pt_3()
+                        .child(div().text_xs().child(text))
+                        .when_some(fraction, |view, fraction| {
+                            view.child(
+                                div()
+                                    .w_full()
+                                    .h(ui_rem(5.0))
+                                    .rounded_md()
+                                    .bg(theme.border)
+                                    .child(
+                                        div()
+                                            .h_full()
+                                            .w(gpui::relative(fraction))
+                                            .rounded_md()
+                                            .bg(theme.primary),
+                                    ),
+                            )
+                        })
+                        .when(fraction.is_none(), |view| {
+                            view.child(gpui_component::spinner::Spinner::new())
+                        }),
+                )
+            })
+            .when_some(download_error, |view, error| {
+                view.child(div().pt_2().text_xs().text_color(theme.danger).child(error))
+            })
+            .child(frequency)
+            .child(about_update_row(
+                translator.translate("updates.auto_download"),
+                auto_download,
+                cx,
+            ))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .pt_2()
+                    .child(translator.translate("updates.auto_download_detail")),
+            )
+            .child(proxy)
+            .when_some(proxy_editor, |view, editor| view.child(editor))
             .when_some(self.update_error.clone(), |view, error| {
                 view.child(
                     div()

@@ -280,7 +280,7 @@ fn handle_menu_action(action: MenuActionId, cx: &mut App) {
         }
         SETTINGS_ACTION => crate::windows::settings::open_settings_window(cx),
         CHECK_UPDATES_ACTION => crate::services::updates::UpdateService::check(true, cx),
-        OPEN_RELEASE_ACTION => crate::services::updates::UpdateService::open_release(cx),
+        OPEN_RELEASE_ACTION => crate::windows::settings::open_about_window(cx),
         RESTART_ACTION => cx.restart(),
         QUIT_ACTION => cx.quit(),
         _ => {}

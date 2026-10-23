@@ -1,10 +1,18 @@
 mod client;
+mod download;
+mod installer;
+mod installer_window;
+pub(crate) use installer_window::run_if_requested as run_installer_if_requested;
 mod schedule;
 
 use std::{
     fs,
     io::Write,
     path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -12,7 +20,9 @@ use atomic_write_file::AtomicWriteFile;
 use gpui::{App, AppContext, BorrowAppContext, Global, Task};
 use serde::{Deserialize, Serialize};
 
-use crate::windows::notification::{NotificationLevel, NotificationRequest, NotificationService};
+use crate::windows::notification::{
+    NotificationAction, NotificationLevel, NotificationRequest, NotificationService,
+};
 use crate::{config::NotificationKind, config_runtime, i18n};
 #[cfg(debug_assertions)]
 use client::{RELEASES_API, api_url};
@@ -27,10 +37,25 @@ struct CheckRecord {
     notified_tag: Option<String>,
 }
 
+#[derive(Default)]
+pub(crate) enum DownloadState {
+    #[default]
+    Idle,
+    Downloading(download::DownloadProgress),
+    Ready(download::CachedUpdate),
+    Failed(String),
+}
+
 pub(crate) struct UpdateService {
     pub(crate) checking: bool,
     pub(crate) status_key: &'static str,
     pub(crate) error: Option<String>,
+    pub(crate) download: DownloadState,
+    pub(crate) installing: bool,
+    download_cancel: Option<Arc<AtomicBool>>,
+    download_retry: Option<Task<()>>,
+    deferred_tag: Option<String>,
+    auto_download_enabled: bool,
     record: CheckRecord,
     path: PathBuf,
     retry_after: u64,
@@ -56,15 +81,27 @@ impl UpdateService {
             checking: false,
             status_key,
             error: None,
+            download: DownloadState::Idle,
+            installing: false,
+            download_cancel: None,
+            download_retry: None,
+            deferred_tag: None,
+            auto_download_enabled: config_runtime::update_config(cx).auto_download,
             record,
             path,
             retry_after: 0,
             scheduled_check: None,
         });
         cx.refresh_windows();
-        cx.observe_global::<config_runtime::ConfigRuntime>(Self::schedule)
+        cx.observe_global::<config_runtime::ConfigRuntime>(Self::settings_changed)
             .detach();
         Self::schedule(cx);
+        let cache_directory = cx.global::<Self>().cache_directory();
+        cx.background_spawn(async move {
+            installer::cleanup_workers(&cache_directory);
+        })
+        .detach();
+        Self::restore_download(cx);
     }
 
     fn schedule(cx: &mut App) {
@@ -109,7 +146,7 @@ impl UpdateService {
     }
 
     pub(crate) fn check(manual: bool, cx: &mut App) {
-        if cx.global::<Self>().checking {
+        if cx.global::<Self>().busy() {
             return;
         }
         cx.update_global::<Self, _>(|service, _| {
@@ -187,8 +224,8 @@ impl UpdateService {
                 NotificationKind::VersionUpdate
             };
             request.duration = Duration::from_secs(12);
-            request.action_url = Some(release.url());
-            request.action_label = Some(translator.translate("updates.open_release"));
+            request.action = Some(NotificationAction::OpenUpdates);
+            request.action_label = Some(translator.translate("updates.view_progress"));
             NotificationService::show(request, cx);
         } else if manual && cx.global::<Self>().status_key != "updates.status.available" {
             let service = cx.global::<Self>();
@@ -207,6 +244,325 @@ impl UpdateService {
                 cx,
             );
         }
+        Self::maybe_download(cx);
+    }
+
+    fn settings_changed(cx: &mut App) {
+        let enabled = config_runtime::update_config(cx).auto_download;
+        let changed = enabled != cx.global::<Self>().auto_download_enabled;
+        cx.update_global::<Self, _>(|service, _| {
+            service.auto_download_enabled = enabled;
+            if changed && enabled {
+                service.deferred_tag = None;
+            }
+        });
+        if changed && !enabled {
+            Self::cancel_download(cx);
+        }
+        Self::schedule(cx);
+        Self::maybe_download(cx);
+    }
+
+    pub(crate) fn busy(&self) -> bool {
+        self.checking || self.installing || self.download_cancel.is_some()
+    }
+
+    pub(crate) fn cancelling(&self) -> bool {
+        self.download_cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    }
+
+    fn cache_directory(&self) -> PathBuf {
+        self.path.with_extension("cache")
+    }
+
+    fn restore_download(cx: &mut App) {
+        let Some(release) = Self::available(cx) else {
+            return;
+        };
+        let directory = cx.global::<Self>().cache_directory();
+        let portable =
+            crate::app_paths::AppPaths::discover().is_ok_and(|paths| paths.is_portable());
+        let tag = release.tag_name;
+        let task = cx.background_spawn(async move {
+            let cached: download::CachedUpdate =
+                serde_json::from_slice(&fs::read(directory.join("ready.json")).ok()?).ok()?;
+            (cached.tag == tag && cached.portable == portable && cached.verify(&directory).is_ok())
+                .then_some(cached)
+        });
+        cx.spawn(async move |cx| {
+            let cached = task.await;
+            cx.update(|cx| {
+                if !cx.global::<Self>().busy()
+                    && matches!(cx.global::<Self>().download, DownloadState::Idle)
+                {
+                    if let Some(cached) = cached
+                        && Self::available(cx).is_some_and(|r| r.tag_name == cached.tag)
+                    {
+                        cx.update_global::<Self, _>(|service, _| {
+                            service.download = DownloadState::Ready(cached)
+                        });
+                        cx.refresh_windows();
+                    }
+                    Self::maybe_download(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn maybe_download(cx: &mut App) {
+        let service = cx.global::<Self>();
+        if !cfg!(target_os = "windows")
+            || !config_runtime::update_config(cx).auto_download
+            || service.busy()
+            || service.download_retry.is_some()
+        {
+            return;
+        }
+        if let Some(release) = Self::available(cx) {
+            if service.deferred_tag.as_deref() == Some(&release.tag_name) {
+                return;
+            }
+            if matches!(&service.download, DownloadState::Ready(cached) if cached.tag == release.tag_name)
+            {
+                return;
+            }
+            Self::start_download(false, cx);
+        }
+    }
+
+    pub(crate) fn cancel_download(cx: &mut App) {
+        let tag = Self::available(cx).map(|r| r.tag_name);
+        cx.update_global::<Self, _>(|service, _| {
+            if let Some(cancel) = &service.download_cancel {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            service.download_retry = None;
+            service.deferred_tag = tag;
+        });
+        cx.refresh_windows();
+    }
+
+    pub(crate) fn start_download(manual: bool, cx: &mut App) {
+        if cx.global::<Self>().busy() {
+            return;
+        }
+        let Some(release) = Self::available(cx) else {
+            return;
+        };
+        let config = config_runtime::update_config(cx);
+        let directory = cx.global::<Self>().cache_directory();
+        let portable =
+            crate::app_paths::AppPaths::discover().is_ok_and(|paths| paths.is_portable());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        cx.update_global::<Self, _>(|service, _| {
+            service.download_cancel = Some(cancelled.clone());
+            service.download_retry = None;
+            service.deferred_tag = None;
+            service.download = DownloadState::Downloading(download::DownloadProgress {
+                source: "GitHub",
+                downloaded: 0,
+                total: 0,
+            });
+        });
+        cx.refresh_windows();
+        let translator = i18n::translator(cx);
+        let mut request = NotificationRequest::text(
+            translator.translate("updates.downloading"),
+            translator.translate("updates.download_started"),
+        );
+        request.kind = if manual {
+            NotificationKind::OperationResult
+        } else {
+            NotificationKind::VersionUpdate
+        };
+        request.action = Some(NotificationAction::OpenUpdates);
+        request.action_label = Some(translator.translate("updates.view_progress"));
+        NotificationService::show(request, cx);
+        let (sender, receiver) = async_channel::unbounded();
+        let task = cx.background_spawn(async move {
+            download::download(
+                release,
+                &config,
+                &directory,
+                portable,
+                &cancelled,
+                |progress| {
+                    let _ = sender.try_send(progress);
+                },
+            )
+        });
+        cx.spawn(async move |cx| {
+            while let Ok(progress) = receiver.recv().await {
+                cx.update(|cx| {
+                    cx.update_global::<Self, _>(|service, _| {
+                        service.download = DownloadState::Downloading(progress)
+                    });
+                    cx.refresh_windows();
+                });
+            }
+            let result = task.await;
+            cx.update(|cx| Self::download_finished(result, manual, cx));
+        })
+        .detach();
+    }
+
+    fn download_finished(
+        result: Result<download::CachedUpdate, String>,
+        manual: bool,
+        cx: &mut App,
+    ) {
+        let cancelled = cx
+            .global::<Self>()
+            .download_cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed));
+        let mut ready = None;
+        let mut failure = None;
+        cx.update_global::<Self, _>(|service, _| {
+            service.download_cancel = None;
+            if cancelled {
+                service.download = DownloadState::Idle;
+                return;
+            }
+            match result {
+                Ok(cached) => {
+                    ready = Some(cached.tag.clone());
+                    service.download = DownloadState::Ready(cached);
+                }
+                Err(error) => {
+                    tracing::warn!("下载更新失败：{error}");
+                    failure = Some(error.clone());
+                    service.download = DownloadState::Failed(error);
+                }
+            }
+        });
+        let translator = i18n::translator(cx);
+        if let Some(tag) = ready {
+            let mut request = NotificationRequest::text(
+                translator.translate("updates.ready"),
+                translator.translate("updates.ready_detail"),
+            );
+            request.kind = if manual {
+                NotificationKind::OperationResult
+            } else {
+                NotificationKind::VersionUpdate
+            };
+            request.action = Some(NotificationAction::InstallUpdate(tag));
+            request.action_label = Some(translator.translate("updates.install"));
+            NotificationService::show(request, cx);
+        } else if let Some(error) = failure {
+            let mut request =
+                NotificationRequest::text(translator.translate("updates.download_failed"), error);
+            request.level = NotificationLevel::Error;
+            request.action = Some(NotificationAction::OpenUpdates);
+            request.action_label = Some(translator.translate("updates.retry"));
+            NotificationService::show(request, cx);
+            if config_runtime::update_config(cx).auto_download {
+                let task = cx.spawn(async move |cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_secs(3600))
+                        .await;
+                    cx.update(|cx| {
+                        cx.update_global::<Self, _>(|service, _| service.download_retry = None);
+                        Self::maybe_download(cx);
+                    });
+                });
+                cx.update_global::<Self, _>(|service, _| service.download_retry = Some(task));
+            }
+        }
+        cx.refresh_windows();
+        Self::schedule(cx);
+        if cancelled {
+            Self::maybe_download(cx);
+        }
+    }
+
+    pub(crate) fn install_downloaded(expected_tag: Option<&str>, cx: &mut App) {
+        let service = cx.global::<Self>();
+        if service.busy() {
+            return;
+        }
+        let DownloadState::Ready(cached) = &service.download else {
+            return;
+        };
+        if expected_tag.is_some_and(|tag| tag != cached.tag)
+            || !Self::available(cx).is_some_and(|release| release.tag_name == cached.tag)
+        {
+            return;
+        }
+        let cached = cached.clone();
+        let directory = service.cache_directory();
+        if !crate::windows::main::MainWindowService::begin_blocking_operation(
+            "updates.installing",
+            cx,
+        ) {
+            let translator = i18n::translator(cx);
+            NotificationService::show_message(
+                translator.translate("updates.install"),
+                translator.translate("updates.wait_for_operation"),
+                NotificationLevel::Warning,
+                cx,
+            );
+            return;
+        }
+        cx.update_global::<Self, _>(|service, _| {
+            service.installing = true;
+            service.download_retry = None;
+        });
+        cx.refresh_windows();
+        let task = cx.background_spawn(async move { installer::prepare(cached, directory) });
+        cx.spawn(async move |cx| {
+            let result = match task.await {
+                Ok(mut prepared) => {
+                    let started = std::time::Instant::now();
+                    loop {
+                        if let Ok(error) = fs::read_to_string(prepared.directory.join("error.txt"))
+                        {
+                            break Err(error);
+                        }
+                        match prepared.child.try_wait() {
+                            Ok(Some(status)) => break Err(format!("更新进程提前退出：{status}")),
+                            Err(error) => break Err(format!("读取更新进程状态失败：{error}")),
+                            Ok(None) => {}
+                        }
+                        if prepared.directory.join("ready").exists() {
+                            break fs::write(prepared.directory.join("proceed"), b"proceed")
+                                .map_err(|e| format!("确认安装失败：{e}"));
+                        }
+                        if started.elapsed() > Duration::from_secs(30) {
+                            let _ = prepared.child.kill();
+                            break Err("更新进程启动超时，主程序保持运行，请重试".into());
+                        }
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                    }
+                }
+                Err(error) => Err(error),
+            };
+            cx.update(|cx| match result {
+                Ok(()) => cx.quit(),
+                Err(error) => {
+                    tracing::error!("启动更新安装失败：{error}");
+                    crate::windows::main::MainWindowService::finish_blocking_operation(cx);
+                    cx.update_global::<Self, _>(|service, _| {
+                        service.installing = false;
+                        service.download = DownloadState::Failed(error.clone());
+                    });
+                    NotificationService::show_message(
+                        i18n::translator(cx).translate("updates.install_failed"),
+                        error,
+                        NotificationLevel::Error,
+                        cx,
+                    );
+                    cx.refresh_windows();
+                }
+            });
+        })
+        .detach();
     }
 
     fn persist(&self) -> Result<(), String> {

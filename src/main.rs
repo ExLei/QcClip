@@ -22,5 +22,7 @@ mod window_material;
 mod windows;
 
 fn main() {
-    app::run();
+    if !services::updates::run_installer_if_requested() {
+        app::run();
+    }
 }

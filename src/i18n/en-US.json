@@ -862,5 +862,21 @@
   "updates.status.current": "You are up to date",
   "updates.status.empty": "No releases published yet",
   "updates.status.failed": "Check failed. Try again later",
-  "updates.save_error": "Could not save update settings"
+  "updates.save_error": "Could not save update settings",
+  "updates.auto_download": "Automatically download updates",
+  "updates.auto_download_detail": "Download new versions in the background, then click to install. When off, only check for updates.",
+  "updates.download": "Download / retry",
+  "updates.downloading": "Downloading update",
+  "updates.download_started": "Downloading in the background. View progress on the About page.",
+  "updates.view_progress": "View update",
+  "updates.cancel_download": "Cancel download",
+  "updates.ready": "Update ready to install",
+  "updates.ready_detail": "Click Install to save and exit. Update progress will be shown, then the app will restart.",
+  "updates.install": "Install and restart",
+  "updates.installing": "Preparing installation…",
+  "updates.download_failed": "Update download failed",
+  "updates.retry": "Retry on About page",
+  "updates.install_failed": "Update installation failed",
+  "updates.cancelling": "Cancelling…",
+  "updates.wait_for_operation": "Wait for the current data operation to finish before installing the update."
 }
