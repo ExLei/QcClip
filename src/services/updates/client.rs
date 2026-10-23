@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{UpdateConfig, UpdateProxyMode};
 
 pub(super) const RELEASES_API: &str = "https://api.github.com/repos/mosheng1/QcClip/releases";
+const GITEE_RELEASES_API: &str = "https://gitee.com/api/v5/repos/mk-mo-sheng/QcClip/releases";
 const RELEASES_PAGE: &str = "https://github.com/mosheng1/QcClip/releases";
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -19,6 +20,15 @@ pub(crate) struct Release {
     pub draft: bool,
     #[serde(default)]
     pub prerelease: bool,
+    #[serde(default)]
+    source: ReleaseSource,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+enum ReleaseSource {
+    #[default]
+    GitHub,
+    Gitee,
 }
 
 impl Release {
@@ -36,7 +46,11 @@ impl Release {
                 tag.push_str(&format!("%{byte:02X}"));
             }
         }
-        format!("{RELEASES_PAGE}/tag/{tag}")
+        let releases_page = match &self.source {
+            ReleaseSource::GitHub => RELEASES_PAGE,
+            ReleaseSource::Gitee => "https://gitee.com/mk-mo-sheng/QcClip/releases",
+        };
+        format!("{releases_page}/tag/{tag}")
     }
 }
 
@@ -135,12 +149,32 @@ fn valid_test_api_url(value: &str) -> bool {
 }
 
 pub(super) fn fetch_latest(config: &UpdateConfig) -> Result<Option<Release>, String> {
-    fetch_releases(config, &api_url())
+    let github_api = api_url();
+    if github_api != RELEASES_API {
+        return fetch_releases(config, &github_api);
+    }
+    fetch_with_fallback(config, RELEASES_API, GITEE_RELEASES_API)
+}
+
+fn fetch_with_fallback(
+    config: &UpdateConfig,
+    primary_api: &str,
+    fallback_api: &str,
+) -> Result<Option<Release>, String> {
+    match fetch_releases(config, primary_api) {
+        Ok(latest) => Ok(latest),
+        Err(primary_error) => {
+            tracing::warn!("GitHub 更新检查失败，切换到 Gitee：{primary_error}");
+            fetch_releases(config, fallback_api).map_err(|fallback_error| {
+                format!("GitHub 和 Gitee 更新检查均失败：{primary_error}；{fallback_error}")
+            })
+        }
+    }
 }
 
 fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, String> {
     let mut builder = ureq::AgentBuilder::new().timeout(Duration::from_secs(20));
-    if api != RELEASES_API {
+    if api != RELEASES_API && api != GITEE_RELEASES_API {
         builder = builder.try_proxy_from_env(false);
     } else {
         builder = match config.proxy_mode {
@@ -178,7 +212,7 @@ fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, S
             Ok(response) => response,
             Err(ureq::Error::Status(404, _)) if page == 1 => return Ok(None),
             Err(ureq::Error::Status(status @ (403 | 429), response)) => {
-                return Err(github_access_error(status, &response));
+                return Err(access_error(service_name(api), status, &response));
             }
             Err(ureq::Error::Status(status, _)) => {
                 return Err(format!("更新服务返回错误（HTTP {status}）"));
@@ -199,7 +233,8 @@ fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, S
         }
         let releases: Vec<Release> =
             serde_json::from_slice(&bytes).map_err(|_| "更新服务返回的数据格式错误".to_owned())?;
-        for release in releases.into_iter().filter(|r| !r.draft) {
+        for mut release in releases.into_iter().filter(|r| !r.draft) {
+            release.source = source_for_api(api);
             let Some(version) = parse_version(&release.tag_name) else {
                 continue;
             };
@@ -217,7 +252,23 @@ fn fetch_releases(config: &UpdateConfig, api: &str) -> Result<Option<Release>, S
     Err("发布版本列表过长，未能完成更新检查".to_owned())
 }
 
-fn github_access_error(status: u16, response: &ureq::Response) -> String {
+fn source_for_api(api: &str) -> ReleaseSource {
+    if api == GITEE_RELEASES_API {
+        ReleaseSource::Gitee
+    } else {
+        ReleaseSource::GitHub
+    }
+}
+
+fn service_name(api: &str) -> &'static str {
+    if api == GITEE_RELEASES_API {
+        "Gitee"
+    } else {
+        "GitHub"
+    }
+}
+
+fn access_error(service: &str, status: u16, response: &ureq::Response) -> String {
     if response.header("X-RateLimit-Remaining") == Some("0") {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -233,13 +284,13 @@ fn github_access_error(status: u16, response: &ureq::Response) -> String {
             |minutes| format!("约 {minutes} 分钟后恢复"),
         );
         return format!(
-            "当前网络出口的 GitHub API 额度已用尽，{recovery}；可更换代理节点或使用直连"
+            "当前网络出口的 {service} API 额度已用尽，{recovery}；可更换代理节点或使用直连"
         );
     }
     if status == 429 {
-        "GitHub 请求受限，请稍后重试或调整代理设置".to_owned()
+        format!("{service} 请求受限，请稍后重试或调整代理设置")
     } else {
-        "GitHub 拒绝访问更新接口（HTTP 403），请检查网络或代理设置".to_owned()
+        format!("{service} 拒绝访问更新接口（HTTP 403），请检查网络或代理设置")
     }
 }
 
@@ -336,6 +387,7 @@ mod tests {
             tag_name: "v0.2.0+test/1".into(),
             draft: false,
             prerelease: true,
+            source: ReleaseSource::default(),
         };
         assert_eq!(
             release.url(),
@@ -387,6 +439,36 @@ mod tests {
         result
     }
 
+    fn fetch_with_fallback_mock(
+        primary_response: String,
+        fallback_response: String,
+    ) -> Result<Option<Release>, String> {
+        use std::net::TcpListener;
+        let primary_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fallback_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let primary_url = format!("http://{}/releases", primary_listener.local_addr().unwrap());
+        let fallback_url = format!(
+            "http://{}/releases",
+            fallback_listener.local_addr().unwrap()
+        );
+        let primary_server = std::thread::spawn(move || {
+            let (mut stream, _) = primary_listener.accept().unwrap();
+            let mut request = [0; 2048];
+            stream.read(&mut request).unwrap();
+            stream.write_all(primary_response.as_bytes()).unwrap();
+        });
+        let fallback_server = std::thread::spawn(move || {
+            let (mut stream, _) = fallback_listener.accept().unwrap();
+            let mut request = [0; 2048];
+            stream.read(&mut request).unwrap();
+            stream.write_all(fallback_response.as_bytes()).unwrap();
+        });
+        let result = fetch_with_fallback(&UpdateConfig::default(), &primary_url, &fallback_url);
+        primary_server.join().unwrap();
+        fallback_server.join().unwrap();
+        result
+    }
+
     #[test]
     fn handles_empty_and_unpublished_repositories() {
         assert!(fetch_mock(mock_response(200, "[]")).unwrap().is_none());
@@ -428,6 +510,40 @@ mod tests {
                 .unwrap_err()
                 .contains("格式错误")
         );
+    }
+
+    #[test]
+    fn falls_back_to_gitee_after_github_failure() {
+        let release = fetch_with_fallback_mock(
+            mock_response(500, "{}"),
+            mock_response(200, r#"[{"tag_name":"v1.2.0"}]"#),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(release.tag_name, "v1.2.0");
+    }
+
+    #[test]
+    fn uses_the_source_release_page_for_gitee_releases() {
+        let release = Release {
+            tag_name: "v1.2.0".into(),
+            draft: false,
+            prerelease: false,
+            source: ReleaseSource::Gitee,
+        };
+        assert_eq!(
+            release.url(),
+            "https://gitee.com/mk-mo-sheng/QcClip/releases/tag/v1.2.0"
+        );
+    }
+
+    #[test]
+    fn reports_both_sources_when_fallback_fails() {
+        let error = fetch_with_fallback_mock(mock_response(500, "{}"), mock_response(503, "{}"))
+            .unwrap_err();
+        assert!(error.contains("GitHub 和 Gitee 更新检查均失败"));
+        assert!(error.contains("HTTP 500"));
+        assert!(error.contains("HTTP 503"));
     }
 
     #[test]
