@@ -628,7 +628,11 @@ fn compatible_future_database_preserves_its_formats_without_rewriting() {
     let id = fixture.store(&rich("hello", "<b>hello</b>"));
     let connection = fixture.database.connect().expect("无法连接数据库");
     connection
-        .pragma_update(None, "user_version", 2)
+        .pragma_update(
+            None,
+            "user_version",
+            crate::services::database::CURRENT_SCHEMA_VERSION + 1,
+        )
         .expect("无法模拟新版数据库");
     drop(connection);
     assert_ne!(fixture.store(&rich("hello", "<i>hello</i>")), id);

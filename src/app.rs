@@ -202,6 +202,7 @@ pub fn run() {
                 cx,
             );
             crate::windows::settings::SettingsWindowService::install(cx);
+            crate::services::sync::SyncService::install(_database.clone(), _raw_blob_store.clone(), cx);
             crate::windows::notification::NotificationService::install(
                 history_repository.clone(),
                 crate::services::image_preview::ImagePreviewService::new(_raw_blob_store.clone()),

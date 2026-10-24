@@ -393,6 +393,7 @@ impl SettingsWindowView {
             SettingsPage::Shortcuts => self.render_shortcuts(cx),
             SettingsPage::Personalization => self.render_personalization(cx),
             SettingsPage::DataManagement => self.render_data_management(cx),
+            SettingsPage::Sync => self.render_sync(cx),
             SettingsPage::About => self.render_about(cx),
         };
 

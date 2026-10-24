@@ -34,6 +34,48 @@ mod transient;
 
 pub type ClipboardEventReceiver = Receiver<Result<CapturedClipboard, String>>;
 
+pub(crate) fn assess_remote_format(format: &mut crate::domain::capture::RawFormat) {
+    use crate::domain::capture::{FormatKind, RestoreState};
+    format.native_format_id = None;
+    format.restore_state = RestoreState::NotRestorable;
+    #[cfg(target_os = "windows")]
+    {
+        if crate::domain::capture::is_custom_text_format(
+            &format.format_namespace,
+            &format.format_key,
+        ) {
+            format.format_kind = FormatKind::Text;
+            format.native_format_id = Some(13);
+            format.restore_state = RestoreState::Restorable;
+            return;
+        }
+        let registered = format.format_key.strip_prefix("registered:");
+        if format.format_namespace != "windows"
+            || registered.is_some_and(|name| name != format.format_name || name.contains('\0'))
+            || format.format_key.starts_with("native:")
+        {
+            return;
+        }
+        let payload = ClipboardPayload {
+            format_kind: format.format_kind.as_str().into(),
+            format_namespace: format.format_namespace.clone(),
+            format_key: format.format_key.clone(),
+            format_name: format.format_name.clone(),
+            native_format_id: None,
+            bytes: Vec::new(),
+        };
+        if let Ok(id) = windows_clipboard::clipboard_format_id(&payload) {
+            format.format_kind = windows_clipboard::classify_format(id, &format.format_name);
+            if !matches!(id, 2 | 3 | 9 | 14 | 0x80 | 0x82 | 0x83 | 0x8e) {
+                format.native_format_id = Some(id);
+                format.restore_state = RestoreState::Restorable;
+            }
+        } else {
+            format.format_kind = FormatKind::Unknown;
+        }
+    }
+}
+
 const SELF_WRITE_SUPPRESSION_TTL: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -469,7 +511,7 @@ mod windows_clipboard {
         Ok(())
     }
 
-    fn clipboard_format_id(payload: &ClipboardPayload) -> Result<u32, String> {
+    pub(super) fn clipboard_format_id(payload: &ClipboardPayload) -> Result<u32, String> {
         match payload.format_key.as_str() {
             "CF_TEXT" => Ok(1),
             "CF_OEMTEXT" => Ok(7),
@@ -828,7 +870,7 @@ mod windows_clipboard {
         )
     }
 
-    fn classify_format(format_id: u32, name: &str) -> FormatKind {
+    pub(super) fn classify_format(format_id: u32, name: &str) -> FormatKind {
         let lower_name = name.to_ascii_lowercase();
         match format_id {
             1 | 7 | 13 => FormatKind::Text,

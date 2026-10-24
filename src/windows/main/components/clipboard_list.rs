@@ -2863,7 +2863,7 @@ fn render_row(
             let last_search_engine_template = crate::state_runtime::state(cx)
                 .main_window
                 .last_search_engine_template;
-            let (context_menu, format_actions) = if active_tab == TabId::Favorites {
+            let (mut context_menu, format_actions) = if active_tab == TabId::Favorites {
                 favorite_item_context_menu(
                     &menu_item,
                     &menu_tags,
@@ -2884,6 +2884,11 @@ fn render_row(
                     &links,
                 )
             };
+            {
+                let mut items = context_menu.items().to_vec();
+                items.push(crate::services::sync::ui::menu(cx));
+                context_menu = MenuModel::new(items);
+            }
             let browser_links = Rc::new(links);
             if active_tab == TabId::Favorites {
                 let format_actions = format_actions.clone();
@@ -2894,6 +2899,9 @@ fn render_row(
                     context_menu.clone(),
                     position,
                     move |action, cx| {
+                        if crate::services::sync::ui::perform(action.as_str(), item_id, true, cx) {
+                            return;
+                        }
                         if let Some(index) = action
                             .as_str()
                             .strip_prefix(OPEN_LINK_ACTION_PREFIX)
@@ -2976,6 +2984,9 @@ fn render_row(
                     context_menu.clone(),
                     position,
                     move |action, cx| {
+                        if crate::services::sync::ui::perform(action.as_str(), item_id, false, cx) {
+                            return;
+                        }
                         if let Some(index) = action
                             .as_str()
                             .strip_prefix(OPEN_LINK_ACTION_PREFIX)

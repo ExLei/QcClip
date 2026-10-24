@@ -124,7 +124,11 @@ fn capture_storage_latency() {
             database
                 .connect_write()
                 .expect("无法连接性能测试库")
-                .pragma_update(None, "user_version", if merge { 1 } else { 2 })
+                .pragma_update(
+                    None,
+                    "user_version",
+                    crate::services::database::CURRENT_SCHEMA_VERSION + i32::from(!merge),
+                )
                 .expect("无法设置参考路径");
             let name = format!("{size}-{merge}");
             let mut record = |scenario: &str, stats: Value| {

@@ -104,7 +104,13 @@ impl FavoriteRepository {
                 timestamp
             ],
         )?;
+        if inserted > 0 {
+            crate::services::sync::activity::record_local(&transaction, item_id, true)?;
+        }
         transaction.commit()?;
+        if inserted > 0 {
+            crate::services::sync::favorited(&self.database, item_id);
+        }
         Ok(inserted > 0)
     }
 

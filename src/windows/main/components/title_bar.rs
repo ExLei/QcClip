@@ -229,6 +229,10 @@ pub fn render(
         );
     }
 
+    if let Some(buttons) = super::sync_buttons::render(main, cx) {
+        actions = actions.child(buttons);
+    }
+
     let more_button = div()
         .id("titlebar-more-button")
         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())

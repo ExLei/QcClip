@@ -14,6 +14,9 @@ impl MainWindow {
         data_root: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
+        self.sync_refresh_task = None;
+        self.sync_changes.clear();
+        crate::services::sync::SyncService::replace_data(database.clone(), blob_store.clone(), cx);
         self.history_repository = HistoryRepository::new(database.clone(), blob_store.clone());
         self.favorite_repository =
             FavoriteRepository::with_blob_store(database.clone(), blob_store.clone());

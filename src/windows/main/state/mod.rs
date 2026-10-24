@@ -4,6 +4,7 @@ mod heatmap;
 mod history;
 mod list;
 mod selection;
+mod sync;
 mod tab_bar;
 mod tags_search;
 
@@ -226,6 +227,8 @@ pub struct MainWindow {
     pub(super) tag_reorder_animation_generation: u64,
     pub(crate) sidebar_collapsed: bool,
     pub(crate) titlebar_window_fixed: bool,
+    pub(crate) dav_upload_busy: bool,
+    pub(crate) dav_pull_busy: bool,
     pub(crate) window_drag_start: Option<Point<Pixels>>,
     pub(crate) search_query: String,
     pub(crate) search_expanded: bool,
@@ -269,6 +272,8 @@ pub struct MainWindow {
     pub(super) list_item_load_animation_generation: u64,
     /// 当前列表查询任务；刷新查询时丢弃旧任务，避免过期查询堆积占用后台线程。
     pub(super) list_query_task: Option<Task<()>>,
+    pub(super) sync_refresh_task: Option<Task<()>>,
+    pub(super) sync_changes: HashMap<i64, crate::services::sync::ReceivedChange>,
     pub(crate) list_order_ids: Vec<HistoryItemId>,
     pub(crate) list_order_positions: HashMap<HistoryItemId, usize>,
     pub total_item_count: usize,
@@ -449,6 +454,8 @@ impl MainWindow {
             tag_reorder_animation_generation: 0,
             sidebar_collapsed: false,
             titlebar_window_fixed: false,
+            dav_upload_busy: false,
+            dav_pull_busy: false,
             window_drag_start: None,
             search_query: String::new(),
             search_expanded: false,
@@ -491,6 +498,8 @@ impl MainWindow {
             list_item_load_animations: HashMap::new(),
             list_item_load_animation_generation: 0,
             list_query_task: None,
+            sync_refresh_task: None,
+            sync_changes: HashMap::new(),
             list_order_ids: Vec::new(),
             list_order_positions: HashMap::new(),
             total_item_count: 0,

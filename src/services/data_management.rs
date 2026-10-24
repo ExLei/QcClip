@@ -869,6 +869,7 @@ pub(crate) fn reload_runtime_after_import(
 }
 
 pub(crate) fn refresh_after_import(reload: crate::config_runtime::ConfigReload, cx: &mut App) {
+    super::sync::SyncService::invalidate(cx);
     crate::windows::menu::MenuService::close_all(cx);
     crate::config_runtime::ConfigRuntime::apply_imported_config(reload, cx);
     crate::windows::preview::PreviewWindowService::destroy(cx);

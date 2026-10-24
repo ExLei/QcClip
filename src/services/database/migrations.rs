@@ -78,6 +78,15 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<(), DatabaseError> 
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
         ensure_capture_indexes(&transaction)?;
         transaction
+            .execute_batch(include_str!("sync.sql"))
+            .map_err(|source| DatabaseError::Migration { version: 2, source })?;
+        transaction
+            .execute(
+                "UPDATE database_compatibility SET minimum_write_version = 2",
+                [],
+            )
+            .map_err(|source| DatabaseError::Migration { version: 2, source })?;
+        transaction
             .pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
         validate_schema(&transaction)?;
@@ -85,6 +94,34 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<(), DatabaseError> 
         transaction
             .commit()
             .map_err(|source| DatabaseError::Migration { version: 1, source })?;
+    }
+    if version == 1 {
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|source| DatabaseError::Migration { version: 2, source })?;
+        let history_start = INITIAL_SCHEMA
+            .find("CREATE TABLE clipboard_history (")
+            .expect("缺少历史表定义");
+        let history_end = INITIAL_SCHEMA[history_start..]
+            .find("CREATE TABLE favorites (")
+            .expect("缺少收藏表定义")
+            + history_start;
+        let history_schema = &INITIAL_SCHEMA[history_start..history_end];
+        let table_end = history_schema.find(";").expect("历史表定义无效") + 1;
+        let create =
+            history_schema[..table_end].replacen("clipboard_history", "clipboard_history_v2", 1);
+        let sql = format!(
+            "{create}\nINSERT INTO clipboard_history_v2 SELECT * FROM clipboard_history;\nDROP TABLE clipboard_history;\nALTER TABLE clipboard_history_v2 RENAME TO clipboard_history;\n{}\n{}\nUPDATE database_compatibility SET minimum_write_version = 2; PRAGMA user_version = 2;",
+            &history_schema[table_end..],
+            include_str!("sync.sql")
+        );
+        transaction
+            .execute_batch(&sql)
+            .map_err(|source| DatabaseError::Migration { version: 2, source })?;
+        validate_write_schema(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|source| DatabaseError::Migration { version: 2, source })?;
     }
     // 高版本只核验兼容性，不回写版本号，也不执行旧程序的初始化语句。
     validate_schema(connection)
@@ -400,7 +437,7 @@ mod tests {
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
                 .expect("无法读取数据库版本"),
-            1
+            CURRENT_SCHEMA_VERSION
         );
         drop(connection);
         Database::open(path).expect("索引应支持重复初始化");

@@ -11,6 +11,7 @@ pub mod symbol_list;
 pub mod symbol_picker;
 pub mod symbol_search;
 pub mod symbol_sidebar;
+mod sync_buttons;
 pub mod tab_bar;
 pub mod tag_manager;
 pub mod tags_panel;

@@ -26,6 +26,8 @@
 
 搜索输入、滚动位置、加载任务和图像缓存等临时状态由窗口维护，不属于配置文件。
 
+跨设备同步设置由独立的 [services/sync/config.rs](../src/services/sync/config.rs) 管理，不写入 `config.json` 或 `state.json`。Windows 上的设备身份、配对、发送序号、连接及设备策略和 WebDAV 凭据统一通过 DPAPI 保护，保存于 `%LOCALAPPDATA%/QcClipDevice/sync.bin`，不使用 Windows 凭据管理器，不随内容导入或数据目录迁移覆盖。清理日志 `sync-cache-*.json` 仅保存待回收对象的随机标识。配置语义见[同步使用说明](sync-guide.md)。
+
 标签面板中的“切换页面时清空选择”保存为 `config.json` 的 `clipboard.clearTagsOnTabSwitch`，默认关闭；开启后切换到历史或收藏页面时清空标签选择。
 
 ## 配置分组
@@ -46,7 +48,7 @@
 
 默认值由各配置类型的 `Default` 提供，加载与更新时按相应模型规则规范化。设置页不维护另一套默认值。
 
-`clipboard.captureFormats` 包含 `all` 开关和原生格式名称数组 `names`。默认只读取常规格式；名单支持增删和恢复默认，空名单表示不捕获新内容。全量模式保留名单，关闭后继续使用。保存成功后更新后台快照，下一次捕获生效，读取系统剪贴板时不持有配置锁。具体格式和延迟渲染边界见 [剪贴板格式读取配置](clipboard-capture.md)。
+`clipboard.captureFormats` 包含 `all` 开关和原生格式名称数组 `names`。默认只读取常规格式；名单支持增删和恢复默认，空名单表示不捕获新内容。全量模式保留名单，关闭后继续使用。保存成功后更新后台快照，下一次捕获生效，读取系统剪贴板时不持有配置锁。读取与延迟渲染处理见 [Windows 剪贴板实现](../src/platform/clipboard.rs)。
 
 `clipboard.previewTypes` 保存悬停预览允许显示的类型，支持 `text`、`html`、`image` 和 `file`，默认全部启用。关闭某一类型只影响悬停预览候选，不会删除已保存的剪贴板格式，也不影响列表显示、搜索或粘贴。
 
