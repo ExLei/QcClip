@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: 检出标签对应代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -76,7 +76,7 @@ jobs:
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: 初始化打包工具的 x64 编译环境
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: x64
 
@@ -91,7 +91,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw '安装 cargo-packager 失败' }
 
       - name: 初始化目标架构的 MSVC 编译环境
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: ${{ matrix.msvc-arch }}
 
@@ -134,7 +134,7 @@ jobs:
           }
 
       - name: 保存当前架构发布产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.arch }}
           path: |
@@ -153,7 +153,7 @@ jobs:
       contents: write
     steps:
       - name: 下载全部架构产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: windows-*
           merge-multiple: true
