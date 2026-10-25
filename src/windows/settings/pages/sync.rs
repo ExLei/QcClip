@@ -643,6 +643,33 @@ impl SettingsWindowView {
                     })
                     .child(self.render_sync_identity(cx))
                     .child(actions)
+                    .child(
+                        card(cx).child(setting_row(
+                            theme,
+                            t.translate("sync.copy_on_receive"),
+                            Some(t.translate("sync.copy_on_receive_help").into()),
+                            Switch::new("sync-copy-on-receive")
+                                .checked(config.copy_on_receive)
+                                .on_click({
+                                    let view = view.clone();
+                                    move |checked, _, cx| {
+                                        feedback(
+                                            view.clone(),
+                                            SyncService::get(cx).and_then(|runtime| {
+                                                runtime.change(
+                                                    |config| {
+                                                        config.copy_on_receive = *checked;
+                                                        Ok(())
+                                                    },
+                                                    false,
+                                                )
+                                            }),
+                                            cx,
+                                        );
+                                    }
+                                }),
+                        )),
+                    )
                     .child(self.render_sync_devices(config, &snapshot, cx))
                     .child(
                         div()

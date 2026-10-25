@@ -22,7 +22,10 @@ use super::{
     repository::{self, Packet},
     webdav,
 };
-use crate::services::{database::Database, storage::RawBlobStore};
+use crate::{
+    platform::clipboard::ClipboardWriteSuppressor,
+    services::{database::Database, paste::PasteService, storage::RawBlobStore},
+};
 use gpui::{App, Global};
 use uuid::Uuid;
 
@@ -101,6 +104,9 @@ struct TestQueues {
     incoming: [async_channel::Receiver<DavJob>; 2],
 }
 
+type ClipboardWriter =
+    Box<dyn Fn(&Database, &RawBlobStore, i64) -> std::result::Result<(), String> + Send + Sync>;
+
 pub struct Runtime {
     #[cfg(test)]
     test_queues: Option<TestQueues>,
@@ -125,6 +131,7 @@ pub struct Runtime {
     invitation: Mutex<Option<(Invitation, super::config::DavConfig)>>,
     notices: Mutex<VecDeque<OperationNotice>>,
     received_changes: Mutex<HashMap<i64, super::ReceivedChange>>,
+    clipboard_writer: Mutex<ClipboardWriter>,
     pub(super) local_pairing: Mutex<local_pairing::State>,
     dav_transport: Mutex<Option<webdav::Client>>,
     dav_cache: Mutex<dav_cache::Cache>,
@@ -134,9 +141,14 @@ pub struct Runtime {
 }
 
 impl SyncService {
-    pub fn install(database: Database, blobs: RawBlobStore, cx: &mut App) {
+    pub fn install(
+        database: Database,
+        blobs: RawBlobStore,
+        suppressor: ClipboardWriteSuppressor,
+        cx: &mut App,
+    ) {
         let (changed, receiver) = async_channel::bounded(1);
-        let runtime = Runtime::start(database, blobs, changed);
+        let runtime = Runtime::start(database, blobs, changed, suppressor);
         let (runtime, error) = match runtime {
             Ok(runtime) => (Some(runtime), String::new()),
             Err(error) => {
@@ -284,6 +296,7 @@ impl Runtime {
             invitation: Mutex::new(None),
             notices: Mutex::new(VecDeque::new()),
             received_changes: Mutex::new(HashMap::new()),
+            clipboard_writer: Mutex::new(Box::new(|_, _, _| Ok(()))),
             local_pairing: Mutex::new(Default::default()),
             dav_transport: Mutex::new(None),
             dav_cache: Mutex::new(Default::default()),
@@ -496,6 +509,7 @@ impl Runtime {
         database: Database,
         blobs: RawBlobStore,
         changed: async_channel::Sender<()>,
+        suppressor: ClipboardWriteSuppressor,
     ) -> Result<Arc<Self>> {
         let store = ConfigStore::discover()?;
         let config = store.load()?;
@@ -527,6 +541,15 @@ impl Runtime {
             invitation: Mutex::new(None),
             notices: Mutex::new(VecDeque::new()),
             received_changes: Mutex::new(HashMap::new()),
+            clipboard_writer: Mutex::new(Box::new(move |database, blobs, item_id| {
+                PasteService::with_clipboard_write_suppressor(
+                    database.clone(),
+                    blobs.clone(),
+                    suppressor.clone(),
+                )
+                .copy_item(item_id)
+                .map_err(|error| error.to_string())
+            })),
             local_pairing: Mutex::new(Default::default()),
             dav_transport: Mutex::new(None),
             dav_cache: Mutex::new(Default::default()),
@@ -1614,17 +1637,10 @@ impl Runtime {
                     .into_iter()
                     .map(|(id, chunks)| (id, chunks.into_iter().flatten().flatten().collect()))
                     .collect();
-                let data = self.data.read().unwrap_or_else(|e| e.into_inner());
-                let outcome = repository::apply_with_feedback(
-                    &data.0,
-                    &data.1,
-                    &item.event,
-                    &resources,
-                    &peer.profile.name,
-                )?;
-                self.received_feedback(&outcome);
-                drop(data);
-                Ok((None, outcome.applied))
+                Ok((
+                    None,
+                    self.apply_received(config, peer, &item.event, &resources)?,
+                ))
             }
             Request::Hello { .. } => unreachable!(),
         }
@@ -1777,19 +1793,44 @@ impl Runtime {
             .event
             .validate_cache(&job.peer.profile.id, &config.profile.id)?;
         validate_limits(&job.entry.event, &job.peer.policy)?;
+        self.apply_received(&config, &job.peer, &job.entry.event, &resources)?;
+        self.result(&job.peer.profile.id, "已从 WebDAV 缓存接收".into());
+        Ok(())
+    }
+    fn apply_received(
+        &self,
+        config: &Config,
+        peer: &Peer,
+        event: &Event,
+        resources: &HashMap<String, Vec<u8>>,
+    ) -> Result<bool> {
+        // 串行提交和写回，避免并发接收时旧内容晚于新内容写入剪贴板。
+        let writer = self
+            .clipboard_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let data = self.data.read().unwrap_or_else(|e| e.into_inner());
         let outcome = repository::apply_with_feedback(
             &data.0,
             &data.1,
-            &job.entry.event,
-            &resources,
-            &job.peer.profile.name,
+            event,
+            resources,
+            &peer.profile.name,
         )?;
+        if config.copy_on_receive
+            && let Some(item_id) = outcome.clipboard_item
+            && let Err(error) = writer(&data.0, &data.1, item_id)
+        {
+            self.queue_notice(
+                format!("内容已接收，但未能写入系统剪贴板，可在 QcClip 中手动复制：{error}"),
+                true,
+                false,
+            );
+        }
         self.received_feedback(&outcome);
-        drop(data);
-        self.result(&job.peer.profile.id, "已从 WebDAV 缓存接收".into());
-        Ok(())
+        Ok(outcome.applied)
     }
+
     fn received_feedback(&self, outcome: &repository::ApplyOutcome) {
         if let Some(change) = outcome.change {
             self.received_changes
@@ -1905,6 +1946,115 @@ fn success(channel: &str, packet: &Packet) -> String {
 mod update_tests {
     use super::*;
     use crate::services::sync::tests::{Fixture, paired, runtime};
+
+    #[test]
+    fn clipboard_receiving_defaults_on_and_can_be_disabled_without_losing_identity() {
+        let config = Config::fresh();
+        assert!(config.copy_on_receive);
+        let mut json = serde_json::to_value(&config).unwrap();
+        json.as_object_mut().unwrap().remove("copy_on_receive");
+        let loaded: Config = serde_json::from_value(json).unwrap();
+        assert!(loaded.copy_on_receive);
+        assert_eq!(loaded.profile, config.profile);
+        let mut disabled = config;
+        disabled.copy_on_receive = false;
+        let loaded: Config =
+            serde_json::from_slice(&serde_json::to_vec(&disabled).unwrap()).unwrap();
+        assert!(!loaded.copy_on_receive);
+    }
+
+    #[test]
+    fn clipboard_receiving_respects_toggle_duplicates_touches_and_late_events() {
+        let source = Fixture::new();
+        let target = Fixture::new();
+        let (mut config, _) = paired();
+        let peer = config.peers[0].clone();
+        let mut receiver = runtime(&target, config.clone());
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let written = writes.clone();
+        receiver.clipboard_writer = Mutex::new(Box::new(move |_, _, item| {
+            written.lock().unwrap().push(item);
+            Ok(())
+        }));
+        let item = source.capture("接收后可以直接粘贴");
+        let mut packet = source.packet(item, Mode::ManualFavorite, 3);
+        packet.event.sender = peer.profile.id.clone();
+        assert!(
+            receiver
+                .apply_received(&config, &peer, &packet.event, &packet.resources)
+                .unwrap()
+        );
+        assert_eq!(target.count("clipboard_history"), 0);
+        assert_eq!(writes.lock().unwrap().len(), 1);
+        assert!(
+            !receiver
+                .apply_received(&config, &peer, &packet.event, &packet.resources)
+                .unwrap()
+        );
+        assert_eq!(writes.lock().unwrap().len(), 1);
+        let mut late = source.packet(item, Mode::ManualContent, 2);
+        late.event.sender = peer.profile.id.clone();
+        assert!(
+            receiver
+                .apply_received(&config, &peer, &late.event, &late.resources)
+                .unwrap()
+        );
+        assert_eq!(writes.lock().unwrap().len(), 1);
+
+        let mut touch = source.packet(item, Mode::Touch, 4);
+        touch.event.sender = peer.profile.id.clone();
+        assert!(
+            receiver
+                .apply_received(&config, &peer, &touch.event, &touch.resources)
+                .unwrap()
+        );
+        assert_eq!(writes.lock().unwrap().len(), 2);
+        config.copy_on_receive = false;
+        let mut next = source.packet(source.capture("只入库"), Mode::NewContent, 5);
+        next.event.sender = peer.profile.id.clone();
+        assert!(
+            receiver
+                .apply_received(&config, &peer, &next.event, &next.resources)
+                .unwrap()
+        );
+        assert_eq!(target.count("clipboard_items"), 2);
+        assert_eq!(writes.lock().unwrap().len(), 2);
+        assert!(
+            super::super::activity::latest(&target.db)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn clipboard_failure_keeps_received_content_and_reports_without_retrying_receipt() {
+        let source = Fixture::new();
+        let target = Fixture::new();
+        let (config, _) = paired();
+        let peer = &config.peers[0];
+        let mut receiver = runtime(&target, config.clone());
+        receiver.clipboard_writer =
+            Mutex::new(Box::new(|_, _, _| Err("剪贴板被其他程序占用".into())));
+        let packet = source.packet(source.capture("写入失败仍保留内容"), Mode::NewContent, 1);
+        assert!(
+            receiver
+                .apply_received(&config, peer, &packet.event, &packet.resources)
+                .unwrap()
+        );
+        assert_eq!(target.count("clipboard_items"), 1);
+        assert_eq!(receiver.take_received_changes().len(), 1);
+        let notices = receiver.notices.lock().unwrap();
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].failed);
+        assert!(notices[0].message.contains("已接收"));
+        drop(notices);
+        assert!(
+            !receiver
+                .apply_received(&config, peer, &packet.event, &packet.resources)
+                .unwrap()
+        );
+        assert_eq!(receiver.notices.lock().unwrap().len(), 1);
+    }
 
     #[test]
     fn status_wakeups_do_not_discard_or_duplicate_pending_row_changes() {

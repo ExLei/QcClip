@@ -136,6 +136,8 @@ impl Default for DavConfig {
 pub struct Config {
     pub enabled: bool,
     pub lan_enabled: bool,
+    #[serde(default = "default_copy_on_receive")]
+    pub copy_on_receive: bool,
     pub profile: Profile,
     pub secret: [u8; 32],
     pub sequence: u64,
@@ -154,6 +156,7 @@ impl Config {
         Self {
             enabled: false,
             lan_enabled: true,
+            copy_on_receive: true,
             profile: Profile {
                 id,
                 name: clean_name(&name),
@@ -217,6 +220,10 @@ impl Config {
     pub fn dav_allowed(&self, peer: &Peer) -> bool {
         self.enabled && self.dav.enabled && peer.policy.enabled && peer.policy.webdav
     }
+}
+
+fn default_copy_on_receive() -> bool {
+    true
 }
 
 pub fn validate_dav_url(address: &str) -> Result<url::Url> {

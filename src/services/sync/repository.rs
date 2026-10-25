@@ -386,6 +386,7 @@ pub struct ApplyOutcome {
     pub applied: bool,
     pub note_conflict: bool,
     pub change: Option<ReceivedChange>,
+    pub clipboard_item: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -675,6 +676,7 @@ pub fn apply_with_feedback(
         applied: item_id.is_some(),
         note_conflict,
         change,
+        clipboard_item: item_id.filter(|_| event.sequence >= newest_content as u64),
     })
 }
 
