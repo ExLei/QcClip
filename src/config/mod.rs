@@ -1512,6 +1512,10 @@ pub struct AppearanceConfig {
     pub list_item_height: ListItemHeight,
     pub adaptive_max_lines: u8,
     pub only_show_notes: bool,
+    /// 是否为置顶条目绘制状态边框线。
+    pub pinned_item_border: bool,
+    /// 是否为已粘贴过的条目绘制状态边框线。
+    pub pasted_item_border: bool,
     pub item_display: ItemDisplayConfig,
     pub preview_information: PreviewInformationConfig,
 }
@@ -1538,6 +1542,8 @@ impl Default for AppearanceConfig {
             list_item_height: ListItemHeight::default(),
             adaptive_max_lines: ADAPTIVE_MAX_LINES_DEFAULT,
             only_show_notes: false,
+            pinned_item_border: true,
+            pasted_item_border: true,
             item_display: ItemDisplayConfig::default(),
             preview_information: PreviewInformationConfig::default(),
         }

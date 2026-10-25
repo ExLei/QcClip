@@ -2161,10 +2161,11 @@ fn render_item_border(
 fn item_border_color(
     is_pinned: bool,
     paste_count: u64,
+    (pinned_border, pasted_border): (bool, bool),
     theme: ThemeColor,
     horizontal: bool,
 ) -> Option<gpui::Background> {
-    match (is_pinned, paste_count > 0) {
+    match (is_pinned && pinned_border, paste_count > 0 && pasted_border) {
         (true, true) => Some(linear_gradient(
             if horizontal { 90.0 } else { 0.0 },
             linear_color_stop(theme.yellow, 0.49),
@@ -2234,6 +2235,7 @@ fn render_drag_preview(
             item_border_color(
                 item.is_pinned,
                 item.paste_count,
+                crate::config_runtime::item_status_borders(cx),
                 theme,
                 drag.metrics.horizontal,
             ),
@@ -3076,6 +3078,7 @@ fn render_row(
             item_border_color(
                 item.is_pinned,
                 item.paste_count,
+                crate::config_runtime::item_status_borders(cx),
                 cx.theme().colors,
                 metrics.horizontal,
             ),

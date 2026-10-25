@@ -452,6 +452,20 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
             default.only_show_notes,
             warnings,
         ),
+        pinned_item_border: read_field(
+            object,
+            "pinnedItemBorder",
+            "appearance.pinnedItemBorder",
+            default.pinned_item_border,
+            warnings,
+        ),
+        pasted_item_border: read_field(
+            object,
+            "pastedItemBorder",
+            "appearance.pastedItemBorder",
+            default.pasted_item_border,
+            warnings,
+        ),
         preview_information: read_field(
             object,
             "previewInformation",
@@ -1041,6 +1055,26 @@ mod tests {
         let invalid = super::from_str(r#"{"appearance":{"galleryGifAutoplay":"invalid"}}"#)
             .expect("无法读取无效配置");
         assert!(!invalid.config.appearance.gallery_gif_autoplay);
+        assert_eq!(invalid.warnings.len(), 1);
+    }
+
+    #[test]
+    fn item_status_borders_round_trip_and_default_to_enabled() {
+        let old = super::from_str("{}").expect("无法读取已有配置");
+        assert!(old.config.appearance.pinned_item_border);
+        assert!(old.config.appearance.pasted_item_border);
+        let mut config = old.config;
+        config.appearance.pinned_item_border = false;
+        config.appearance.pasted_item_border = false;
+        let encoded = serde_json::to_string(&config).expect("无法保存状态边框配置");
+        let decoded = super::from_str(&encoded)
+            .expect("无法读取状态边框配置")
+            .config;
+        assert!(!decoded.appearance.pinned_item_border);
+        assert!(!decoded.appearance.pasted_item_border);
+        let invalid = super::from_str(r#"{"appearance":{"pinnedItemBorder":"invalid"}}"#)
+            .expect("无法读取无效配置");
+        assert!(invalid.config.appearance.pinned_item_border);
         assert_eq!(invalid.warnings.len(), 1);
     }
 

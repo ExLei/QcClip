@@ -159,6 +159,59 @@ pub(super) fn open_item_display_sheet(
                 content = content.child(compact_setting_row(theme, label, switch));
             }
         }
+        content = content.child(
+            h_flex()
+                .w_full()
+                .min_h(ui_rem(52.0))
+                .flex_shrink_0()
+                .items_center()
+                .px_4()
+                .py_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(translator.translate("settings.item_display.status_border")),
+                ),
+        );
+        for (key, label_key, checked) in [
+            (
+                "pinned",
+                "settings.item_display.pinned_border",
+                appearance.pinned_item_border,
+            ),
+            (
+                "pasted",
+                "settings.item_display.pasted_border",
+                appearance.pasted_item_border,
+            ),
+        ] {
+            let label = translator.translate(label_key);
+            let switch = Switch::new(format!("item-display-status-border-{key}"))
+                .checked(checked)
+                .accessibility_label(label.clone())
+                .on_click({
+                    let view = view.clone();
+                    let save_error = save_error.clone();
+                    move |checked, _, cx| {
+                        let checked = *checked;
+                        persist_appearance_change(
+                            view.clone(),
+                            "条目状态边框",
+                            move |appearance| match key {
+                                "pinned" => appearance.pinned_item_border = checked,
+                                _ => appearance.pasted_item_border = checked,
+                            },
+                            save_error.clone(),
+                            cx,
+                        )
+                    }
+                });
+            content = content.child(compact_setting_row(theme, label, switch));
+        }
         sheet
             .title(translator.translate("settings.item_display.title"))
             .size(ui_rem(420.0))

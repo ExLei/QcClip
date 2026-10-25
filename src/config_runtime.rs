@@ -246,6 +246,14 @@ pub(crate) fn appearance_config(cx: &App) -> AppearanceConfig {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.appearance.clone())
 }
 
+/// 返回置顶与已粘贴状态边框线的启用状态，避免逐行克隆整份外观配置。
+pub(crate) fn item_status_borders(cx: &App) -> (bool, bool) {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| {
+        let appearance = &runtime.config.appearance;
+        (appearance.pinned_item_border, appearance.pasted_item_border)
+    })
+}
+
 pub(crate) fn gallery_gif_autoplay(cx: &App) -> bool {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.appearance.gallery_gif_autoplay)
 }
