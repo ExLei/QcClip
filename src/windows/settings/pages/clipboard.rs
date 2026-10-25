@@ -13,9 +13,8 @@ use super::super::{
 use crate::ui::{hover_icon, icon};
 use crate::{
     config::{
-        ClipboardConfig, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
-        ClipboardMouseMiddleBehavior, ClipboardPreviewPriority, ClipboardPreviewType,
-        ClipboardWindowPosition, SearchEngine,
+        ClipboardConfig, ClipboardDisplayPriority, ClipboardMouseBehavior,
+        ClipboardPreviewPriority, ClipboardPreviewType, ClipboardWindowPosition, SearchEngine,
     },
     config_runtime, i18n,
     windows::menu::{DropdownItem, DropdownItemId},
@@ -95,12 +94,12 @@ impl SettingsWindowView {
             })
             .collect::<Vec<_>>();
         let save_error = translator.translate("settings.clipboard.save_error");
-        let mouse_left_behavior_items = ClipboardMouseLeftBehavior::ALL
+        let mouse_left_behavior_items = ClipboardMouseBehavior::ALL
             .into_iter()
             .map(|behavior| {
                 DropdownItem::option(
                     DropdownItemId::new(behavior.code()),
-                    translator.translate(clipboard_mouse_left_behavior_label_key(behavior)),
+                    translator.translate(clipboard_mouse_behavior_label_key(behavior)),
                 )
                 .selected(behavior == clipboard.mouse_left_behavior)
             })
@@ -113,7 +112,7 @@ impl SettingsWindowView {
                 let view = view.clone();
                 let save_error = save_error.clone();
                 move |action_id, cx| {
-                    let Some(behavior) = ClipboardMouseLeftBehavior::ALL
+                    let Some(behavior) = ClipboardMouseBehavior::ALL
                         .into_iter()
                         .find(|behavior| behavior.code() == action_id.as_str())
                     else {
@@ -129,12 +128,12 @@ impl SettingsWindowView {
             },
             cx,
         );
-        let mouse_middle_behavior_items = ClipboardMouseMiddleBehavior::ALL
+        let mouse_middle_behavior_items = ClipboardMouseBehavior::ALL
             .into_iter()
             .map(|behavior| {
                 DropdownItem::option(
                     DropdownItemId::new(behavior.code()),
-                    translator.translate(clipboard_mouse_middle_behavior_label_key(behavior)),
+                    translator.translate(clipboard_mouse_behavior_label_key(behavior)),
                 )
                 .selected(behavior == clipboard.mouse_middle_behavior)
             })
@@ -147,7 +146,7 @@ impl SettingsWindowView {
                 let view = view.clone();
                 let save_error = save_error.clone();
                 move |action_id, cx| {
-                    let Some(behavior) = ClipboardMouseMiddleBehavior::ALL
+                    let Some(behavior) = ClipboardMouseBehavior::ALL
                         .into_iter()
                         .find(|behavior| behavior.code() == action_id.as_str())
                     else {
@@ -1213,46 +1212,35 @@ const fn clipboard_preview_priority_label_key(priority: ClipboardPreviewPriority
     }
 }
 
-const fn clipboard_mouse_left_behavior_label_key(
-    behavior: ClipboardMouseLeftBehavior,
-) -> &'static str {
+const fn clipboard_mouse_behavior_label_key(behavior: ClipboardMouseBehavior) -> &'static str {
     match behavior {
-        ClipboardMouseLeftBehavior::SinglePaste => {
-            "settings.clipboard.mouse_left_behavior.single_paste"
+        ClipboardMouseBehavior::SinglePaste => "settings.clipboard.mouse_behavior.single_paste",
+        ClipboardMouseBehavior::SinglePlainTextPaste => {
+            "settings.clipboard.mouse_behavior.single_plain_text_paste"
         }
-        ClipboardMouseLeftBehavior::SinglePlainTextPaste => {
-            "settings.clipboard.mouse_left_behavior.single_plain_text_paste"
+        ClipboardMouseBehavior::SingleCopy => "settings.clipboard.mouse_behavior.single_copy",
+        ClipboardMouseBehavior::SingleSelectItem => {
+            "settings.clipboard.mouse_behavior.single_select_item"
         }
-        ClipboardMouseLeftBehavior::SingleCopy => {
-            "settings.clipboard.mouse_left_behavior.single_copy"
+        ClipboardMouseBehavior::SinglePinItem => {
+            "settings.clipboard.mouse_behavior.single_pin_item"
         }
-        ClipboardMouseLeftBehavior::DoublePaste => {
-            "settings.clipboard.mouse_left_behavior.double_paste"
+        ClipboardMouseBehavior::SingleFavoriteItem => {
+            "settings.clipboard.mouse_behavior.single_favorite_item"
         }
-        ClipboardMouseLeftBehavior::DoublePlainTextPaste => {
-            "settings.clipboard.mouse_left_behavior.double_plain_text_paste"
+        ClipboardMouseBehavior::DoublePaste => "settings.clipboard.mouse_behavior.double_paste",
+        ClipboardMouseBehavior::DoublePlainTextPaste => {
+            "settings.clipboard.mouse_behavior.double_plain_text_paste"
         }
-        ClipboardMouseLeftBehavior::DoubleCopy => {
-            "settings.clipboard.mouse_left_behavior.double_copy"
+        ClipboardMouseBehavior::DoubleCopy => "settings.clipboard.mouse_behavior.double_copy",
+        ClipboardMouseBehavior::DoubleSelectItem => {
+            "settings.clipboard.mouse_behavior.double_select_item"
         }
-    }
-}
-
-const fn clipboard_mouse_middle_behavior_label_key(
-    behavior: ClipboardMouseMiddleBehavior,
-) -> &'static str {
-    match behavior {
-        ClipboardMouseMiddleBehavior::PlainTextPaste => {
-            "settings.clipboard.mouse_middle_behavior.plain_text_paste"
+        ClipboardMouseBehavior::DoublePinItem => {
+            "settings.clipboard.mouse_behavior.double_pin_item"
         }
-        ClipboardMouseMiddleBehavior::SelectItem => {
-            "settings.clipboard.mouse_middle_behavior.select_item"
-        }
-        ClipboardMouseMiddleBehavior::PinItem => {
-            "settings.clipboard.mouse_middle_behavior.pin_item"
-        }
-        ClipboardMouseMiddleBehavior::FavoriteItem => {
-            "settings.clipboard.mouse_middle_behavior.favorite_item"
+        ClipboardMouseBehavior::DoubleFavoriteItem => {
+            "settings.clipboard.mouse_behavior.double_favorite_item"
         }
     }
 }

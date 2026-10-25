@@ -534,26 +534,54 @@ impl ClipboardWindowPosition {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// 鼠标点击剪贴板条目时执行的行为，左键与中键共用同一组选项。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ClipboardMouseLeftBehavior {
-    #[default]
+pub enum ClipboardMouseBehavior {
     SinglePaste,
+    // 旧版中键行为没有单击/双击前缀，按单击读取。
+    #[serde(alias = "plain-text-paste")]
     SinglePlainTextPaste,
     SingleCopy,
+    #[serde(alias = "select-item")]
+    SingleSelectItem,
+    #[serde(alias = "pin-item")]
+    SinglePinItem,
+    #[serde(alias = "favorite-item")]
+    SingleFavoriteItem,
     DoublePaste,
     DoublePlainTextPaste,
     DoubleCopy,
+    DoubleSelectItem,
+    DoublePinItem,
+    DoubleFavoriteItem,
 }
 
-impl ClipboardMouseLeftBehavior {
-    pub const ALL: [Self; 6] = [
+/// 点击行为去掉单击/双击后的具体操作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardMouseAction {
+    Paste,
+    PlainTextPaste,
+    Copy,
+    SelectItem,
+    PinItem,
+    FavoriteItem,
+}
+
+impl ClipboardMouseBehavior {
+    pub const ALL: [Self; 12] = [
         Self::SinglePaste,
         Self::SinglePlainTextPaste,
         Self::SingleCopy,
+        Self::SingleSelectItem,
+        Self::SinglePinItem,
+        Self::SingleFavoriteItem,
         Self::DoublePaste,
         Self::DoublePlainTextPaste,
         Self::DoubleCopy,
+        Self::DoubleSelectItem,
+        Self::DoublePinItem,
+        Self::DoubleFavoriteItem,
     ];
 
     pub const fn code(self) -> &'static str {
@@ -561,28 +589,51 @@ impl ClipboardMouseLeftBehavior {
             Self::SinglePaste => "single-paste",
             Self::SinglePlainTextPaste => "single-plain-text-paste",
             Self::SingleCopy => "single-copy",
+            Self::SingleSelectItem => "single-select-item",
+            Self::SinglePinItem => "single-pin-item",
+            Self::SingleFavoriteItem => "single-favorite-item",
             Self::DoublePaste => "double-paste",
             Self::DoublePlainTextPaste => "double-plain-text-paste",
             Self::DoubleCopy => "double-copy",
+            Self::DoubleSelectItem => "double-select-item",
+            Self::DoublePinItem => "double-pin-item",
+            Self::DoubleFavoriteItem => "double-favorite-item",
         }
+    }
+
+    pub const fn is_double_click(self) -> bool {
+        matches!(
+            self,
+            Self::DoublePaste
+                | Self::DoublePlainTextPaste
+                | Self::DoubleCopy
+                | Self::DoubleSelectItem
+                | Self::DoublePinItem
+                | Self::DoubleFavoriteItem
+        )
     }
 
     pub const fn matches_click_count(self, click_count: usize) -> bool {
-        match self {
-            Self::SinglePaste | Self::SinglePlainTextPaste | Self::SingleCopy => click_count == 1,
-            Self::DoublePaste | Self::DoublePlainTextPaste | Self::DoubleCopy => click_count == 2,
+        if self.is_double_click() {
+            click_count == 2
+        } else {
+            click_count == 1
         }
     }
 
-    pub const fn is_copy(self) -> bool {
-        matches!(self, Self::SingleCopy | Self::DoubleCopy)
-    }
-
-    pub const fn is_plain_text_paste(self) -> bool {
-        matches!(
-            self,
-            Self::SinglePlainTextPaste | Self::DoublePlainTextPaste
-        )
+    pub const fn action(self) -> ClipboardMouseAction {
+        match self {
+            Self::SinglePaste | Self::DoublePaste => ClipboardMouseAction::Paste,
+            Self::SinglePlainTextPaste | Self::DoublePlainTextPaste => {
+                ClipboardMouseAction::PlainTextPaste
+            }
+            Self::SingleCopy | Self::DoubleCopy => ClipboardMouseAction::Copy,
+            Self::SingleSelectItem | Self::DoubleSelectItem => ClipboardMouseAction::SelectItem,
+            Self::SinglePinItem | Self::DoublePinItem => ClipboardMouseAction::PinItem,
+            Self::SingleFavoriteItem | Self::DoubleFavoriteItem => {
+                ClipboardMouseAction::FavoriteItem
+            }
+        }
     }
 }
 
@@ -669,34 +720,6 @@ impl ClipboardPreviewPriority {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ClipboardMouseMiddleBehavior {
-    #[default]
-    PlainTextPaste,
-    SelectItem,
-    PinItem,
-    FavoriteItem,
-}
-
-impl ClipboardMouseMiddleBehavior {
-    pub const ALL: [Self; 4] = [
-        Self::PlainTextPaste,
-        Self::SelectItem,
-        Self::PinItem,
-        Self::FavoriteItem,
-    ];
-
-    pub const fn code(self) -> &'static str {
-        match self {
-            Self::PlainTextPaste => "plain-text-paste",
-            Self::SelectItem => "select-item",
-            Self::PinItem => "pin-item",
-            Self::FavoriteItem => "favorite-item",
-        }
-    }
-}
-
 /// 用户自定义搜索引擎：name 为显示名，url_template 中的 {query} 会被替换为搜索词。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -751,8 +774,8 @@ fn default_search_engines() -> Vec<SearchEngine> {
 #[serde(default)]
 pub struct ClipboardConfig {
     pub capture_formats: ClipboardFormatConfig,
-    pub mouse_left_behavior: ClipboardMouseLeftBehavior,
-    pub mouse_middle_behavior: ClipboardMouseMiddleBehavior,
+    pub mouse_left_behavior: ClipboardMouseBehavior,
+    pub mouse_middle_behavior: ClipboardMouseBehavior,
     pub display_priority: ClipboardDisplayPriority,
     pub preview_priority: ClipboardPreviewPriority,
     pub preview_types: Vec<ClipboardPreviewType>,
@@ -1008,8 +1031,8 @@ impl Default for ClipboardConfig {
     fn default() -> Self {
         Self {
             capture_formats: ClipboardFormatConfig::default(),
-            mouse_left_behavior: ClipboardMouseLeftBehavior::default(),
-            mouse_middle_behavior: ClipboardMouseMiddleBehavior::default(),
+            mouse_left_behavior: ClipboardMouseBehavior::SinglePaste,
+            mouse_middle_behavior: ClipboardMouseBehavior::SinglePlainTextPaste,
             display_priority: ClipboardDisplayPriority::default(),
             preview_priority: ClipboardPreviewPriority::default(),
             preview_types: ClipboardPreviewType::ALL.to_vec(),
@@ -1823,7 +1846,7 @@ impl AppearanceConfig {
 mod tests {
     use super::{
         ADAPTIVE_MAX_LINES_DEFAULT, ADAPTIVE_MAX_LINES_MAX, AppConfig, AppearanceConfig,
-        AppearanceMode, CardItemGap, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
+        AppearanceMode, CardItemGap, ClipboardDisplayPriority, ClipboardMouseBehavior,
         ClipboardWindowPosition, InterfaceLanguage, ListItemHeight, ListItemStyle,
         QuickPasteConfig, SoundPreset, TitlebarPosition, WINDOW_MATERIAL_OPACITY_DEFAULT,
         WINDOW_MATERIAL_OPACITY_MAX, WindowMaterial,
@@ -1877,7 +1900,11 @@ mod tests {
         );
         assert_eq!(
             config.clipboard.mouse_left_behavior,
-            ClipboardMouseLeftBehavior::SinglePaste
+            ClipboardMouseBehavior::SinglePaste
+        );
+        assert_eq!(
+            config.clipboard.mouse_middle_behavior,
+            ClipboardMouseBehavior::SinglePlainTextPaste
         );
         assert_eq!(
             config.clipboard.window_position,
@@ -1913,6 +1940,10 @@ mod tests {
         assert_eq!(value["clipboard"]["previewTypes"][0], "text");
         assert_eq!(value["clipboard"]["previewTypes"][3], "file");
         assert_eq!(value["clipboard"]["mouseLeftBehavior"], "single-paste");
+        assert_eq!(
+            value["clipboard"]["mouseMiddleBehavior"],
+            "single-plain-text-paste"
+        );
         assert_eq!(value["clipboard"]["pageHoverDelayMs"], 40);
         assert_eq!(value["clipboard"]["filterHoverDelayMs"], 40);
         assert_eq!(value["clipboard"]["edgeHide"], false);
@@ -1939,26 +1970,35 @@ mod tests {
     }
 
     #[test]
-    fn mouse_left_behavior_matches_only_configured_click_count() {
-        use ClipboardMouseLeftBehavior::*;
+    fn mouse_behavior_matches_only_configured_click_count() {
+        use super::ClipboardMouseAction as Action;
+        use ClipboardMouseBehavior::*;
 
         let cases = [
-            (SinglePaste, 1, false, false),
-            (SinglePlainTextPaste, 1, false, true),
-            (SingleCopy, 1, true, false),
-            (DoublePaste, 2, false, false),
-            (DoublePlainTextPaste, 2, false, true),
-            (DoubleCopy, 2, true, false),
+            (SinglePaste, 1, Action::Paste),
+            (SinglePlainTextPaste, 1, Action::PlainTextPaste),
+            (SingleCopy, 1, Action::Copy),
+            (SingleSelectItem, 1, Action::SelectItem),
+            (SinglePinItem, 1, Action::PinItem),
+            (SingleFavoriteItem, 1, Action::FavoriteItem),
+            (DoublePaste, 2, Action::Paste),
+            (DoublePlainTextPaste, 2, Action::PlainTextPaste),
+            (DoubleCopy, 2, Action::Copy),
+            (DoubleSelectItem, 2, Action::SelectItem),
+            (DoublePinItem, 2, Action::PinItem),
+            (DoubleFavoriteItem, 2, Action::FavoriteItem),
         ];
-        assert_eq!(ClipboardMouseLeftBehavior::ALL, cases.map(|case| case.0));
-        for (behavior, click_count, is_copy, is_plain_text_paste) in cases {
+        assert_eq!(ClipboardMouseBehavior::ALL, cases.map(|case| case.0));
+        for (behavior, click_count, action) in cases {
             for count in 0..=3 {
                 assert_eq!(behavior.matches_click_count(count), count == click_count);
             }
-            assert_eq!(behavior.is_copy(), is_copy);
-            assert_eq!(behavior.is_plain_text_paste(), is_plain_text_paste);
-            let saved = serde_json::to_value(behavior).expect("左键行为应当可以保存");
+            assert_eq!(behavior.action(), action);
+            let saved = serde_json::to_value(behavior).expect("鼠标行为应当可以保存");
             assert_eq!(saved, behavior.code());
+            let loaded: ClipboardMouseBehavior =
+                serde_json::from_value(saved).expect("鼠标行为应当可以读取");
+            assert_eq!(loaded, behavior);
         }
     }
 

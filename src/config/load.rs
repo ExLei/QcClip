@@ -1101,7 +1101,7 @@ mod tests {
 
     use super::{ConfigLoadError, from_str};
     use crate::config::{
-        AppearanceMode, CardItemGap, ClipboardDisplayPriority, ClipboardMouseLeftBehavior,
+        AppearanceMode, CardItemGap, ClipboardDisplayPriority, ClipboardMouseBehavior,
         ClipboardWindowPosition, InterfaceLanguage, ListItemHeight, ListItemStyle, ShortcutBinding,
         SoundPreset, TitlebarPosition, WindowMaterial,
     };
@@ -1420,8 +1420,49 @@ mod tests {
 
         assert_eq!(
             loaded.config.clipboard.mouse_left_behavior,
-            ClipboardMouseLeftBehavior::DoubleCopy
+            ClipboardMouseBehavior::DoubleCopy
         );
+    }
+
+    #[test]
+    fn clipboard_mouse_middle_behavior_legacy_codes_load_as_single_click() {
+        let cases = [
+            (
+                "plain-text-paste",
+                ClipboardMouseBehavior::SinglePlainTextPaste,
+            ),
+            ("select-item", ClipboardMouseBehavior::SingleSelectItem),
+            ("pin-item", ClipboardMouseBehavior::SinglePinItem),
+            ("favorite-item", ClipboardMouseBehavior::SingleFavoriteItem),
+        ];
+        for (code, expected) in cases {
+            let json = serde_json::json!({
+                "clipboard": { "mouseMiddleBehavior": code }
+            });
+            let loaded = from_str(&json.to_string()).expect("旧版中键行为应当可以加载");
+
+            assert!(loaded.warnings.is_empty(), "旧版中键行为不应产生警告");
+            assert_eq!(loaded.config.clipboard.mouse_middle_behavior, expected);
+            let saved = serde_json::to_value(&loaded.config).expect("中键行为应当可以保存");
+            assert_eq!(saved["clipboard"]["mouseMiddleBehavior"], expected.code());
+        }
+    }
+
+    #[test]
+    fn clipboard_mouse_buttons_share_all_behavior_options() {
+        for behavior in ClipboardMouseBehavior::ALL {
+            let json = serde_json::json!({
+                "clipboard": {
+                    "mouseLeftBehavior": behavior.code(),
+                    "mouseMiddleBehavior": behavior.code(),
+                }
+            });
+            let loaded = from_str(&json.to_string()).expect("鼠标行为应当可以加载");
+
+            assert!(loaded.warnings.is_empty(), "鼠标行为不应产生警告");
+            assert_eq!(loaded.config.clipboard.mouse_left_behavior, behavior);
+            assert_eq!(loaded.config.clipboard.mouse_middle_behavior, behavior);
+        }
     }
 
     #[test]

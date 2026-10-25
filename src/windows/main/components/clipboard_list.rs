@@ -35,8 +35,8 @@ use crate::platform::drag_preview::DragPreviewService;
 use crate::{
     config::{
         ADAPTIVE_MAX_LINES_MAX, ADAPTIVE_MAX_LINES_MIN, CardItemGap, ClipboardDisplayPriority,
-        ClipboardMouseMiddleBehavior, ItemDisplayField, ItemRegionVisibility, ListItemHeight,
-        ListItemStyle, SearchEngine,
+        ClipboardMouseAction, ClipboardMouseBehavior, ItemDisplayField, ItemRegionVisibility,
+        ListItemHeight, ListItemStyle, SearchEngine,
     },
     config_runtime,
     domain::{
@@ -2398,6 +2398,66 @@ fn with_row_hover(
     })
 }
 
+/// 鼠标点击行时执行操作所需的条目信息，左键与中键共用。
+#[derive(Clone)]
+struct RowMouseTarget {
+    main_window: gpui::Entity<MainWindow>,
+    row_id: HistoryItemId,
+    item_id: ClipboardItemId,
+    favorite_id: Option<i64>,
+    is_pinned: bool,
+}
+
+fn run_row_mouse_behavior(
+    this: &mut MainWindow,
+    behavior: ClipboardMouseBehavior,
+    click_count: usize,
+    target: &RowMouseTarget,
+    window: &mut Window,
+    cx: &mut Context<MainWindow>,
+) {
+    if !behavior.matches_click_count(click_count) {
+        return;
+    }
+    let action = behavior.action();
+    // 切换选中状态本身就是修改选中集合，不能先单选当前项。
+    if action != ClipboardMouseAction::SelectItem {
+        this.select_item(target.row_id);
+    }
+    match action {
+        ClipboardMouseAction::Paste => this.paste_item(target.item_id, cx),
+        ClipboardMouseAction::PlainTextPaste => {
+            this.paste_selected_item_as_plain_text(cx);
+        }
+        ClipboardMouseAction::Copy => this.copy_item(target.item_id, cx),
+        ClipboardMouseAction::SelectItem => {
+            this.select_list_item_with_modifiers(target.row_id, Default::default());
+        }
+        ClipboardMouseAction::PinItem => {
+            this.set_item_pinned(target.row_id, target.favorite_id, !target.is_pinned, cx);
+        }
+        ClipboardMouseAction::FavoriteItem => {
+            if let Some(favorite_id) = target.favorite_id {
+                let main_window = target.main_window.clone();
+                let owner_window = window.window_handle();
+                let row_id = target.row_id;
+                cx.defer(move |cx| {
+                    confirm_remove_from_favorites(
+                        main_window,
+                        owner_window,
+                        favorite_id,
+                        row_id,
+                        cx,
+                    );
+                });
+            } else {
+                this.add_to_favorites(target.item_id, cx);
+            }
+        }
+    }
+    cx.notify();
+}
+
 fn render_row(
     item: ClipboardListItem,
     can_reorder: bool,
@@ -2511,16 +2571,6 @@ fn render_row(
 
     let item_id = item.item_id;
     let favorite_id = item.favorite_id;
-    let plain_text_format = item
-        .all_format_options
-        .iter()
-        .filter(|preview| {
-            preview.role() == FormatRole::PlainText
-                && preview.is_restorable
-                && !is_empty_textual_preview(preview)
-        })
-        .min_by_key(|preview| preview.format_order)
-        .map(|preview| (preview.format_namespace.clone(), preview.format_key.clone()));
     let item_tag_ids = Rc::new(RefCell::new(item.tag_ids.clone()));
     // 右键菜单在 on_mouse_down 中现场构建：此时才能取到完整纯文本来解析链接。
     let menu_item = item.clone();
@@ -2727,7 +2777,14 @@ fn render_row(
             }));
     }
     let menu_window = main_window.clone();
-    let middle_click_window = main_window.clone();
+    let middle_click_target = RowMouseTarget {
+        main_window: main_window.clone(),
+        row_id,
+        item_id,
+        favorite_id,
+        is_pinned: target_is_pinned,
+    };
+    let left_click_target = middle_click_target.clone();
     let row = row
         .on_scroll_wheel(cx.listener(move |_, event, window, cx| {
             PreviewWindowService::handle_wheel(preview_source, event, window, cx);
@@ -2737,50 +2794,17 @@ fn render_row(
                 return;
             }
             cx.stop_propagation();
-            match config_runtime::clipboard_config(cx).mouse_middle_behavior {
-                ClipboardMouseMiddleBehavior::PlainTextPaste => {
-                    if let Some((format_namespace, format_key)) = plain_text_format.as_ref() {
-                        this.paste_item_format(
-                            item_id,
-                            format_namespace.clone(),
-                            format_key.clone(),
-                            cx,
-                        );
-                    } else {
-                        this.paste_item(item_id, cx);
-                    }
-                }
-                ClipboardMouseMiddleBehavior::SelectItem => {
-                    this.select_list_item_with_modifiers(row_id, Default::default());
-                    cx.notify();
-                }
-                ClipboardMouseMiddleBehavior::PinItem => {
-                    this.select_item(row_id);
-                    this.set_item_pinned(row_id, favorite_id, !target_is_pinned, cx);
-                    cx.notify();
-                }
-                ClipboardMouseMiddleBehavior::FavoriteItem => {
-                    this.select_item(row_id);
-                    if let Some(favorite_id) = favorite_id {
-                        let main_window = middle_click_window.clone();
-                        let owner_window = window.window_handle();
-                        cx.defer(move |cx| {
-                            confirm_remove_from_favorites(
-                                main_window,
-                                owner_window,
-                                favorite_id,
-                                row_id,
-                                cx,
-                            );
-                        });
-                    } else {
-                        this.add_to_favorites(item_id, cx);
-                    }
-                    cx.notify();
-                }
-            }
+            let behavior = config_runtime::clipboard_config(cx).mouse_middle_behavior;
+            run_row_mouse_behavior(
+                this,
+                behavior,
+                event.click_count(),
+                &middle_click_target,
+                window,
+                cx,
+            );
         }))
-        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
             let behavior = config_runtime::clipboard_config(cx).mouse_left_behavior;
             if !event.standard_click() {
                 return;
@@ -2791,17 +2815,14 @@ fn render_row(
                 cx.notify();
                 return;
             }
-            if !behavior.matches_click_count(event.click_count()) {
-                return;
-            }
-            this.select_item(row_id);
-            if behavior.is_copy() {
-                this.copy_item(item_id, cx);
-            } else if behavior.is_plain_text_paste() {
-                this.paste_selected_item_as_plain_text(cx);
-            } else {
-                this.paste_item(item_id, cx);
-            }
+            run_row_mouse_behavior(
+                this,
+                behavior,
+                event.click_count(),
+                &left_click_target,
+                window,
+                cx,
+            );
         }))
         .on_mouse_down(MouseButton::Right, move |event, window, cx| {
             window.prevent_default();
