@@ -252,6 +252,11 @@ struct DirectXRenderPipelines {
     blur_params_buffer: ID3D11Buffer,
     blur_blend_replace: ID3D11BlendState,
     blur_blend_composite: ID3D11BlendState,
+    // Backdrop composite replaces the backdrop instead of drawing over it: an erase pass
+    // (dst *= 1 - coverage, driven by an opaque 1x1 texture) followed by an additive pass.
+    backdrop_blend_erase: ID3D11BlendState,
+    backdrop_blend_add: ID3D11BlendState,
+    opaque_texture_srv: Option<ID3D11ShaderResourceView>,
 }
 
 /// The generated `surfaces` pipeline: one draw per surface, per-draw uniforms.
@@ -1417,6 +1422,37 @@ impl DirectXRenderer {
                 &self.pipelines.blur_composite_fragment,
             )
         };
+        if clip_rounded {
+            // Backdrop filters replace the backdrop: dst = blurred * k + dst * (1 - k), with
+            // k = coverage * opacity. Drawing the blurred copy *over* the sharp backdrop only
+            // looks right when the backdrop is opaque; on translucent (system material)
+            // windows the sharp content would leak through and stack with the blurred copy.
+            self.dx_blur_pass(
+                composite_vertex,
+                composite_fragment,
+                &self.pipelines.backdrop_blend_erase,
+                target_rtv,
+                &self.pipelines.opaque_texture_srv,
+                composite_uniforms,
+                &full_vp,
+                D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+                4,
+                false,
+            )?;
+            self.dx_blur_pass(
+                composite_vertex,
+                composite_fragment,
+                &self.pipelines.backdrop_blend_add,
+                target_rtv,
+                &ping_srv,
+                composite_uniforms,
+                &full_vp,
+                D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+                4,
+                false,
+            )?;
+            return Ok(());
+        }
         // Composite the blurred result into the target (preserving its contents).
         self.dx_blur_pass(
             composite_vertex,
@@ -1693,6 +1729,14 @@ impl DirectXRenderPipelines {
         // Premultiplied (One / InvSrcAlpha) — the composite outputs a premultiplied blurred sample;
         // straight-alpha blending would darken the faded edges.
         let blur_blend_composite = create_blend_state_for_path_sprite(device)?;
+        let backdrop_blend_erase = create_blend_state_with_factors(
+            device,
+            D3D11_BLEND_ZERO,
+            D3D11_BLEND_INV_SRC_ALPHA,
+        )?;
+        let backdrop_blend_add =
+            create_blend_state_with_factors(device, D3D11_BLEND_ONE, D3D11_BLEND_ONE)?;
+        let opaque_texture_srv = create_opaque_texture_srv(device)?;
 
         let surface = ShaderModule::Surface.bytecode()?;
         let surfaces = SurfacePipeline {
@@ -1723,6 +1767,9 @@ impl DirectXRenderPipelines {
             blur_params_buffer,
             blur_blend_replace,
             blur_blend_composite,
+            backdrop_blend_erase,
+            backdrop_blend_add,
+            opaque_texture_srv,
         })
     }
 }
@@ -2300,7 +2347,10 @@ fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    // Porter-Duff "over" alpha. Additive alpha (One) saturates overlapping translucent layers
+    // toward opaque while color stays premultiplied, which greys them out on transparent
+    // (system material) windows. Opaque windows are unaffected.
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
     unsafe {
         let mut state = None;
@@ -2361,7 +2411,7 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
     unsafe {
         let mut state = None;
@@ -2383,6 +2433,62 @@ fn create_constant_buffer(device: &ID3D11Device, byte_size: usize) -> Result<ID3
     let mut buffer = None;
     unsafe { device.CreateBuffer(&desc, None, Some(&mut buffer)) }?;
     Ok(buffer.unwrap())
+}
+
+/// A blend state using the same source/destination factors for color and alpha.
+#[inline]
+fn create_blend_state_with_factors(
+    device: &ID3D11Device,
+    src: D3D11_BLEND,
+    dest: D3D11_BLEND,
+) -> Result<ID3D11BlendState> {
+    let mut desc = D3D11_BLEND_DESC::default();
+    desc.RenderTarget[0].BlendEnable = true.into();
+    desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    desc.RenderTarget[0].SrcBlend = src;
+    desc.RenderTarget[0].SrcBlendAlpha = src;
+    desc.RenderTarget[0].DestBlend = dest;
+    desc.RenderTarget[0].DestBlendAlpha = dest;
+    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
+    unsafe {
+        let mut state = None;
+        device.CreateBlendState(&desc, Some(&mut state))?;
+        Ok(state.unwrap())
+    }
+}
+
+/// A 1x1 opaque white texture; sampling it anywhere yields alpha 1, so the blur composite
+/// shader outputs exactly its coverage factor.
+fn create_opaque_texture_srv(device: &ID3D11Device) -> Result<Option<ID3D11ShaderResourceView>> {
+    let pixel = [0xFFu8; 4];
+    let desc = D3D11_TEXTURE2D_DESC {
+        Width: 1,
+        Height: 1,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_IMMUTABLE,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+    let data = D3D11_SUBRESOURCE_DATA {
+        pSysMem: pixel.as_ptr().cast(),
+        SysMemPitch: 4,
+        SysMemSlicePitch: 0,
+    };
+    unsafe {
+        let mut texture = None;
+        device.CreateTexture2D(&desc, Some(&data), Some(&mut texture))?;
+        let mut view = None;
+        device.CreateShaderResourceView(&texture.unwrap(), None, Some(&mut view))?;
+        Ok(view)
+    }
 }
 
 /// A blend state that overwrites the target (no blending) — used for the blur downsample and

@@ -448,6 +448,20 @@ fn material_window_color(base: Hsla, window_opacity: f32) -> Hsla {
     with_alpha(base, base.alpha * opacity)
 }
 
+/// 浮于列表之上的毛玻璃表面：开启材质时与窗口色调一致并跟随材质不透明度，
+/// 关闭材质时使用调用方给出的颜色。
+pub(crate) fn overlay_surface_color(cx: &App, fallback: Hsla) -> Hsla {
+    let appearance = crate::config_runtime::appearance_config(cx);
+    if supported_material(appearance.window_material) == WindowMaterial::Disabled {
+        return fallback;
+    }
+    material_tint_color(
+        excluded_window_theme(cx).background,
+        cx.theme().background,
+        appearance.window_material_opacity,
+    )
+}
+
 pub(crate) fn material_tint_color(
     base_background: Hsla,
     theme_background: Hsla,

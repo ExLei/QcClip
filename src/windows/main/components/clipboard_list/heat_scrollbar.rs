@@ -240,6 +240,7 @@ pub(super) fn render(
     let motion = Duration::from_millis(180).with_easing(gpui::ease_in_out);
     let mut rail_background = theme.background;
     rail_background.alpha = 0.5;
+    let rail_background = crate::window_material::overlay_surface_color(cx, rail_background);
     let thumb_color = gpui::rgb_to_hsla(gpui::rgb(if dark { 0xafc9b5 } else { 0x4f6658 }));
 
     let rail = div()
@@ -656,6 +657,7 @@ pub(super) fn render(
         );
         let mut background = theme.popover;
         background.alpha = 0.5;
+        let background = crate::window_material::overlay_surface_color(cx, background);
         let foreground = theme.popover_foreground;
         let secondary = gpui::ColorExt::opacity(&foreground, 0.7);
         // 纯展示元素不注册命中区域，鼠标可穿透到下方列表。

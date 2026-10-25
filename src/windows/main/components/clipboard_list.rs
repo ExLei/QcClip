@@ -1742,7 +1742,7 @@ fn render_item_surface<T>(
     } else if !metrics.horizontal {
         let mut background = theme.popover;
         background.alpha = 0.5;
-        background
+        crate::window_material::overlay_surface_color(cx, background)
     } else {
         theme.popover
     };
