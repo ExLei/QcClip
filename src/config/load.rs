@@ -819,6 +819,20 @@ fn read_shortcuts(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Sh
             default.toggle_clipboard_monitor.clone(),
             warnings,
         ),
+        upload_latest: read_field(
+            object,
+            "uploadLatest",
+            "shortcuts.uploadLatest",
+            default.upload_latest.clone(),
+            warnings,
+        ),
+        pull_latest: read_field(
+            object,
+            "pullLatest",
+            "shortcuts.pullLatest",
+            default.pull_latest.clone(),
+            warnings,
+        ),
         plain_text_paste: read_field(
             object,
             "plainTextPaste",

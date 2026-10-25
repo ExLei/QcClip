@@ -385,6 +385,27 @@ impl MainWindowService {
         main_view.update(cx, |_, cx| cx.notify());
     }
 
+    pub(crate) fn upload_latest_shortcut(cx: &mut App) {
+        Self::run_sync_shortcut(components::sync_buttons::Action::Upload, cx);
+    }
+
+    pub(crate) fn pull_latest_shortcut(cx: &mut App) {
+        Self::run_sync_shortcut(components::sync_buttons::Action::Pull, cx);
+    }
+
+    fn run_sync_shortcut(action: components::sync_buttons::Action, cx: &mut App) {
+        let main_view = cx
+            .try_global::<Self>()
+            .and_then(|service| service.main_view.clone());
+        let Some(main_view) = main_view else {
+            tracing::error!("主窗口尚未就绪，无法执行同步快捷键");
+            return;
+        };
+        main_view.update(cx, |view, cx| {
+            components::sync_buttons::run_shortcut(view, action, cx)
+        });
+    }
+
     pub(crate) fn clipboard_listener_active(cx: &App) -> bool {
         cx.try_global::<Self>()
             .and_then(|service| service.main_view.clone())

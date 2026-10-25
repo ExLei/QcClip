@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-enum Action {
+pub(crate) enum Action {
     Upload,
     Pull,
 }
@@ -121,6 +121,35 @@ pub(super) fn render(main: &MainWindow, cx: &mut Context<MainWindow>) -> Option<
         buttons = buttons.child(button);
     }
     Some(buttons)
+}
+
+/// 全局快捷键入口，与标题栏按钮行为一致；同步未就绪时给出提示。
+pub(crate) fn run_shortcut(main: &mut MainWindow, action: Action, cx: &mut Context<MainWindow>) {
+    let config = match SyncService::get(cx) {
+        Ok(runtime) => runtime.config(),
+        Err(error) => {
+            show_result(action, Err(error), cx);
+            return;
+        }
+    };
+    let t = i18n::translator(cx);
+    let blocked = if !config.enabled {
+        Some(t.translate("sync.enable_first"))
+    } else if !config.dav.enabled {
+        Some(t.translate("sync.dav_off"))
+    } else {
+        None
+    };
+    if let Some(message) = blocked {
+        NotificationService::show_message(
+            t.translate(action.label()),
+            message,
+            NotificationLevel::Info,
+            cx,
+        );
+        return;
+    }
+    run(main, action, cx);
 }
 
 fn run(main: &mut MainWindow, action: Action, cx: &mut Context<MainWindow>) {
