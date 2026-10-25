@@ -321,6 +321,9 @@ impl Runtime {
         *cached = Some(client.clone());
         Ok(client)
     }
+    pub(crate) fn package_client(&self) -> Result<webdav::Client> {
+        Ok(self.dav_client(&self.config().dav)?.for_packages())
+    }
     #[cfg(test)]
     pub(super) fn test_relay_agent(&self, agent: ureq::Agent) {
         *self.test_agent.lock().unwrap() = Some(agent);

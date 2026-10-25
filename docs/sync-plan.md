@@ -106,3 +106,5 @@ LAN 会话只保存在内存，启动或配置变更时重新生成；设备身�
 身份与凭据见 `services/sync/config.rs`，在线协议见 `protocol.rs`、`lan.rs`，配对见 `local_pairing.rs`、`pairing.rs`；WebDAV 传输与缓存分别见 `webdav.rs`、`dav_cache.rs`，任务编排见 `runtime.rs`，入库与去重见 `repository.rs`。本机最近操作由 `activity.rs` 和数据库写事务记录，列表局部更新见 `windows/main/state/sync.rs`。
 
 稳定的回归入口与实机验收范围见[使用说明的开发验证部分](sync-guide.md#开发验证)。保留协议、请求量、发布恢复及实际故障回归，不将人工界面预览或外部测试服务器的临时脚本作为自动回归。
+
+完整转移或恢复所选数据使用独立的数据包流程，入口位于“数据管理 → 数据转移与备份”。WebDAV 数据包与有界同步缓存分开存放，不要求配对或自动同步，使用独立可选密码。详见[数据转移与备份](data-packages.md)。

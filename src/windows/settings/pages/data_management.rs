@@ -240,14 +240,51 @@ impl SettingsWindowView {
             .small()
             .disabled(self.data_busy)
             .label(translator.translate("settings.data_management.export"))
-            .on_click(move |_, _, cx| start_export(export_view.clone(), cx));
+            .on_click(move |_, window, cx| {
+                super::data_packages::open(
+                    export_view.clone(),
+                    super::data_packages::PanelMode::Export,
+                    window,
+                    cx,
+                )
+            });
         let import_view = view.clone();
         let import_button = Button::new("settings-data-import")
             .secondary()
             .small()
             .disabled(self.data_busy)
             .label(translator.translate("settings.data_management.import"))
-            .on_click(move |_, _, cx| start_import(import_view.clone(), cx));
+            .on_click(move |_, window, cx| {
+                super::data_packages::open(
+                    import_view.clone(),
+                    super::data_packages::PanelMode::Import,
+                    window,
+                    cx,
+                )
+            });
+        let cloud_view = view.clone();
+        let cloud_button = Button::new("settings-data-cloud-packages")
+            .secondary()
+            .small()
+            .disabled(self.data_busy)
+            .label(translator.translate("package.cloud"))
+            .on_click(move |_, window, cx| {
+                super::data_packages::open(
+                    cloud_view.clone(),
+                    super::data_packages::PanelMode::Cloud,
+                    window,
+                    cx,
+                )
+            });
+        let backups = data_root.join(".package-backups");
+        let backup_button = Button::new("settings-data-package-backups")
+            .ghost()
+            .small()
+            .disabled(self.data_busy || !backups.is_dir())
+            .label(translator.translate("package.open_backup"))
+            .on_click(move |_, _, cx| {
+                open_settings_directory(backups.clone(), "package.title", cx)
+            });
         let clear_history_view = view.clone();
         let clear_history_button = Button::new("settings-data-clear-all-history")
             .danger()
@@ -343,56 +380,48 @@ impl SettingsWindowView {
                     .child(open_data_button.flex_1()),
             );
 
-        let stats_actions = self.highlight_element(
+        let transfer_actions = self.setting_row(
             theme,
-            translator.translate("settings.data_management.actions_title"),
-            h_flex()
-                .w_full()
-                .items_center()
+            translator.translate("package.transfer_title"),
+            Some(translator.translate("package.transfer_help").into()),
+            v_flex()
+                .w(ui_rem(390.0))
+                .max_w_full()
                 .gap_2()
-                .border_b_1()
-                .border_color(theme.border)
-                .px_4()
-                .py_3()
                 .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.foreground)
-                                .child(
-                                    translator.translate("settings.data_management.actions_title"),
-                                ),
-                        )
-                        .child(div().text_xs().text_color(theme.muted_foreground).child(
-                            translator.translate("settings.data_management.actions_description"),
-                        )),
+                    h_flex()
+                        .w_full()
+                        .gap_2()
+                        .child(export_button.flex_1())
+                        .child(import_button.flex_1()),
                 )
                 .child(
-                    v_flex()
-                        .w(ui_rem(390.0))
-                        .max_w_full()
-                        .flex_shrink_0()
+                    h_flex()
+                        .w_full()
                         .gap_2()
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .gap_2()
-                                .child(cleanup_button.flex_grow(2.0))
-                                .child(export_button.flex_1())
-                                .child(import_button.flex_1()),
-                        )
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .gap_2()
-                                .child(clear_history_button.flex_1())
-                                .child(reset_application_button.flex_1()),
-                        ),
+                        .child(cloud_button.flex_1())
+                        .child(backup_button.flex_1()),
+                ),
+        );
+        let stats_actions = self.setting_row(
+            theme,
+            translator.translate("settings.data_management.actions_title"),
+            Some(
+                translator
+                    .translate("settings.data_management.actions_description")
+                    .into(),
+            ),
+            v_flex()
+                .w(ui_rem(390.0))
+                .max_w_full()
+                .gap_2()
+                .child(cleanup_button.w_full())
+                .child(
+                    h_flex()
+                        .w_full()
+                        .gap_2()
+                        .child(clear_history_button.flex_1())
+                        .child(reset_application_button.flex_1()),
                 ),
         );
         let stats_dashboard = self.highlight_element(
@@ -445,6 +474,7 @@ impl SettingsWindowView {
                 translator.translate("settings.data_management.description"),
                 reset_button,
             ))
+            .child(transfer_actions)
             .child(self.render_legacy_migration(cx))
             .child(
                 self.setting_row(
@@ -2008,202 +2038,7 @@ fn start_history_cleanup(view: Entity<SettingsWindowView>, clear_all: bool, cx: 
     .detach();
 }
 
-fn start_export(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
-    if view.read(cx).data_busy {
-        return;
-    }
-    let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
-    let suggested = service.suggested_export_file_name();
-    if !crate::windows::main::MainWindowService::begin_blocking_operation(
-        "settings.data_management.export",
-        cx,
-    ) {
-        return;
-    }
-    let translator = crate::i18n::translator(cx);
-    let dialog = rfd::AsyncFileDialog::new()
-        .set_title(translator.translate("settings.data_management.export_title"))
-        .set_file_name(suggested)
-        .add_filter(
-            translator.translate("settings.data_management.file_filter"),
-            &["qcclip-data"],
-        );
-    view.update(cx, |view, cx| {
-        view.data_busy = true;
-        view.data_error = None;
-        view.data_message = None;
-        cx.notify();
-    });
-    cx.spawn(async move |cx| {
-        let (message, error, level) = match dialog.save_file().await {
-            Some(file) => match cx
-                .background_executor()
-                .spawn(async move { service.export_data(file.path()) })
-                .await
-            {
-                Ok(()) => (
-                    Some(translator.translate("settings.data_management.export_success")),
-                    None,
-                    NotificationLevel::Success,
-                ),
-                Err(error) => {
-                    tracing::error!("导出数据失败：{error}");
-                    (
-                        None,
-                        Some(translator.translate("settings.data_management.export_error")),
-                        NotificationLevel::Error,
-                    )
-                }
-            },
-            None => (
-                Some(translator.translate("settings.data_management.cancelled")),
-                None,
-                NotificationLevel::Info,
-            ),
-        };
-        view.update(cx, |view, cx| {
-            view.data_busy = false;
-            view.data_message =
-                notify_settings_status(SettingsPage::DataManagement, message, level, cx);
-            view.data_error = notify_settings_error(SettingsPage::DataManagement, error, cx);
-            cx.notify();
-        });
-        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
-    })
-    .detach();
-}
-
-fn start_import(view: gpui::Entity<SettingsWindowView>, cx: &mut App) {
-    if view.read(cx).data_busy {
-        return;
-    }
-    let service = cx.read_global::<DataManagementService, _>(|service, _| service.clone());
-    if !crate::windows::main::MainWindowService::begin_blocking_operation(
-        "settings.data_management.import",
-        cx,
-    ) {
-        return;
-    }
-    let translator = crate::i18n::translator(cx);
-    let dialog = rfd::AsyncFileDialog::new()
-        .set_title(translator.translate("settings.data_management.import_title"))
-        .add_filter(
-            translator.translate("settings.data_management.file_filter"),
-            &["qcclip-data"],
-        );
-    view.update(cx, |view, cx| {
-        view.data_busy = true;
-        view.data_error = None;
-        view.data_message = None;
-        cx.notify();
-    });
-    cx.spawn(async move |cx| {
-        let data_root = service.data_root().to_path_buf();
-        let mut clipboard_listener_stopped = false;
-        let result = match dialog.pick_file().await {
-            Some(file) => match cx
-                .background_executor()
-                .spawn(async move { service.stage_import(file.path()) })
-                .await
-            {
-                Ok(()) => {
-                    cx.update(|cx| {
-                        crate::windows::main::MainWindowService::stop_clipboard_listener(cx)
-                    });
-                    clipboard_listener_stopped = true;
-                    let import_root = data_root.clone();
-                    cx.background_executor()
-                        .spawn(async move {
-                            data_management::apply_pending_import_for_reload(&import_root)
-                                .map(|(applied, guard)| (applied, Some(guard)))
-                        })
-                        .await
-                }
-                Err(error) => Err(error),
-            },
-            None => Ok((false, None)),
-        };
-        match result {
-            Ok((true, Some(switch_guard))) => {
-                let config_reload =
-                    cx.update(|cx| data_management::reload_runtime_after_import(&data_root, cx));
-                drop(switch_guard);
-                cx.update(|cx| data_management::refresh_after_import(config_reload, cx));
-                view.update(cx, |view, cx| {
-                    view.data_busy = false;
-                    view.data_message = notify_settings_status(
-                        SettingsPage::DataManagement,
-                        Some(translator.translate("settings.data_management.import_success")),
-                        NotificationLevel::Success,
-                        cx,
-                    );
-                    view.data_stats_request_id = view.data_stats_request_id.wrapping_add(1);
-                    view.data_stats_policy = None;
-                    view.data_stats_loading = false;
-                    view.data_stats = None;
-                    view.refresh_data_stats(cx);
-                    cx.notify();
-                });
-            }
-            Ok((false, switch_guard)) => {
-                drop(switch_guard);
-                if clipboard_listener_stopped {
-                    cx.update(|cx| {
-                        crate::windows::main::MainWindowService::restart_clipboard_listener(cx)
-                    });
-                }
-                view.update(cx, |view, cx| {
-                    view.data_busy = false;
-                    view.data_message = notify_settings_status(
-                        SettingsPage::DataManagement,
-                        Some(translator.translate("settings.data_management.cancelled")),
-                        NotificationLevel::Info,
-                        cx,
-                    );
-                    cx.notify();
-                })
-            }
-            Ok((true, None)) => {
-                tracing::error!("数据导入没有取得热重载锁");
-                if clipboard_listener_stopped {
-                    cx.update(|cx| {
-                        crate::windows::main::MainWindowService::restart_clipboard_listener(cx)
-                    });
-                }
-                view.update(cx, |view, cx| {
-                    view.data_busy = false;
-                    view.data_error = notify_settings_error(
-                        SettingsPage::DataManagement,
-                        Some(translator.translate("settings.data_management.import_error")),
-                        cx,
-                    );
-                    cx.notify();
-                });
-            }
-            Err(error) => {
-                tracing::error!("导入数据失败：{error}");
-                if clipboard_listener_stopped {
-                    cx.update(|cx| {
-                        crate::windows::main::MainWindowService::restart_clipboard_listener(cx)
-                    });
-                }
-                view.update(cx, |view, cx| {
-                    view.data_busy = false;
-                    view.data_error = notify_settings_error(
-                        SettingsPage::DataManagement,
-                        Some(translator.translate("settings.data_management.import_error")),
-                        cx,
-                    );
-                    cx.notify();
-                });
-            }
-        }
-        cx.update(crate::windows::main::MainWindowService::finish_blocking_operation);
-    })
-    .detach();
-}
-
-fn format_bytes(bytes: u64) -> String {
+pub(super) fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         return format!("{bytes} B");
     }

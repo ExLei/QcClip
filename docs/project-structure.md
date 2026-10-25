@@ -131,3 +131,5 @@ src/
 - 服务和平台错误通过 `Result` 传递，UI 负责显示可读提示，日志不记录原始剪贴板内容。
 - 新模块按实际职责和复用需求拆分，不创建未来功能的空目录，也不按数据库表数量机械拆分。
 - 独立状态、交互生命周期或多个调用方形成清晰边界时再增加抽象。
+
+`services/data_management/package` 管理按范围的数据快照、独立密码加密归档、合并/替换和 WebDAV 数据包；`windows/settings/pages/data_packages.rs` 提供统一抽屉交互。包与在线同步缓存独立，规则见[数据转移与备份](data-packages.md)。

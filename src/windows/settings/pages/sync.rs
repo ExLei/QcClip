@@ -40,6 +40,10 @@ enum SyncPanel {
     Device(String),
 }
 
+pub(super) fn open_webdav(view: Entity<SettingsWindowView>, window: &mut Window, cx: &mut App) {
+    open_sync_panel(view, SyncPanel::WebDav, window, cx);
+}
+
 pub(in crate::windows::settings) struct SyncForm {
     name: Entity<InputState>,
     address: Entity<InputState>,

@@ -3,6 +3,7 @@ mod application_filter;
 mod clipboard;
 mod clipboard_formats;
 mod data_management;
+mod data_packages;
 mod general;
 mod item_display_editor;
 mod legacy_migration;

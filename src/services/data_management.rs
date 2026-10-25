@@ -15,6 +15,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub(crate) mod package;
+
 use crate::{
     app_paths::write_location,
     config::HistoryConfig,
@@ -40,7 +42,8 @@ const MANAGED_ROOT_FILES: &[&str] = &[
     "state.json",
 ];
 const MANAGED_ROOT_DIRECTORIES: &[&str] = &["data", "image_library", "sound"];
-const DATA_LOCATION_DIRECTORIES: &[&str] = &["data", "image_library", "sound", "log"];
+const DATA_LOCATION_DIRECTORIES: &[&str] =
+    &["data", "image_library", "sound", "log", ".package-backups"];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DataManagementStats {
@@ -615,6 +618,7 @@ impl DataManagementService {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn stage_import(&self, archive: &Path) -> Result<(), DataManagementError> {
         let pending_root = self.data_root.join(IMPORT_DIRECTORY);
         fs::create_dir_all(&pending_root)?;
@@ -733,15 +737,45 @@ pub fn apply_pending_import(data_root: &Path) -> Result<bool, DataManagementErro
     apply_pending_import_while_paused(data_root)
 }
 
-pub(crate) fn apply_pending_import_for_reload(
-    data_root: &Path,
-) -> Result<(bool, super::data_runtime::DataSwitchGuard), DataManagementError> {
-    let switch = super::data_runtime::begin_switch();
-    let applied = apply_pending_import_while_paused(data_root)?;
-    Ok((applied, switch))
+fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManagementError> {
+    let result = apply_pending_import_inner(data_root);
+    if let Err(error) = &result {
+        // 回滚失败时必须保留现场供恢复；已回滚或尚未修改本机数据的失败不能继续自动重放。
+        if !matches!(error, DataManagementError::ImportRollback { .. }) {
+            if let Err(cleanup) = preserve_failed_import(data_root) {
+                tracing::error!(%cleanup, "保留失败导入并撤销等待状态失败");
+            }
+        }
+    }
+    result
 }
 
-fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManagementError> {
+fn preserve_failed_import(data_root: &Path) -> Result<(), io::Error> {
+    let pending = data_root.join(IMPORT_DIRECTORY);
+    if !pending.try_exists()? {
+        return Ok(());
+    }
+    // 非空回滚目录可能是尚未恢复的原数据，不能作为普通失败暂存移走。
+    for entry in fs::read_dir(&pending)? {
+        let entry = entry?;
+        if entry.file_name().to_string_lossy().starts_with("rollback-")
+            && entry.file_type()?.is_dir()
+            && fs::read_dir(entry.path())?.next().is_some()
+        {
+            return Err(io::Error::other(
+                "存在尚未恢复的导入原数据，请保留暂存目录并检查日志",
+            ));
+        }
+    }
+    let backups = data_root.join(".package-backups");
+    fs::create_dir_all(&backups)?;
+    let destination = backups.join(format!("failed-import-{}", Uuid::new_v4()));
+    rename_with_retry(&pending, &destination)?;
+    tracing::warn!("失败的导入暂存数据已保留到导入前备份目录，可重新选择数据包导入");
+    Ok(())
+}
+
+fn apply_pending_import_inner(data_root: &Path) -> Result<bool, DataManagementError> {
     let pending_root = data_root.join(IMPORT_DIRECTORY);
     let marker = pending_root.join(IMPORT_MARKER);
     match fs::symlink_metadata(&marker) {
@@ -779,6 +813,13 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
             .iter()
             .any(|(_, staged_name)| staged_name.to_string_lossy().eq_ignore_ascii_case(name))
     };
+    if !has_staged_entry("qcclip.sqlite3")
+        || !fs::symlink_metadata(staging.join("qcclip.sqlite3"))?.is_file()
+    {
+        return Err(DataManagementError::InvalidDataFile(
+            "导入暂存数据缺少数据库，原数据已保留，请重新导入".to_owned(),
+        ));
+    }
     let rollback = pending_root.join(format!("rollback-{}", Uuid::new_v4()));
     fs::create_dir_all(&rollback).map_err(|error| io_with_path(error, &rollback))?;
     let mut moved_current = Vec::new();
@@ -801,7 +842,7 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
             Ok(_) => true,
             Err(error) if error.kind() == io::ErrorKind::NotFound => false,
             Err(error) => {
-                let operation = io_with_path(error, &current);
+                let operation = import_io_error(error, "检查原数据", OsStr::new(name), &current);
                 return Err(match restore_rollback(&moved_current) {
                     Ok(()) => operation.into(),
                     Err(rollback) => DataManagementError::ImportRollback {
@@ -814,7 +855,7 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
         if current_exists {
             let old = rollback.join(name);
             if let Err(error) = rename_with_retry(&current, &old) {
-                let error = io_with_path(error, &current);
+                let error = import_io_error(error, "备份原数据", OsStr::new(name), &current);
                 return Err(match restore_rollback(&moved_current) {
                     Ok(()) => error.into(),
                     Err(rollback) => DataManagementError::ImportRollback {
@@ -828,9 +869,10 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
     }
     let mut copied_staged = Vec::new();
     for (source, name) in staged_entries {
-        let target = data_root.join(name);
+        let target = data_root.join(&name);
         copied_staged.push(target.clone());
         if let Err(error) = copy_import_entry(&source, &target) {
+            let error = import_io_error(error, "写入导入数据", &name, &target);
             return Err(match rollback_import(&copied_staged, &moved_current) {
                 Ok(()) => error.into(),
                 Err(rollback) => DataManagementError::ImportRollback {
@@ -841,7 +883,7 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
         }
     }
     if let Err(error) = fs::remove_file(&marker) {
-        let error = io_with_path(error, &marker);
+        let error = import_io_error(error, "完成导入", OsStr::new(IMPORT_MARKER), &marker);
         return Err(match rollback_import(&copied_staged, &moved_current) {
             Ok(()) => error.into(),
             Err(rollback) => DataManagementError::ImportRollback {
@@ -858,6 +900,18 @@ fn apply_pending_import_while_paused(data_root: &Path) -> Result<bool, DataManag
     }
     cleanup_unmarked_import_data(&pending_root);
     Ok(true)
+}
+
+fn import_io_error(error: io::Error, operation: &str, entry: &OsStr, path: &Path) -> io::Error {
+    // 受管理的根条目名和操作先于路径输出，分享日志脱敏后仍能定位失败阶段。
+    io::Error::new(
+        error.kind(),
+        format!(
+            "{operation}“{}”失败：{}",
+            entry.to_string_lossy(),
+            io_with_path(error, path)
+        ),
+    )
 }
 
 pub(crate) fn reload_runtime_after_import(
@@ -890,6 +944,15 @@ fn copy_import_entry(source: &Path, target: &Path) -> Result<(), io::Error> {
     } else if file_type.is_file() {
         retry_permission_denied(|| fs::copy(source, target))
             .map_err(|error| io_with_path(error, target))?;
+        #[cfg(windows)]
+        {
+            // Windows 复制文件会继承只读属性；新副本需要可写句柄完成刷盘。
+            let mut permissions = fs::metadata(target)?.permissions();
+            if permissions.readonly() {
+                permissions.set_readonly(false);
+                fs::set_permissions(target, permissions)?;
+            }
+        }
         // Windows 的 FlushFileBuffers 需要可写句柄，不能用只读 File::open。
         retry_permission_denied(|| {
             OpenOptions::new()
@@ -907,6 +970,7 @@ fn copy_import_entry(source: &Path, target: &Path) -> Result<(), io::Error> {
     Ok(())
 }
 
+#[cfg(test)]
 fn remove_sqlite_shared_memory_artifacts(staging: &Path) -> Result<(), io::Error> {
     for entry in fs::read_dir(staging)? {
         let entry = entry?;
@@ -1013,7 +1077,10 @@ where
     for attempt in 0..FILE_OPERATION_RETRIES {
         match operation() {
             Ok(value) => return Ok(value),
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    || (cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33))) =>
+            {
                 last_error = Some(error);
                 if attempt + 1 < FILE_OPERATION_RETRIES {
                     thread::sleep(std::time::Duration::from_millis(
@@ -1028,7 +1095,14 @@ where
 }
 
 fn io_with_path(error: io::Error, path: &Path) -> io::Error {
-    io::Error::new(error.kind(), format!("{}：{error}", path.display()))
+    let reason = if cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)) {
+        "文件正在被占用，请稍后重试；"
+    } else if error.kind() == io::ErrorKind::PermissionDenied {
+        "访问被拒绝，请检查文件占用、只读属性或目录权限；"
+    } else {
+        ""
+    };
+    io::Error::new(error.kind(), format!("{reason}{}：{error}", path.display()))
 }
 
 fn managed_files(root: &Path) -> Result<Vec<PathBuf>, io::Error> {
@@ -1413,7 +1487,7 @@ fn hash_file(path: &Path) -> Result<[u8; 32], io::Error> {
 }
 
 fn copy_file_contents<W: Write>(
-    input: &mut File,
+    input: &mut impl Read,
     output: &mut W,
     byte_length: u64,
 ) -> Result<[u8; 32], io::Error> {
@@ -1430,13 +1504,13 @@ fn copy_file_contents<W: Write>(
     Ok(hasher.finalize().into())
 }
 
-fn read_u32(file: &mut File) -> Result<u32, io::Error> {
+fn read_u32(file: &mut impl Read) -> Result<u32, io::Error> {
     let mut bytes = [0; 4];
     file.read_exact(&mut bytes)?;
     Ok(u32::from_le_bytes(bytes))
 }
 
-fn read_u64(file: &mut File) -> Result<u64, io::Error> {
+fn read_u64(file: &mut impl Read) -> Result<u64, io::Error> {
     let mut bytes = [0; 8];
     file.read_exact(&mut bytes)?;
     Ok(u64::from_le_bytes(bytes))

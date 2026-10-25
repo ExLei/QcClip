@@ -64,9 +64,12 @@ pub fn run() {
         data_root = ?app_paths.data_root(), portable = app_paths.is_portable(),
         "QcClip 数据目录已确定"
     );
-    match apply_pending_import(app_paths.data_root()) {
-        Ok(true) => tracing::info!("已应用暂存的数据导入内容"),
-        Ok(false) => {}
+    let import_error = match apply_pending_import(app_paths.data_root()) {
+        Ok(true) => {
+            tracing::info!("已应用暂存的数据导入内容");
+            None
+        }
+        Ok(false) => None,
         Err(error) => {
             tracing::error!("应用暂存的数据导入失败：{error}");
             if matches!(
@@ -75,8 +78,9 @@ pub fn run() {
             ) {
                 panic!("无法恢复导入前的数据，应用已停止启动：{error}");
             }
+            Some(error.to_string())
         }
-    }
+    };
     let _database = initialize_database(&app_paths).unwrap_or_else(|error| {
         tracing::error!("无法初始化数据库：{error}");
         panic!("无法初始化数据库：{error}");
@@ -373,6 +377,15 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             crate::services::system::check_win_v_on_startup(cx);
             crate::windows::notification::NotificationService::show_startup(cx);
+            if let Some(error) = &import_error {
+                let translator = crate::i18n::translator(cx);
+                crate::windows::notification::NotificationService::show_message(
+                    translator.translate("package.title"),
+                    error.clone(),
+                    crate::windows::notification::NotificationLevel::Error,
+                    cx,
+                );
+            }
             crate::windows::settings::offer_legacy_migration(cx);
             crate::services::updates::UpdateService::install(
                 config_path.with_extension("updates.json"),

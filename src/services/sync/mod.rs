@@ -8,7 +8,7 @@ pub(crate) mod protocol;
 mod repository;
 mod runtime;
 pub(crate) mod ui;
-mod webdav;
+pub(crate) mod webdav;
 
 #[cfg(test)]
 mod behavior_tests;

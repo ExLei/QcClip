@@ -1,7 +1,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use std::{
     collections::VecDeque,
-    io::Read,
+    io::{Read, Write},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -98,6 +98,16 @@ impl Client {
             && self.config.username == config.username
             && self.config.password == config.password
     }
+    pub(crate) fn for_packages(mut self) -> Self {
+        // 数据包可能较大，仅限制连接和单次读写停顿，不沿用同步小请求的总时限。
+        self.agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(8))
+            .timeout_read(Duration::from_secs(60))
+            .timeout_write(Duration::from_secs(60))
+            .redirects(0)
+            .build();
+        self
+    }
     fn execute(&self, method: &str, path: &str, body: Option<&[u8]>) -> Result<ureq::Response> {
         self.traffic.begin()?;
         let request = self
@@ -180,6 +190,88 @@ impl Client {
             Err(super::Error::Http { status: 404, .. }) => Ok(()),
             Err(error) => Err(error),
         }
+    }
+    pub(crate) fn put_file(&self, path: &str, file: &std::path::Path) -> Result<()> {
+        self.traffic.begin()?;
+        let file = std::fs::File::open(file)?;
+        let request = self
+            .agent
+            .put(&format!("{}{path}", self.base))
+            .set(
+                "Authorization",
+                &format!(
+                    "Basic {}",
+                    B64.encode(format!("{}:{}", self.config.username, self.config.password))
+                ),
+            )
+            .set("Content-Type", "application/octet-stream")
+            .set("Content-Length", &file.metadata()?.len().to_string());
+        match request.send(file) {
+            Ok(_) => Ok(()),
+            Err(ureq::Error::Status(status, response)) => {
+                if status == 429 || status == 503 {
+                    self.traffic.cooldown(&response);
+                }
+                Err(request_error("PUT", ureq::Error::Status(status, response)))
+            }
+            Err(error) => Err(request_error("PUT", error)),
+        }
+    }
+    pub(crate) fn get_file(&self, path: &str, target: &std::path::Path, limit: u64) -> Result<()> {
+        let response = self.execute("GET", path, None)?;
+        let mut output = atomic_write_file::AtomicWriteFile::open(target)?;
+        let size = std::io::copy(&mut response.into_reader().take(limit + 1), &mut output)?;
+        if size > limit {
+            return fail("数据包超过支持的大小");
+        }
+        output.flush()?;
+        output.commit()?;
+        Ok(())
+    }
+    pub(crate) fn list_package_files(&self) -> Result<Vec<(String, u64)>> {
+        let response = match self.execute("PROPFIND", "packages/", Some(b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:getcontentlength/><d:resourcetype/></d:prop></d:propfind>")) {
+            Ok(response) => response,
+            Err(super::Error::Http { status: 404, .. }) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut xml = String::new();
+        response
+            .into_reader()
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_string(&mut xml)?;
+        if xml.len() > 4 * 1024 * 1024 {
+            return fail("云端数据包清单过大");
+        }
+        validate_collection(&xml)?;
+        let document = roxmltree::Document::parse(&xml)
+            .map_err(|_| super::Error::Message("云端数据包目录无效".into()))?;
+        let mut files = Vec::new();
+        for response in document
+            .descendants()
+            .filter(|node| node.has_tag_name(("DAV:", "response")))
+        {
+            if response
+                .descendants()
+                .any(|node| node.has_tag_name(("DAV:", "collection")))
+            {
+                continue;
+            }
+            let href = response
+                .children()
+                .find(|n| n.has_tag_name(("DAV:", "href")))
+                .and_then(|n| n.text())
+                .unwrap_or("");
+            let name = href.rsplit('/').next().unwrap_or("");
+            let size = response
+                .descendants()
+                .find(|n| n.has_tag_name(("DAV:", "getcontentlength")))
+                .and_then(|n| n.text())
+                .and_then(|v| v.parse::<u64>().ok());
+            if let Some(size) = size {
+                files.push((name.to_owned(), size));
+            }
+        }
+        Ok(files)
     }
     pub fn check_collection(&self, path: &str) -> Result<()> {
         let response = self.execute("PROPFIND", path, Some(b"<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:getcontentlength/><d:resourcetype/></d:prop></d:propfind>"))?;
