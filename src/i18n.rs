@@ -215,6 +215,22 @@ fn load_builtin_bundle(locale: Locale, json: &str) -> MessageBundle {
         .unwrap_or_else(|error| panic!("内建语言资源加载失败（{}）：{error}", locale.as_str()))
 }
 
+pub fn clipboard_source(
+    translator: &Translator,
+    app: Option<&str>,
+    device: Option<&str>,
+) -> String {
+    let app = app.filter(|name| !name.trim().is_empty());
+    if let Some(device) = device {
+        let from =
+            translator.translate_with_args("main.source.device", &[("device", device.to_owned())]);
+        app.map(|app| format!("{app} · {from}")).unwrap_or(from)
+    } else {
+        app.map(str::to_owned)
+            .unwrap_or_else(|| translator.translate("main.source.unknown"))
+    }
+}
+
 pub fn relative_time(translator: &Translator, timestamp_millis: i64) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -335,5 +351,28 @@ mod tests {
         zh_keys.sort();
         en_keys.sort();
         assert_eq!(zh_keys, en_keys);
+    }
+
+    #[test]
+    fn clipboard_source_labels_include_device_and_handle_missing_application() {
+        let zh = Translator::builtin(Locale::zh_cn());
+        let en = Translator::builtin(Locale::en_us());
+        assert_eq!(
+            clipboard_source(&zh, Some("Chrome"), Some("工作电脑")),
+            "Chrome · 来自工作电脑"
+        );
+        assert_eq!(
+            clipboard_source(&zh, None, Some("工作电脑")),
+            "来自工作电脑"
+        );
+        assert_eq!(
+            clipboard_source(&en, Some("Chrome"), Some("PC")),
+            "Chrome · From PC"
+        );
+        assert_eq!(clipboard_source(&en, Some("Chrome"), None), "Chrome");
+        assert_eq!(
+            clipboard_source(&en, None, None),
+            en.translate("main.source.unknown")
+        );
     }
 }

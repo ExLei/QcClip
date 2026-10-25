@@ -230,6 +230,19 @@ pub fn build(
     event.source_hash = hash
         .try_into()
         .map_err(|_| super::Error::Message("内容哈希无效".into()))?;
+    event.source_app_name = connection
+        .query_row(
+            "SELECT CASE WHEN COALESCE(h.capture_count, 0) > 0 THEN h.last_source_app_name
+                     ELSE COALESCE(s.app_name, h.last_source_app_name) END
+         FROM clipboard_items AS i
+         LEFT JOIN clipboard_history AS h ON h.item_id = i.id
+         LEFT JOIN sync_sources AS s ON s.item_id = i.id WHERE i.id = ?1",
+            [item_id],
+            |row| row.get::<_, Option<String>>(0),
+        )?
+        .map(|name| name.chars().filter(|c| !c.is_control()).collect::<String>())
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty() && name.len() <= 512);
     let captured = if event.mode == Mode::Touch {
         CapturedClipboard {
             formats: Vec::new(),
@@ -398,7 +411,7 @@ pub fn apply(
     event: &Event,
     resources: &HashMap<String, Vec<u8>>,
 ) -> Result<bool> {
-    Ok(apply_with_feedback(database, blobs, event, resources)?.applied)
+    Ok(apply_with_feedback(database, blobs, event, resources, "测试设备")?.applied)
 }
 
 pub fn apply_with_feedback(
@@ -406,6 +419,7 @@ pub fn apply_with_feedback(
     blobs: &RawBlobStore,
     event: &Event,
     resources: &HashMap<String, Vec<u8>>,
+    sender_name: &str,
 ) -> Result<ApplyOutcome> {
     let mut connection = database.connect_rewrite()?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -592,6 +606,16 @@ pub fn apply_with_feedback(
         }
         if event.mode != Mode::Touch {
             note_conflict = apply_metadata(&transaction, item_id, event, timestamp)?;
+            if event.sequence >= newest_content as u64 {
+                // 设备名称取自已认证的配对资料，来源独立于历史和收藏关系。
+                transaction.execute(
+                    "INSERT INTO sync_sources (item_id, device_id, device_name, app_name)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(item_id) DO UPDATE SET device_id = excluded.device_id,
+                         device_name = excluded.device_name, app_name = excluded.app_name",
+                    params![item_id, event.sender, sender_name, event.source_app_name],
+                )?;
+            }
         }
         let local_hash: Vec<u8> = transaction.query_row(
             "SELECT content_hash FROM clipboard_items WHERE id = ?1",

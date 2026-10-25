@@ -174,6 +174,7 @@
   "main.floating_toolbar.new_favorite": "New favorite",
   "main.list.loading_row": "Loading…",
   "main.source.unknown": "Unknown source application",
+  "main.source.device": "From {device}",
   "main.preview.file_list": "{count} files",
   "main.preview.image": "Image",
   "main.preview.image_dimensions": "{width} x {height}",

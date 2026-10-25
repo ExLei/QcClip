@@ -604,6 +604,7 @@ fn record_to_list_item(record: HistoryListRecord) -> ClipboardListItem {
         last_seen_at: record.last_seen_at,
         shortcut: String::new(),
         source_app_name: record.source_app_name,
+        source_device_name: record.source_device_name,
         source_app_icon: record.source_app_icon,
         is_selected: false,
     }

@@ -24,3 +24,9 @@ CREATE TABLE IF NOT EXISTS sync_local_activity (
     item_id INTEGER REFERENCES clipboard_items(id) ON DELETE SET NULL,
     favorite INTEGER NOT NULL CHECK(favorite IN (0, 1))
 );
+CREATE TABLE IF NOT EXISTS sync_sources (
+    item_id INTEGER PRIMARY KEY REFERENCES clipboard_items(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    device_name TEXT NOT NULL,
+    app_name TEXT
+);

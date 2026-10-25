@@ -152,9 +152,15 @@ pub(super) fn append_search_filter(
               WHERE n_search.item_id = i.id
                 AND n_search.note_text LIKE ? ESCAPE '\\'
           )
-          OR COALESCE(h.last_source_app_name, '') LIKE ? ESCAPE '\\')"
+          OR COALESCE(h.last_source_app_name, '') LIKE ? ESCAPE '\\'
+          OR EXISTS (
+              SELECT 1 FROM sync_sources AS s_search WHERE s_search.item_id = i.id
+                AND (s_search.app_name LIKE ? ESCAPE '\\' OR s_search.device_name LIKE ? ESCAPE '\\')
+          ))"
             .to_owned(),
     );
+    parameters.push(pattern.clone());
+    parameters.push(pattern.clone());
     parameters.push(pattern.clone());
     parameters.push(pattern.clone());
     parameters.push(pattern.clone());
@@ -243,6 +249,7 @@ pub struct HistoryListRecord {
     pub is_pinned: bool,
     pub sort_order: i64,
     pub source_app_name: Option<String>,
+    pub source_device_name: Option<String>,
     pub source_app_icon: Option<ApplicationIconSource>,
 }
 

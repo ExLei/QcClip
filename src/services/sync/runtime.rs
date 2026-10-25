@@ -1309,6 +1309,7 @@ impl Runtime {
             hash_version: 0,
             source_hash: [0; 32],
             complete: false,
+            source_app_name: None,
             formats: Vec::new(),
             files: Vec::new(),
             tags: Vec::new(),
@@ -1614,8 +1615,13 @@ impl Runtime {
                     .map(|(id, chunks)| (id, chunks.into_iter().flatten().flatten().collect()))
                     .collect();
                 let data = self.data.read().unwrap_or_else(|e| e.into_inner());
-                let outcome =
-                    repository::apply_with_feedback(&data.0, &data.1, &item.event, &resources)?;
+                let outcome = repository::apply_with_feedback(
+                    &data.0,
+                    &data.1,
+                    &item.event,
+                    &resources,
+                    &peer.profile.name,
+                )?;
                 self.received_feedback(&outcome);
                 drop(data);
                 Ok((None, outcome.applied))
@@ -1772,8 +1778,13 @@ impl Runtime {
             .validate_cache(&job.peer.profile.id, &config.profile.id)?;
         validate_limits(&job.entry.event, &job.peer.policy)?;
         let data = self.data.read().unwrap_or_else(|e| e.into_inner());
-        let outcome =
-            repository::apply_with_feedback(&data.0, &data.1, &job.entry.event, &resources)?;
+        let outcome = repository::apply_with_feedback(
+            &data.0,
+            &data.1,
+            &job.entry.event,
+            &resources,
+            &job.peer.profile.name,
+        )?;
         self.received_feedback(&outcome);
         drop(data);
         self.result(&job.peer.profile.id, "已从 WebDAV 缓存接收".into());

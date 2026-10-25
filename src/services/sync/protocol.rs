@@ -253,6 +253,7 @@ pub struct Event {
     pub hash_version: i64,
     pub source_hash: [u8; 32],
     pub complete: bool,
+    pub source_app_name: Option<String>,
     pub formats: Vec<WireFormat>,
     pub files: Vec<WireFile>,
     pub tags: Vec<WireTag>,
@@ -292,6 +293,11 @@ impl Event {
             || self.tags.len() > 128
         {
             return fail("同步事件身份、版本、会话或大小无效");
+        }
+        if self.source_app_name.as_ref().is_some_and(|name| {
+            name.trim().is_empty() || name.len() > 512 || name.chars().any(char::is_control)
+        }) {
+            return fail("同步来源应用名称无效");
         }
         let mut total = 0usize;
         let mut identities = std::collections::HashSet::new();

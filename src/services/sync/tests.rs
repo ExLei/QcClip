@@ -71,6 +71,7 @@ impl Fixture {
                 hash_version: CONTENT_HASH_VERSION,
                 source_hash: [0; 32],
                 complete: false,
+                source_app_name: None,
                 formats: Vec::new(),
                 files: Vec::new(),
                 tags: Vec::new(),
@@ -517,6 +518,17 @@ fn encrypted_pipeline_is_idempotent_and_rejects_revocation_and_old_sessions() {
     packet.event.session = session.id;
     let first = deliver(&receiver, &a, &packet);
     assert!(first.accepted && first.applied, "{}", first.message);
+    let origin: (String, String) = target
+        .db
+        .connect()
+        .unwrap()
+        .query_row(
+            "SELECT device_id, device_name FROM sync_sources",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(origin, (a.profile.id.clone(), a.profile.name.clone()));
     let second = deliver(&receiver, &a, &packet);
     assert!(second.accepted && !second.applied, "{}", second.message);
     assert_eq!(target.count("clipboard_history"), 1);

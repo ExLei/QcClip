@@ -1120,6 +1120,7 @@ impl MainWindow {
                 || previous.note_text != item.note_text
                 || previous.tag_ids != item.tag_ids
                 || previous.source_app_name != item.source_app_name
+                || previous.source_device_name != item.source_device_name
                 || previous.source_app_icon != item.source_app_icon
         });
         let destination_position;

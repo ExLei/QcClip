@@ -19,6 +19,7 @@ fn receive_feedback_identifies_affected_lists_and_ignores_duplicate_receipts() {
         &target.blobs,
         &history.event,
         &history.resources,
+        "测试设备",
     )
     .unwrap();
     let change = outcome.change.unwrap();
@@ -30,6 +31,7 @@ fn receive_feedback_identifies_affected_lists_and_ignores_duplicate_receipts() {
         &target.blobs,
         &history.event,
         &history.resources,
+        "测试设备",
     )
     .unwrap();
     assert!(duplicate.change.is_none());
@@ -41,6 +43,7 @@ fn receive_feedback_identifies_affected_lists_and_ignores_duplicate_receipts() {
         &target.blobs,
         &favorite.event,
         &favorite.resources,
+        "测试设备",
     )
     .unwrap()
     .change
@@ -55,12 +58,143 @@ fn receive_feedback_identifies_affected_lists_and_ignores_duplicate_receipts() {
         &favorite_target.blobs,
         &favorite.event,
         &favorite.resources,
+        "测试设备",
     )
     .unwrap()
     .change
     .unwrap();
     assert_eq!(favorite_only.history_id, None);
     assert!(favorite_only.favorite_id.is_some());
+}
+
+#[test]
+fn remote_sources_work_without_history_and_preserve_local_captures() {
+    use crate::services::database::{HistoryRepository, query::HistoryQuery};
+
+    let source = Fixture::new();
+    let target = Fixture::new();
+    let item = source.capture("来源测试");
+    source.db.connect().unwrap().execute(
+        "UPDATE clipboard_history SET last_source_app_name = '浏览器', last_source_app_path = 'C:/private/browser.exe' WHERE item_id = ?1",
+        [item],
+    ).unwrap();
+    let packet = source.packet(item, Mode::ManualFavorite, 1);
+    assert_eq!(packet.event.source_app_name.as_deref(), Some("浏览器"));
+    assert!(
+        !serde_json::to_string(&packet.event)
+            .unwrap()
+            .contains("private/browser.exe")
+    );
+    repository::apply_with_feedback(
+        &target.db,
+        &target.blobs,
+        &packet.event,
+        &packet.resources,
+        "工作电脑",
+    )
+    .unwrap();
+    assert_eq!(target.count("clipboard_history"), 0);
+    let favorites = FavoriteRepository::with_blob_store(target.db.clone(), target.blobs.clone());
+    let rows = favorites.query(&HistoryQuery::default()).unwrap();
+    assert_eq!(rows[0].source_app_name.as_deref(), Some("浏览器"));
+    assert_eq!(rows[0].source_device_name.as_deref(), Some("工作电脑"));
+    assert!(rows[0].source_app_icon.is_none());
+    for search in ["浏览器", "工作电脑"] {
+        let query = HistoryQuery {
+            search: Some(search.into()),
+            ..HistoryQuery::default()
+        };
+        assert_eq!(favorites.query(&query).unwrap().len(), 1);
+        assert_eq!(favorites.count(&query).unwrap(), 1);
+        assert_eq!(favorites.ordered_ids(&query).unwrap().len(), 1);
+    }
+    let forwarded = target.packet(rows[0].item_id, Mode::ManualFavorite, 1);
+    assert_eq!(
+        forwarded.event.source_app_name,
+        packet.event.source_app_name
+    );
+
+    let local = target.capture("来源测试");
+    target
+        .db
+        .connect()
+        .unwrap()
+        .execute(
+            "UPDATE clipboard_history SET last_source_app_name = '本机编辑器' WHERE item_id = ?1",
+            [local],
+        )
+        .unwrap();
+    let rows = favorites.query(&HistoryQuery::default()).unwrap();
+    assert_eq!(rows[0].source_app_name.as_deref(), Some("本机编辑器"));
+    assert_eq!(rows[0].source_device_name, None);
+    let mut newer = packet.event.clone();
+    newer.id = uuid::Uuid::new_v4().to_string();
+    newer.sequence = 2;
+    repository::apply_with_feedback(
+        &target.db,
+        &target.blobs,
+        &newer,
+        &packet.resources,
+        "工作电脑",
+    )
+    .unwrap();
+    let rows = HistoryRepository::new(target.db.clone(), target.blobs.clone())
+        .query(&HistoryQuery::default())
+        .unwrap();
+    assert_eq!(rows[0].source_app_name.as_deref(), Some("本机编辑器"));
+    assert_eq!(rows[0].source_device_name, None);
+}
+
+#[test]
+fn missing_application_and_late_events_do_not_erase_remote_source() {
+    use crate::services::database::{HistoryRepository, query::HistoryQuery};
+
+    let source = Fixture::new();
+    let target = Fixture::new();
+    let item = source.capture("没有应用名称");
+    let packet = source.packet(item, Mode::ManualContent, 3);
+    repository::apply_with_feedback(
+        &target.db,
+        &target.blobs,
+        &packet.event,
+        &packet.resources,
+        "家用电脑",
+    )
+    .unwrap();
+    let mut late = source.packet(item, Mode::ManualFavorite, 2);
+    late.event.sender = packet.event.sender.clone();
+    late.event.source_app_name = Some("过期应用".into());
+    repository::apply_with_feedback(
+        &target.db,
+        &target.blobs,
+        &late.event,
+        &late.resources,
+        "旧设备名称",
+    )
+    .unwrap();
+    let rows = HistoryRepository::new(target.db.clone(), target.blobs.clone())
+        .query(&HistoryQuery::default())
+        .unwrap();
+    assert_eq!(rows[0].source_app_name, None);
+    assert_eq!(rows[0].source_device_name.as_deref(), Some("家用电脑"));
+    let history = HistoryRepository::new(target.db.clone(), target.blobs.clone());
+    let query = HistoryQuery {
+        search: Some("家用电脑".into()),
+        ..HistoryQuery::default()
+    };
+    assert_eq!(history.query(&query).unwrap().len(), 1);
+    assert_eq!(history.count(&query).unwrap(), 1);
+    assert_eq!(history.ordered_ids(&query).unwrap().len(), 1);
+    assert_eq!(target.count("favorites"), 1);
+    for name in ["含\n换行".to_owned(), "a".repeat(513)] {
+        let mut invalid = packet.event.clone();
+        invalid.source_app_name = Some(name);
+        assert!(
+            invalid
+                .validate(&invalid.sender, &invalid.recipient, &invalid.session)
+                .is_err()
+        );
+    }
 }
 
 #[test]
@@ -210,6 +344,7 @@ fn receive_reuses_named_tags_keeps_local_tags_and_reports_note_conflicts() {
         &target.blobs,
         &packet.event,
         &packet.resources,
+        "测试设备",
     )
     .unwrap();
     assert!(outcome.applied && outcome.note_conflict);

@@ -599,7 +599,8 @@ impl FavoriteRepository {
                 f.paste_count,
                 f.is_pinned,
                 f.sort_order,
-                h.last_source_app_name,
+                CASE WHEN COALESCE(h.capture_count, 0) > 0 THEN h.last_source_app_name
+                     ELSE COALESCE(s.app_name, h.last_source_app_name) END,
                 a.sha256,
                 a.byte_length,
                 a.relative_path,
@@ -608,12 +609,14 @@ impl FavoriteRepository {
                     FROM clipboard_item_tags AS cit
                     WHERE cit.item_id = i.id
                 ), ''),
-                COALESCE(n.note_text, '')
+                COALESCE(n.note_text, ''),
+                CASE WHEN COALESCE(h.capture_count, 0) > 0 THEN NULL ELSE s.device_name END
              FROM favorites AS f
              JOIN clipboard_items AS i ON i.id = f.item_id
              LEFT JOIN clipboard_history AS h ON h.item_id = f.item_id
              LEFT JOIN application_icon_assets AS a ON a.id = h.last_source_app_icon_id
              LEFT JOIN clipboard_item_notes AS n ON n.item_id = i.id
+             LEFT JOIN sync_sources AS s ON s.item_id = i.id
              WHERE {}
              ORDER BY f.is_pinned DESC,
                       f.sort_order DESC,
@@ -640,6 +643,7 @@ impl FavoriteRepository {
                 row.get::<_, Option<String>>(12)?,
                 row.get::<_, String>(13)?,
                 row.get::<_, String>(14)?,
+                row.get::<_, Option<String>>(15)?,
             ))
         })?;
         let mut records = Vec::new();
@@ -660,6 +664,7 @@ impl FavoriteRepository {
                 source_app_icon_path,
                 tag_ids,
                 note_text,
+                source_device_name,
             ) = row?;
             let loaded_preview_options = load_preview_options(
                 &connection,
@@ -695,6 +700,7 @@ impl FavoriteRepository {
                 is_pinned,
                 sort_order,
                 source_app_name,
+                source_device_name,
                 source_app_icon: parse_application_icon_source(
                     source_app_icon_hash,
                     source_app_icon_byte_length,

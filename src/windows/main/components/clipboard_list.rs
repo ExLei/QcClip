@@ -1015,30 +1015,37 @@ fn compute_reorder_animation_start_offsets(
 }
 
 fn source_application_icon(
-    row_id: HistoryItemId,
-    source_name: Option<&str>,
+    item: &ClipboardListItem,
     image: Option<Arc<RenderImage>>,
     theme: ThemeColor,
     translator: &Translator,
     horizontal: bool,
 ) -> AnyElement {
-    let icon = image
-        .map(|image| {
-            img(image)
-                .size(ui_rem(16.0))
-                .object_fit(ObjectFit::Contain)
-                .into_any_element()
-        })
-        .unwrap_or_else(|| {
-            icon("square-x-filled", 14.0, theme.muted_foreground).into_any_element()
-        });
-    let tooltip = source_name
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| translator.translate("main.source.unknown"));
+    let icon = if item.source_device_name.is_some() {
+        img("assets/icon32.png")
+            .size(ui_rem(16.0))
+            .object_fit(ObjectFit::Contain)
+            .into_any_element()
+    } else {
+        image
+            .map(|image| {
+                img(image)
+                    .size(ui_rem(16.0))
+                    .object_fit(ObjectFit::Contain)
+                    .into_any_element()
+            })
+            .unwrap_or_else(|| {
+                icon("square-x-filled", 14.0, theme.muted_foreground).into_any_element()
+            })
+    };
+    let tooltip = i18n::clipboard_source(
+        translator,
+        item.source_app_name.as_deref(),
+        item.source_device_name.as_deref(),
+    );
 
     let mut icon_container = div()
-        .id(("source-application-icon", row_id as u64))
+        .id(("source-application-icon", item.history_id as u64))
         .size(ui_rem(20.0))
         .flex()
         .items_center()
@@ -1797,8 +1804,7 @@ fn render_item_surface<T>(
         .overflow_hidden()
         .when(show_source, |this| {
             this.child(source_application_icon(
-                item.history_id,
-                item.source_app_name.as_deref(),
+                item,
                 source_app_icon,
                 theme,
                 &translator,
@@ -2027,7 +2033,15 @@ fn render_item_surface<T>(
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(if show_source {
-                                item.source_app_name.clone().unwrap_or_default()
+                                if item.source_device_name.is_some() {
+                                    i18n::clipboard_source(
+                                        &translator,
+                                        item.source_app_name.as_deref(),
+                                        item.source_device_name.as_deref(),
+                                    )
+                                } else {
+                                    item.source_app_name.clone().unwrap_or_default()
+                                }
                             } else {
                                 String::new()
                             }),
@@ -3539,6 +3553,7 @@ mod tests {
             last_seen_at: 0,
             shortcut: String::new(),
             source_app_name: None,
+            source_device_name: None,
             source_app_icon: None,
             is_selected: false,
         };
