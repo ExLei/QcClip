@@ -79,17 +79,38 @@ impl CaptureService {
         &self,
         captured: &CapturedClipboard,
     ) -> Result<CaptureStoreResult, CaptureError> {
+        let mut connection = self.database.connect_write()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let result = self.store_in_transaction(&transaction, captured, IngestContext::Local)?;
+        transaction.commit()?;
+        if result.formats_changed
+            && let Err(error) = self.cleanup_unused_blobs()
+        {
+            tracing::warn!(%error, "旧格式资源清理失败，将在后续维护时重试");
+        }
+        crate::services::sync::captured(&self.database, result);
+        Ok(result)
+    }
+
+    pub(crate) fn store_in_transaction(
+        &self,
+        transaction: &Transaction<'_>,
+        captured: &CapturedClipboard,
+        context: IngestContext,
+    ) -> Result<CaptureStoreResult, CaptureError> {
         validate_formats(captured)?;
         let hashed = hash_clipboard(captured)?;
         select_primary_format(captured)?;
         let timestamp = current_timestamp_millis();
-        let mut connection = self.database.connect_write()?;
-        let prepared_icon = self
-            .application_icon_store
-            .resolve(&connection, &captured.source_application);
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let local = matches!(context, IngestContext::Local);
+        let prepared_icon = local
+            .then(|| {
+                self.application_icon_store
+                    .resolve(transaction, &captured.source_application)
+            })
+            .flatten();
         let source_app_icon_id =
-            upsert_application_icon(&transaction, prepared_icon.as_ref(), timestamp)?;
+            upsert_application_icon(transaction, prepared_icon.as_ref(), timestamp)?;
 
         let exact_existing = transaction
             .query_row(
@@ -100,13 +121,36 @@ impl CaptureService {
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let text_merge = find_text_merge(
-            &transaction,
-            captured,
-            &self.blob_store,
-            exact_existing.as_ref().map(|existing| existing.0),
-            &hashed,
-        )?;
+        let text_merge = if let IngestContext::Remote {
+            replace_item: Some(item_id),
+            ..
+        } = context
+        {
+            if exact_existing
+                .as_ref()
+                .is_some_and(|(id, _)| *id != item_id)
+            {
+                return Err(CaptureError::InvalidFormat(
+                    "修改后的内容与另一条本地记录冲突，请保留本地内容".into(),
+                ));
+            }
+            Some(super::text_merge::TextMerge {
+                item_id,
+                captured: None,
+                hashed: None,
+                formats_changed: true,
+            })
+        } else if local {
+            find_text_merge(
+                transaction,
+                captured,
+                &self.blob_store,
+                exact_existing.as_ref().map(|existing| existing.0),
+                &hashed,
+            )?
+        } else {
+            None
+        };
         let captured = text_merge
             .as_ref()
             .and_then(|merged| merged.captured.as_ref())
@@ -132,7 +176,11 @@ impl CaptureService {
             match exact_existing {
                 Some(existing) => Some(existing),
                 None => {
-                    find_legacy_duplicate_item(&transaction, captured, hashed, &self.blob_store)?
+                    if local {
+                        find_legacy_duplicate_item(transaction, captured, hashed, &self.blob_store)?
+                    } else {
+                        None
+                    }
                 }
             }
         };
@@ -142,15 +190,16 @@ impl CaptureService {
                     "相同内容存在未完成的 {state} 记录，需先执行恢复"
                 )));
             }
-            let (history_id, is_new) = upsert_history(
-                &transaction,
+            let (history_id, is_new) = ingest_history(
+                transaction,
                 item_id,
                 captured,
                 timestamp,
                 source_app_icon_id,
+                context,
             )?;
-            transaction.commit()?;
             return Ok(CaptureStoreResult {
+                item_id,
                 history_id,
                 is_new,
                 formats_changed: false,
@@ -161,7 +210,6 @@ impl CaptureService {
         let default_preview = select_default_preview(captured, &preview.formats)
             .ok_or(CaptureError::NoCapturedFormats)?;
         let primary_index = select_primary_format(captured)?;
-        let mut replaced_blob_ids = Vec::new();
         let mut reusable_blobs = HashMap::new();
         let item_id = if let Some(merged) = text_merge.as_ref() {
             let item_id = merged.item_id;
@@ -179,7 +227,6 @@ impl CaptureService {
                     ))
                 })? {
                     let (blob_id, hash, state) = row?;
-                    replaced_blob_ids.push(blob_id);
                     if state == "ready" {
                         reusable_blobs.insert(hash, blob_id);
                     }
@@ -211,7 +258,7 @@ impl CaptureService {
                 capture_state, preview_text, preview_char_count, format_count,
                 total_bytes, created_at, updated_at
              ) VALUES (
-                ?1, 'captured', ?2, ?3, ?4,
+                ?1, ?8, ?2, ?3, ?4,
                 'pending', ?5, ?6, 0, 0, ?7, ?7
              )",
                 params![
@@ -222,12 +269,12 @@ impl CaptureService {
                     default_preview.text,
                     default_preview.char_count as i64,
                     timestamp,
+                    if local { "captured" } else { "synced" },
                 ],
             )?;
             transaction.last_insert_rowid()
         };
         let mut total_bytes = 0_i64;
-        let mut retained_blob_ids = HashSet::new();
 
         for (index, format) in captured.formats.iter().enumerate() {
             let is_primary = index == primary_index;
@@ -268,16 +315,12 @@ impl CaptureService {
                 } else {
                     let pending = self.blob_store.write_pending(bytes)?;
                     let blob = self.blob_store.commit_pending(&pending)?;
-                    let blob_id = upsert_binary_blob(&transaction, &blob, timestamp)?;
+                    let blob_id = upsert_binary_blob(transaction, &blob, timestamp)?;
                     ("external", None, Some(blob_id), bytes.len() as i64)
                 }
             } else {
                 ("none", None, None, 0)
             };
-
-            if let Some(blob_id) = blob_id {
-                retained_blob_ids.insert(blob_id);
-            }
 
             transaction.execute(
                 "INSERT INTO clipboard_formats (
@@ -340,31 +383,33 @@ impl CaptureService {
                 item_id
             ],
         )?;
-        let (history_id, is_new) = upsert_history(
-            &transaction,
+        let (history_id, is_new) = ingest_history(
+            transaction,
             item_id,
             captured,
             timestamp,
             source_app_icon_id,
+            context,
         )?;
-        transaction.commit()?;
-        replaced_blob_ids.retain(|blob_id| !retained_blob_ids.contains(blob_id));
-        if !replaced_blob_ids.is_empty()
-            && let Err(error) = self.cleanup_replaced_blobs(&replaced_blob_ids)
-        {
-            tracing::warn!(%error, "合并后的旧格式文件清理失败，将由后续维护重试");
-        }
+        // 旧资源由统一孤儿清理回收，避免在当前写事务内再次申请写锁。
         Ok(CaptureStoreResult {
+            item_id,
             history_id,
             is_new,
             formats_changed: text_merge.is_some(),
         })
     }
 
-    fn cleanup_replaced_blobs(&self, blob_ids: &[i64]) -> Result<(), CaptureError> {
+    pub(crate) fn cleanup_unused_blobs(&self) -> Result<(), CaptureError> {
         let mut connection = self.database.connect_write()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for blob_id in blob_ids {
+        let blob_ids = {
+            let mut statement = transaction.prepare("SELECT id FROM binary_blobs b WHERE NOT EXISTS (SELECT 1 FROM clipboard_formats f WHERE f.blob_id = b.id)")?;
+            statement
+                .query_map([], |r| r.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        for blob_id in &blob_ids {
             let record = transaction.query_row(
                 "SELECT sha256, byte_length, relative_path FROM binary_blobs b
                  WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM clipboard_formats WHERE blob_id = b.id)",
@@ -390,9 +435,72 @@ impl CaptureService {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureStoreResult {
+    pub item_id: i64,
     pub history_id: HistoryItemId,
     pub is_new: bool,
     pub formats_changed: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum IngestContext {
+    Local,
+    Remote {
+        replace_item: Option<i64>,
+        history: bool,
+    },
+}
+
+fn ingest_history(
+    transaction: &Transaction<'_>,
+    item_id: i64,
+    captured: &CapturedClipboard,
+    timestamp: i64,
+    icon: Option<i64>,
+    context: IngestContext,
+) -> Result<(HistoryItemId, bool), CaptureError> {
+    match context {
+        IngestContext::Local => {
+            let result = upsert_history(transaction, item_id, captured, timestamp, icon)?;
+            crate::services::sync::activity::record_local(transaction, item_id, false)?;
+            Ok(result)
+        }
+        IngestContext::Remote { history: false, .. } => Ok((0, false)),
+        IngestContext::Remote { history: true, .. } => {
+            touch_remote_history(transaction, item_id, timestamp, true)
+        }
+    }
+}
+
+pub(crate) fn touch_remote_history(
+    transaction: &Transaction<'_>,
+    item_id: i64,
+    timestamp: i64,
+    create: bool,
+) -> Result<(i64, bool), CaptureError> {
+    let existing: Option<(i64, bool)> = transaction
+        .query_row(
+            "SELECT id, is_pinned FROM clipboard_history WHERE item_id = ?1",
+            [item_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if existing.is_none() && !create {
+        return Ok((0, false));
+    }
+    let sort: i64 = transaction.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + ?1 FROM clipboard_history WHERE is_pinned = ?2",
+        params![LIST_ORDER_GAP, existing.map(|(_, p)| p).unwrap_or(false)],
+        |row| row.get(0),
+    )?;
+    if let Some((id, _)) = existing {
+        transaction.execute("UPDATE clipboard_history SET last_seen_at = MAX(first_seen_at, ?1), sort_order = ?2, updated_at = ?1 WHERE id = ?3",
+            params![timestamp, sort, id])?;
+        Ok((id, false))
+    } else {
+        transaction.execute("INSERT INTO clipboard_history (uuid, item_id, first_seen_at, last_seen_at, capture_count, sort_order, updated_at)
+            VALUES (?1, ?2, ?3, ?3, 0, ?4, ?3)", params![Uuid::new_v4().to_string(), item_id, timestamp, sort])?;
+        Ok((transaction.last_insert_rowid(), true))
+    }
 }
 
 fn find_legacy_duplicate_item(

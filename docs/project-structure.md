@@ -26,6 +26,7 @@ src/
 │   ├── database/                   # SQLite 连接、结构、兼容校验和仓储
 │   ├── storage/                    # 原始字节文件写入、读取和校验
 │   ├── capture/                    # 捕获哈希、预览和持久化编排
+│   ├── sync/                       # 设备身份、配对、LAN 与 WebDAV 事件同步
 │   ├── paste.rs                    # 剪贴板恢复、复制和粘贴
 │   ├── custom_text.rs              # 自定义文本和原始内容恢复
 │   ├── recovery.rs                 # 启动恢复与未完成数据处理
@@ -85,6 +86,8 @@ src/
 
 `services/custom_text` 复用格式表和原始字节存储，创建或更新 `qcclip/custom-text`，并维护哈希、预览和标签。编辑不会覆盖已捕获格式；恢复原始内容时删除生成格式并重建派生数据。
 
+`services/sync` 管理独立设备身份和信任列表，编排 LAN 在线投递与 WebDAV 有界缓存，复用捕获事务保存远程内容。接收后返回具体历史、收藏及标签变更，由 `windows/main/state/sync.rs` 合并并局部更新界面。设置页、主窗口标题栏及条目菜单通过同步服务发起操作；架构和维护入口见[同步实现方案](sync-plan.md)，操作与验证见[同步使用说明](sync-guide.md)。
+
 数据导入、清理、位置迁移和旧版迁移由对应服务组织，受管理操作通过 `data_runtime` 协调。旧版迁移的支持范围见 [迁移说明](legacy-migration.md)。
 
 ### 应用运行时与平台
@@ -128,3 +131,5 @@ src/
 - 服务和平台错误通过 `Result` 传递，UI 负责显示可读提示，日志不记录原始剪贴板内容。
 - 新模块按实际职责和复用需求拆分，不创建未来功能的空目录，也不按数据库表数量机械拆分。
 - 独立状态、交互生命周期或多个调用方形成清晰边界时再增加抽象。
+
+`services/data_management/package` 管理按范围的数据快照、独立密码加密归档、合并/替换和 WebDAV 数据包；`windows/settings/pages/data_packages.rs` 提供统一抽屉交互。包与在线同步缓存独立，规则见[数据转移与备份](data-packages.md)。

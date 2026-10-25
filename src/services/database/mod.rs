@@ -20,6 +20,8 @@ pub use history_repository::{
 };
 pub use models::DatabaseInfo;
 pub(crate) use models::LIST_ORDER_GAP;
+#[cfg(test)]
+pub(crate) use models::{CURRENT_SCHEMA_VERSION, DATABASE_WRITE_VERSION};
 pub use note_repository::NoteRepository;
 pub use tag_repository::{
     TagCreateError, TagDeleteError, TagItemDeleteError, TagItemWriteError, TagQueryError,

@@ -104,7 +104,7 @@ impl Database {
                 true
             } else {
                 migrations::validate_schema(&connection)?;
-                false
+                version < CURRENT_SCHEMA_VERSION
             }
         } else {
             true
@@ -124,6 +124,9 @@ impl Database {
                     if version == CURRENT_SCHEMA_VERSION {
                         let writable = database.open_connection(false, false)?;
                         migrations::ensure_capture_indexes(&writable)?;
+                        writable
+                            .execute_batch(include_str!("sync.sql"))
+                            .map_err(|source| DatabaseError::Configure { source })?;
                     }
                 }
                 Err(error) => tracing::warn!("数据库已按只读兼容模式打开：{error}"),

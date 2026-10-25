@@ -859,7 +859,8 @@ impl HistoryRepository {
                 h.paste_count,
                 h.is_pinned,
                 h.sort_order,
-                h.last_source_app_name,
+                CASE WHEN h.capture_count > 0 THEN h.last_source_app_name
+                     ELSE COALESCE(s.app_name, h.last_source_app_name) END,
                 a.sha256,
                 a.byte_length,
                 a.relative_path,
@@ -869,11 +870,13 @@ impl HistoryRepository {
                     FROM clipboard_item_tags AS cit
                     WHERE cit.item_id = i.id
                 ), ''),
-                COALESCE(n.note_text, '')
+                COALESCE(n.note_text, ''),
+                CASE WHEN h.capture_count > 0 THEN NULL ELSE s.device_name END
              FROM clipboard_history AS h
              JOIN clipboard_items AS i ON i.id = h.item_id
              LEFT JOIN favorites AS f ON f.item_id = h.item_id
              LEFT JOIN clipboard_item_notes AS n ON n.item_id = i.id
+             LEFT JOIN sync_sources AS s ON s.item_id = i.id
              LEFT JOIN application_icon_assets AS a ON a.id = h.last_source_app_icon_id
              WHERE {}
              ORDER BY h.is_pinned DESC,
@@ -902,6 +905,7 @@ impl HistoryRepository {
                 row.get::<_, Option<i64>>(13)?,
                 row.get::<_, String>(14)?,
                 row.get::<_, String>(15)?,
+                row.get::<_, Option<String>>(16)?,
             ))
         })?;
         let mut records = Vec::new();
@@ -923,6 +927,7 @@ impl HistoryRepository {
                 favorite_id,
                 tag_ids,
                 note_text,
+                source_device_name,
             ) = row?;
             let loaded_preview_options = load_preview_options(
                 &connection,
@@ -958,6 +963,7 @@ impl HistoryRepository {
                 is_pinned,
                 sort_order,
                 source_app_name,
+                source_device_name,
                 source_app_icon: parse_application_icon_source(
                     source_app_icon_hash,
                     source_app_icon_byte_length,

@@ -581,6 +581,7 @@ mod item_display_tests {
             last_seen_at: 0,
             shortcut: String::new(),
             source_app_name: None,
+            source_device_name: None,
             source_app_icon: None,
             is_selected: false,
         };

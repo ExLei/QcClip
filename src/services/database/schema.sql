@@ -180,7 +180,7 @@ CREATE TABLE clipboard_history (
         REFERENCES clipboard_items(id) ON DELETE CASCADE,
     first_seen_at INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL,
-    capture_count INTEGER NOT NULL DEFAULT 1 CHECK(capture_count >= 1),
+    capture_count INTEGER NOT NULL DEFAULT 1 CHECK(capture_count >= 0),
     paste_count INTEGER NOT NULL DEFAULT 0 CHECK(paste_count >= 0),
     last_pasted_at INTEGER,
     is_pinned INTEGER NOT NULL DEFAULT 0 CHECK(is_pinned IN (0, 1)),

@@ -152,6 +152,18 @@ impl MainWindowService {
         }
     }
 
+    pub(crate) fn receive_sync_changes(
+        changes: Vec<crate::services::sync::ReceivedChange>,
+        cx: &mut App,
+    ) {
+        let main_view = cx
+            .try_global::<Self>()
+            .and_then(|service| service.main_view.clone());
+        if let Some(main_view) = main_view {
+            main_view.update(cx, |view, cx| view.receive_sync_changes(changes, cx));
+        }
+    }
+
     pub(crate) fn blocking_operation(cx: &App) -> Option<&'static str> {
         cx.try_global::<Self>()
             .and_then(|service| service.blocking_operation)

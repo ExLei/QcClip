@@ -501,6 +501,31 @@ impl PasteService {
             .collect::<Vec<_>>();
         if payloads
             .iter()
+            .any(|p| payload_role(p) == FormatRole::FileList)
+        {
+            let root = self
+                .database
+                .path()
+                .parent()
+                .ok_or_else(|| PasteError::Clipboard("数据目录无效".into()))?;
+            if let Some(paths) = crate::services::sync::managed_file_list(
+                connection,
+                &self.blob_store,
+                root,
+                item_id,
+            )
+            .map_err(|e| PasteError::Clipboard(e.to_string()))?
+            {
+                for payload in payloads
+                    .iter_mut()
+                    .filter(|p| payload_role(p) == FormatRole::FileList)
+                {
+                    payload.bytes = crate::platform::image_temp_file::hdrop_bytes_for_paths(&paths);
+                }
+            }
+        }
+        if payloads
+            .iter()
             .any(|payload| payload_role(payload) == FormatRole::VirtualFile)
             && !virtual_file_payloads_complete(&payloads)
         {
@@ -1118,8 +1143,8 @@ mod tests {
             .expect("无法查询内容 ID");
         connection
             .execute_batch(
-                "UPDATE database_compatibility SET minimum_write_version = 2;
-             PRAGMA user_version = 2;",
+                &format!("UPDATE database_compatibility SET minimum_write_version = {}; PRAGMA user_version = {};",
+                    crate::services::database::DATABASE_WRITE_VERSION + 1, crate::services::database::CURRENT_SCHEMA_VERSION + 1),
             )
             .expect("无法模拟只读兼容数据库");
         drop(connection);

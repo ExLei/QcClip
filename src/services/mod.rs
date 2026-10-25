@@ -14,6 +14,7 @@ pub mod paste;
 pub mod recovery;
 pub mod sound;
 pub mod storage;
+pub(crate) mod sync;
 pub(crate) mod system;
 #[cfg(target_os = "windows")]
 pub mod tray;

@@ -1571,9 +1571,11 @@ impl PreviewWindow {
         if let Some(item) = &self.item {
             rows.push((
                 PreviewInformationField::Source,
-                item.source_app_name
-                    .clone()
-                    .unwrap_or_else(|| translator.translate("main.source.unknown")),
+                i18n::clipboard_source(
+                    &translator,
+                    item.source_app_name.as_deref(),
+                    item.source_device_name.as_deref(),
+                ),
             ));
             if let Some(time) = chrono::DateTime::from_timestamp_millis(item.last_seen_at) {
                 rows.push((

@@ -89,6 +89,17 @@ pub(crate) fn open_about_window(cx: &mut App) {
     }
 }
 
+pub(crate) fn open_sync_window(cx: &mut App) {
+    open_settings_window(cx);
+    if let Some(view) = cx.global::<SettingsWindowService>().view.clone() {
+        view.update(cx, |view, cx| {
+            view.active_page = SettingsPage::Sync;
+            view.clear_search_highlight();
+            cx.notify();
+        });
+    }
+}
+
 pub(crate) fn open_settings_window(cx: &mut App) {
     let existing = cx.read_global::<SettingsWindowService, _>(|service, _| service.window);
     if let Some(window) = existing
@@ -229,6 +240,7 @@ enum SettingsPage {
     Shortcuts,
     Personalization,
     DataManagement,
+    Sync,
     About,
 }
 
@@ -243,7 +255,8 @@ impl SettingsPage {
             Self::Sound => 5,
             Self::ApplicationFilter => 6,
             Self::DataManagement => 7,
-            Self::About => 8,
+            Self::Sync => 8,
+            Self::About => 9,
         }
     }
 }
@@ -255,7 +268,7 @@ enum ShortcutCategory {
 }
 
 impl SettingsPage {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::General,
         Self::Clipboard,
         Self::Shortcuts,
@@ -264,6 +277,7 @@ impl SettingsPage {
         Self::Sound,
         Self::ApplicationFilter,
         Self::DataManagement,
+        Self::Sync,
         Self::About,
     ];
 
@@ -277,6 +291,7 @@ impl SettingsPage {
             Self::Shortcuts => "shortcuts",
             Self::Personalization => "personalization",
             Self::DataManagement => "data-management",
+            Self::Sync => "sync",
             Self::About => "about",
         }
     }
@@ -291,6 +306,7 @@ impl SettingsPage {
             Self::Shortcuts => "keyboard",
             Self::Personalization => "palette",
             Self::DataManagement => "folder-open",
+            Self::Sync => "devices",
             Self::About => "info-circle",
         }
     }
@@ -305,6 +321,7 @@ impl SettingsPage {
             Self::Shortcuts => "settings.page.shortcuts",
             Self::Personalization => "settings.page.personalization",
             Self::DataManagement => "settings.page.data_management",
+            Self::Sync => "settings.page.sync",
             Self::About => "settings.page.about",
         }
     }
@@ -408,6 +425,12 @@ fn open_settings_directory(path: std::path::PathBuf, title_key: &'static str, cx
 fn search_target_specs() -> &'static [SearchTargetSpec] {
     use SettingsPage::*;
     &[
+        SearchTargetSpec {
+            page: Sync,
+            title_key: "settings.page.sync",
+            description_key: Some("sync.description"),
+            ratio: 0.0,
+        },
         SearchTargetSpec {
             page: General,
             title_key: "settings.general.interface_language",
@@ -1025,12 +1048,13 @@ fn search_targets(translator: &i18n::Translator, query: &str) -> Vec<SearchTarge
 }
 
 struct SettingsWindowView {
+    sync_form: pages::sync::SyncForm,
     active_page: SettingsPage,
     focus_handle: FocusHandle,
     settings_search_input: Entity<InputState>,
     search_results_visible: bool,
     search_results_scroll_handle: ScrollHandle,
-    page_scroll_handles: [ScrollHandle; 9],
+    page_scroll_handles: [ScrollHandle; 10],
     pending_search_scroll: Option<(SettingsPage, f32)>,
     highlighted_search_anchor: Option<ScrollAnchor>,
     highlighted_search: Option<String>,
@@ -1534,7 +1558,9 @@ impl SettingsWindowView {
                 view.recording_session_shortcut = None;
                 cx.notify();
             });
+        let sync_form = pages::sync::SyncForm::new(window, cx);
         Self {
+            sync_form,
             active_page: SettingsPage::General,
             focus_handle: cx.focus_handle(),
             settings_search_input,
@@ -1977,5 +2003,18 @@ impl Render for SettingsWindowView {
                     ),
             )
             .child(self.render_search_results(cx))
+    }
+}
+
+pub(crate) fn refresh_sync(cx: &mut App) {
+    if let Some(view) = cx
+        .try_global::<SettingsWindowService>()
+        .and_then(|s| s.view.clone())
+    {
+        view.update(cx, |view, cx| {
+            if view.active_page == SettingsPage::Sync {
+                cx.notify();
+            }
+        });
     }
 }

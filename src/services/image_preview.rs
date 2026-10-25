@@ -84,6 +84,13 @@ pub fn probe_image_dimensions(bytes: &[u8], format_key: &str) -> Option<ImageDim
     (width > 0 && height > 0).then_some(ImageDimensions { width, height })
 }
 
+pub(crate) fn validate_remote_image(
+    bytes: &[u8],
+    format_key: &str,
+) -> Result<(), ImagePreviewError> {
+    decode_image_without_wic(bytes, format_key, (1, 1)).map(|_| ())
+}
+
 impl ImagePreviewService {
     pub fn new(blob_store: RawBlobStore) -> Self {
         Self { blob_store }

@@ -1,7 +1,9 @@
 use rusqlite::Connection;
 
 use super::query::HistoryQuery;
-use super::{Database, HistoryRepository, TagRepository};
+use super::{
+    CURRENT_SCHEMA_VERSION, DATABASE_WRITE_VERSION, Database, HistoryRepository, TagRepository,
+};
 use crate::domain::{capture::FormatKind, clipboard::ContentKind};
 use crate::services::{
     capture::{CaptureService, mock::MockClipboardSource},
@@ -62,14 +64,14 @@ fn future_database_does_not_install_current_capture_indexes() {
 }
 
 #[test]
-fn first_release_starts_at_schema_one() {
+fn new_database_uses_current_schema_version() {
     let directory = tempfile::tempdir().expect("无法创建临时目录");
     let database = Database::open(directory.path().join("test.sqlite3")).expect("无法创建数据库");
     let connection = database.connect().expect("无法连接数据库");
     let version: i32 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("无法读取结构版本");
-    assert_eq!(version, 1);
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 }
 
 #[test]
@@ -105,7 +107,7 @@ fn compatible_future_schema_keeps_revision_and_unknown_columns() {
     let version: i32 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("无法查询结构版本");
-    assert_eq!(version, 2);
+    assert_eq!(version, CURRENT_SCHEMA_VERSION + 1);
     let value: String = connection
         .query_row("SELECT value FROM future_settings", [], |row| row.get(0))
         .expect("无法查询扩展表");
@@ -124,7 +126,7 @@ fn future_schema_can_be_read_only_without_losing_history() {
         .store_captured_clipboard(&MockClipboardSource::text("已有文本").capture())
         .expect("无法捕获测试内容");
     let connection = database.connect().expect("无法连接数据库");
-    future_database(&connection, 1, 2);
+    future_database(&connection, 1, DATABASE_WRITE_VERSION + 1);
     drop(connection);
 
     let database = Database::open(&path).expect("只读兼容数据库应允许打开");
@@ -164,7 +166,7 @@ fn incompatible_reader_is_rejected_without_changing_database() {
     let version: i32 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("无法查询结构版本");
-    assert_eq!(version, 2);
+    assert_eq!(version, CURRENT_SCHEMA_VERSION + 1);
 }
 
 #[test]

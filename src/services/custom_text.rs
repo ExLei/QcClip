@@ -620,7 +620,21 @@ impl CustomTextService {
         }
         replace_item_tags(&transaction, item_id, tag_ids)?;
         cleanup_unreferenced_blobs(&transaction, &self.blob_store)?;
+        crate::services::sync::activity::record_local(&transaction, item_id, add_to_favorites)?;
         transaction.commit()?;
+        if add_to_favorites {
+            crate::services::sync::favorited(&self.database, item_id);
+        } else {
+            crate::services::sync::captured(
+                &self.database,
+                crate::services::capture::CaptureStoreResult {
+                    item_id,
+                    history_id,
+                    is_new: true,
+                    formats_changed: false,
+                },
+            );
+        }
         Ok(history_id)
     }
 }

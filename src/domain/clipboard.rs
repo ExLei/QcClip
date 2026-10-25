@@ -362,6 +362,7 @@ pub struct ClipboardListItem {
     pub last_seen_at: i64,
     pub shortcut: String,
     pub source_app_name: Option<String>,
+    pub source_device_name: Option<String>,
     pub source_app_icon: Option<ApplicationIconSource>,
     pub is_selected: bool,
 }
@@ -385,6 +386,7 @@ impl ClipboardListItem {
             last_seen_at: history.last_seen_at,
             shortcut: String::new(),
             source_app_name: history.source_app_name.clone(),
+            source_device_name: None,
             source_app_icon: history.source_app_icon.clone(),
             is_selected: false,
         }
