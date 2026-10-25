@@ -393,13 +393,31 @@ impl SettingsWindowView {
         let t = i18n::translator(cx);
         let view = cx.entity();
         let snapshot = SyncService::snapshot(cx);
+        let section = v_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .overflow_hidden()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.title_bar);
         let Some(config) = snapshot.config.as_ref() else {
-            return card(cx)
-                .child(heading(
+            return section
+                .child(settings_page_header(
+                    theme,
                     t.translate("settings.page.sync"),
-                    snapshot.message,
-                    cx,
+                    t.translate("sync.description"),
+                    div(),
                 ))
+                .child(
+                    div()
+                        .px_4()
+                        .py_3()
+                        .text_sm()
+                        .text_color(theme.danger)
+                        .child(snapshot.message),
+                )
                 .into_any_element();
         };
         let online = config
@@ -606,28 +624,32 @@ impl SettingsWindowView {
                         )),
                 )
             });
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_4()
+        section
             .child(header)
-            .child(status)
-            .when(!snapshot.message.is_empty(), |v| {
-                v.child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.danger)
-                        .child(snapshot.message.clone()),
-                )
-            })
-            .child(self.render_sync_identity(cx))
-            .child(actions)
-            .child(self.render_sync_devices(config, &snapshot, cx))
             .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(t.translate("sync.limits_help")),
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_4()
+                    .p_4()
+                    .child(status)
+                    .when(!snapshot.message.is_empty(), |v| {
+                        v.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.danger)
+                                .child(snapshot.message.clone()),
+                        )
+                    })
+                    .child(self.render_sync_identity(cx))
+                    .child(actions)
+                    .child(self.render_sync_devices(config, &snapshot, cx))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(t.translate("sync.limits_help")),
+                    ),
             )
             .into_any_element()
     }
