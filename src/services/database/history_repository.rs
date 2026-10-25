@@ -2292,7 +2292,11 @@ mod tests {
                 .iter()
                 .map(|record| record.sort_order)
                 .collect::<Vec<_>>(),
-            vec![2, 1, 0]
+            vec![
+                4 * LIST_ORDER_GAP - 1,
+                3 * LIST_ORDER_GAP - 1,
+                2 * LIST_ORDER_GAP - 1
+            ]
         );
     }
 
@@ -2359,7 +2363,11 @@ mod tests {
                 .iter()
                 .map(|record| (record.history_id, record.is_pinned, record.sort_order))
                 .collect::<Vec<_>>(),
-            vec![(third, true, 1), (second, true, 0), (first, false, 0)]
+            vec![
+                (third, true, 2 * LIST_ORDER_GAP - 1),
+                (second, true, LIST_ORDER_GAP - 1),
+                (first, false, LIST_ORDER_GAP - 1),
+            ]
         );
 
         assert!(

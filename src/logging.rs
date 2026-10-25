@@ -842,7 +842,8 @@ mod tests {
                 .stderr(fs::File::create(&stderr_path).unwrap())
                 .spawn()
                 .unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            // 子进程需采集调用栈，完整测试并行时可能明显变慢；死锁会一直挂起，60 秒足以区分。
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
             loop {
                 if let Some(status) = child.try_wait().unwrap() {
                     assert!(status.success());

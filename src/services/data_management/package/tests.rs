@@ -635,6 +635,8 @@ fn webdav_packages_use_manual_requests_and_do_not_require_pairing_or_sync_indexe
                     Err(error) => panic!("本机 WebDAV 测试未收到请求：{error}"),
                 }
             };
+            // Windows 上 accept 得到的连接会继承监听器的非阻塞模式。
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

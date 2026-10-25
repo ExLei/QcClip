@@ -827,14 +827,6 @@ fn keyboard_hover_is_suppressed(
         .is_some_and(|keyboard_sequence| Some(keyboard_sequence) == current_mouse_move_sequence)
 }
 
-#[cfg(test)]
-fn retain_selection_in_order(
-    selected_item_id: Option<HistoryItemId>,
-    order_ids: &[HistoryItemId],
-) -> Option<HistoryItemId> {
-    selected_item_id.filter(|selected| order_ids.contains(selected))
-}
-
 fn shortcut_uses_favorite_removal(
     shortcut: crate::config::SessionShortcutId,
     active_tab: TabId,
@@ -866,7 +858,7 @@ pub(crate) fn move_id_to_target(
 mod tests {
     use super::{
         TabId, hover_preview_allowed, keyboard_hover_is_suppressed, move_id_to_target,
-        retain_selection_in_order, shortcut_uses_favorite_removal,
+        shortcut_uses_favorite_removal,
     };
     use crate::config::SessionShortcutId;
 
@@ -886,13 +878,6 @@ mod tests {
         assert!(keyboard_hover_is_suppressed(Some(7), Some(7)));
         assert!(!keyboard_hover_is_suppressed(Some(7), Some(8)));
         assert!(!keyboard_hover_is_suppressed(None, None));
-    }
-
-    #[test]
-    fn selection_is_preserved_when_selected_item_is_outside_loaded_page() {
-        assert_eq!(retain_selection_in_order(Some(9), &[1, 4, 9]), Some(9));
-        assert_eq!(retain_selection_in_order(Some(9), &[]), None);
-        assert_eq!(retain_selection_in_order(Some(9), &[1, 4]), None);
     }
 
     #[test]

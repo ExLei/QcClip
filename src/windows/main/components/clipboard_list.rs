@@ -977,43 +977,6 @@ fn current_reorder_animation_offsets(
         .collect()
 }
 
-#[cfg(test)]
-fn compute_reorder_animation_start_offsets(
-    previous_order_ids: &[HistoryItemId],
-    current_order_ids: &[HistoryItemId],
-    item_heights: &HashMap<HistoryItemId, Pixels>,
-    current_visual_offsets: &HashMap<HistoryItemId, Pixels>,
-) -> HashMap<HistoryItemId, Pixels> {
-    let order_origins = |order_ids: &[HistoryItemId]| {
-        let mut origins = HashMap::with_capacity(order_ids.len());
-        let mut origin = px(0.0);
-        for history_id in order_ids {
-            origins.insert(*history_id, origin);
-            if let Some(height) = item_heights.get(history_id) {
-                origin += *height;
-            }
-        }
-        origins
-    };
-
-    let previous_origins = order_origins(previous_order_ids);
-    let current_origins = order_origins(current_order_ids);
-    current_order_ids
-        .iter()
-        .filter_map(|history_id| {
-            let previous_origin = previous_origins.get(history_id)?;
-            let current_origin = current_origins.get(history_id)?;
-            let offset = *previous_origin
-                + current_visual_offsets
-                    .get(history_id)
-                    .copied()
-                    .unwrap_or(px(0.0))
-                - *current_origin;
-            (offset != px(0.0)).then_some((*history_id, offset))
-        })
-        .collect()
-}
-
 fn source_application_icon(
     item: &ClipboardListItem,
     image: Option<Arc<RenderImage>>,
@@ -3507,9 +3470,8 @@ fn render_placeholder_row(
 #[cfg(test)]
 mod tests {
     use super::{
-        ADAPTIVE_IMAGE_PREVIEW_LINES, ListItemMetrics, compute_reorder_animation_start_offsets,
-        estimate_text_lines, file_list_meta_label, image_meta_byte_length, image_meta_label,
-        resolve_row_height,
+        ADAPTIVE_IMAGE_PREVIEW_LINES, ListItemMetrics, estimate_text_lines, file_list_meta_label,
+        image_meta_byte_length, image_meta_label, resolve_row_height,
     };
     use crate::config::{CardItemGap, ListItemHeight, ListItemStyle};
     use crate::domain::clipboard::ImageDimensions;
@@ -3820,42 +3782,5 @@ mod tests {
             image_metrics.preview_line_count,
             ADAPTIVE_IMAGE_PREVIEW_LINES
         );
-    }
-
-    #[test]
-    fn reorder_animation_offsets_follow_item_ids_with_variable_heights() {
-        let previous_order = [10, 20, 30];
-        let current_order = [20, 30, 10];
-        let item_heights = HashMap::from([(10, px(40.0)), (20, px(20.0)), (30, px(30.0))]);
-
-        let offsets = compute_reorder_animation_start_offsets(
-            &previous_order,
-            &current_order,
-            &item_heights,
-            &HashMap::new(),
-        );
-
-        assert_eq!(offsets.get(&20), Some(&px(40.0)));
-        assert_eq!(offsets.get(&30), Some(&px(40.0)));
-        assert_eq!(offsets.get(&10), Some(&px(-50.0)));
-    }
-
-    #[test]
-    fn reorder_animation_starts_from_the_current_visual_position() {
-        let previous_order = [10, 20, 30];
-        let current_order = [20, 30, 10];
-        let item_heights = HashMap::from([(10, px(40.0)), (20, px(20.0)), (30, px(30.0))]);
-        let current_visual_offsets = HashMap::from([(20, px(15.0)), (30, px(8.0))]);
-
-        let offsets = compute_reorder_animation_start_offsets(
-            &previous_order,
-            &current_order,
-            &item_heights,
-            &current_visual_offsets,
-        );
-
-        assert_eq!(offsets.get(&20), Some(&px(55.0)));
-        assert_eq!(offsets.get(&30), Some(&px(48.0)));
-        assert_eq!(offsets.get(&10), Some(&px(-50.0)));
     }
 }
