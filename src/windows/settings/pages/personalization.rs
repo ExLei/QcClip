@@ -824,11 +824,6 @@ fn open_preview_information_sheet(
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let information = config_runtime::preview_information_config(cx);
-        let appearance = config_runtime::appearance_config(cx);
-        let background = gpui::ColorExt::opacity(
-            &crate::window_material::excluded_window_theme(cx).background,
-            0.9,
-        );
         let mut controls = h_flex().w_full().flex_shrink_0().gap_2().pb_2();
         for (enabled, action) in [(true, "enable_all"), (false, "disable_all")] {
             controls = controls.child(
@@ -890,11 +885,7 @@ fn open_preview_information_sheet(
             .size(ui_rem(420.0))
             .resizable(false)
             .shadow_none()
-            .bg(background)
-            .when(
-                appearance.window_material != WindowMaterial::Disabled,
-                |this| this.backdrop_blur(px(18.0)),
-            )
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .child(content)
     });
 }
@@ -903,10 +894,6 @@ fn open_animations_sheet(view: Entity<SettingsWindowView>, window: &mut Window, 
     let save_error = i18n::translator(cx).translate("settings.personalization.save_error");
     window.open_sheet(cx, move |sheet, _, cx| {
         let theme = cx.theme().colors;
-        let sheet_background = gpui::ColorExt::opacity(
-            &crate::window_material::excluded_window_theme(cx).background,
-            0.9,
-        );
         let translator = i18n::translator(cx);
         let appearance = config_runtime::appearance_config(cx);
         let enable_all = Button::new("settings-animations-enable-all")
@@ -969,11 +956,7 @@ fn open_animations_sheet(view: Entity<SettingsWindowView>, window: &mut Window, 
             .size(ui_rem(420.0))
             .resizable(false)
             .shadow_none()
-            .bg(sheet_background)
-            .when(
-                appearance.window_material != WindowMaterial::Disabled,
-                |this| this.backdrop_blur(px(18.0)),
-            )
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .child(content)
     });
 }

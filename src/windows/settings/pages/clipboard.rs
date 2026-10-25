@@ -1121,10 +1121,6 @@ fn open_preview_types_sheet(
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let clipboard = config_runtime::clipboard_config(cx);
-        let background = gpui::ColorExt::opacity(
-            &crate::window_material::excluded_window_theme(cx).background,
-            0.9,
-        );
         let mut content = v_flex().size_full().min_h_0().overflow_y_scrollbar();
         for preview_type in ClipboardPreviewType::ALL {
             let label = translator.translate(preview_type.label_key());
@@ -1159,7 +1155,7 @@ fn open_preview_types_sheet(
             .size(ui_rem(420.0))
             .resizable(false)
             .shadow_none()
-            .bg(background)
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .child(content)
     });
 }

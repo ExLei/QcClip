@@ -11,10 +11,7 @@ use std::{cell::Cell, rc::Rc};
 
 use super::super::{SETTINGS_DROPDOWN_HEIGHT, SETTINGS_DROPDOWN_WIDTH};
 use crate::{
-    config::{
-        InterfaceLanguage, NotificationConfig, NotificationKind, NotificationPosition,
-        WindowMaterial,
-    },
+    config::{InterfaceLanguage, NotificationConfig, NotificationKind, NotificationPosition},
     config_runtime, i18n,
     platform::elevation,
     platform::window as platform_window,
@@ -384,11 +381,6 @@ fn open_notification_preferences(
         let enabled = config_runtime::global_notification_enabled(cx);
         let preferences = config_runtime::notification_preferences(cx);
         let notifications = config_runtime::notification_config(cx);
-        let appearance = config_runtime::appearance_config(cx);
-        let background = gpui::ColorExt::opacity(
-            &crate::window_material::excluded_window_theme(cx).background,
-            0.9,
-        );
         let mut content = v_flex().size_full().min_h_0().overflow_y_scrollbar();
         if !enabled {
             content = content.child(
@@ -549,11 +541,7 @@ fn open_notification_preferences(
             .size(ui_rem(420.0))
             .resizable(false)
             .shadow_none()
-            .bg(background)
-            .when(
-                appearance.window_material != WindowMaterial::Disabled,
-                |this| this.backdrop_blur(px(18.0)),
-            )
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .child(content)
     });
 }

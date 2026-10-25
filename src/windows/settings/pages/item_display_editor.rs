@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{App, Entity, Window, div, px};
+use gpui::{App, Entity, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::switch::Switch;
@@ -8,7 +8,7 @@ use gpui_component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_f
 use super::super::{SettingsWindowView, components::compact_setting_row};
 use super::personalization::persist_appearance_change;
 use crate::{
-    config::{ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility, WindowMaterial},
+    config::{ItemDisplayField, ItemDisplayPreset, ItemRegionVisibility},
     config_runtime, i18n,
     ui::{SingleSelectOption, scale::ui_rem, single_select},
 };
@@ -22,10 +22,6 @@ pub(super) fn open_item_display_sheet(
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let appearance = config_runtime::appearance_config(cx);
-        let sheet_background = gpui::ColorExt::opacity(
-            &crate::window_material::excluded_window_theme(cx).background,
-            0.9,
-        );
         let display = &appearance.item_display;
         let save_error = translator.translate("settings.personalization.save_error");
         let mut presets = h_flex().w_full().flex_shrink_0().gap_2().pb_2();
@@ -168,11 +164,7 @@ pub(super) fn open_item_display_sheet(
             .size(ui_rem(420.0))
             .resizable(false)
             .shadow_none()
-            .bg(sheet_background)
-            .when(
-                appearance.window_material != WindowMaterial::Disabled,
-                |this| this.backdrop_blur(px(18.0)),
-            )
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .child(content)
     });
 }

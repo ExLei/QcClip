@@ -79,7 +79,7 @@ pub(super) fn open(
             .size(ui_rem(540.0))
             .resizable(false)
             .shadow_none()
-            .bg(crate::window_material::excluded_window_theme(cx).background)
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .on_close({
                 let panel = content.clone();
                 move |_, window, cx| {

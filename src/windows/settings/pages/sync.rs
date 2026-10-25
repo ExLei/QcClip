@@ -2127,20 +2127,12 @@ fn open_sync_panel(
             _ => t.translate("sync.add_device"),
         };
         let content = view.update(cx, |view, cx| view.render_sync_panel(&snapshot, cx));
-        let background = crate::window_material::excluded_window_theme(cx)
-            .background
-            .opacity(0.9);
-        let material = crate::config_runtime::appearance_config(cx).window_material;
         sheet
             .title(title)
             .size(ui_rem(520.0))
             .resizable(false)
             .shadow_none()
-            .bg(background)
-            .when(
-                material != crate::config::WindowMaterial::Disabled,
-                |sheet| sheet.backdrop_blur(px(18.0)),
-            )
+            .map(|this| crate::window_material::sheet_surface(this, cx))
             .on_close({
                 let view = view.clone();
                 move |_, _, cx| {
