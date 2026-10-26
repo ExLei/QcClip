@@ -2429,7 +2429,7 @@ fn run_row_mouse_behavior(
     match action {
         ClipboardMouseAction::Paste => this.paste_item(target.item_id, cx),
         ClipboardMouseAction::PlainTextPaste => {
-            this.paste_selected_item_as_plain_text(cx);
+            this.paste_selected_item_as_plain_text(false, cx);
         }
         ClipboardMouseAction::Copy => this.copy_item(target.item_id, cx),
         ClipboardMouseAction::SelectItem => {

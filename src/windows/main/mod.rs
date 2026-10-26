@@ -426,8 +426,10 @@ impl MainWindowService {
             return;
         };
         if visible {
-            let started =
-                main_view.update(cx, |view, cx| view.paste_selected_item_as_plain_text(cx));
+            let into_main_input = crate::services::focus::input_window_is_foreground();
+            let started = main_view.update(cx, |view, cx| {
+                view.paste_selected_item_as_plain_text(into_main_input, cx)
+            });
             if !started {
                 Self::show_plain_text_paste_unavailable(cx);
             }
@@ -444,7 +446,11 @@ impl MainWindowService {
             .try_global::<Self>()
             .and_then(|service| service.main_view.clone());
         if let Some(main_view) = main_view {
-            main_view.update(cx, |view, cx| view.paste_history_index(index, cx));
+            let into_main_input = Self::is_logically_visible(cx)
+                && crate::services::focus::input_window_is_foreground();
+            main_view.update(cx, |view, cx| {
+                view.paste_history_index(index, into_main_input, cx)
+            });
         }
     }
 

@@ -74,6 +74,21 @@ pub fn restore_previous_focus() -> Result<(), String> {
     Ok(())
 }
 
+/// 主窗口内的输入框正持有系统焦点时返回 true，此时粘贴快捷键应直接作用于该输入框。
+pub fn input_window_is_foreground() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let input_window = FOCUS_SESSION
+            .lock()
+            .ok()
+            .and_then(|session| session.map(|session| session.input_window));
+        input_window.is_some_and(|window| current_foreground_window() == Some(window))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
 /// 恢复 Raw Input 按下时捕获的外部窗口焦点，不保存焦点状态。
 pub fn restore_captured_focus(target_window: Option<isize>) -> Result<(), String> {
     #[cfg(target_os = "windows")]

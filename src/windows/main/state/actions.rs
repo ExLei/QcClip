@@ -33,7 +33,13 @@ impl MainWindow {
         }
     }
 
-    pub(crate) fn paste_history_index(&mut self, index: usize, cx: &mut Context<Self>) {
+    /// `into_main_input` 为 true 时粘贴到当前持有焦点的主窗口输入框，不隐藏窗口也不恢复焦点。
+    pub(crate) fn paste_history_index(
+        &mut self,
+        index: usize,
+        into_main_input: bool,
+        cx: &mut Context<Self>,
+    ) {
         let order_ids = self.list_order_ids.clone();
         let active_tab = self.active_tab;
         let include_pinned = crate::config_runtime::shortcuts_config(cx)
@@ -43,9 +49,11 @@ impl MainWindow {
         let history_repository = self.history_repository.clone();
         let paste_service = self.paste_service.clone();
         cx.defer(move |cx| {
-            crate::windows::main::hide_main_window(cx);
-            if let Err(error) = crate::services::focus::restore_previous_focus() {
-                tracing::error!("快捷粘贴前恢复窗口焦点失败：{error}");
+            if !into_main_input {
+                crate::windows::main::hide_main_window(cx);
+                if let Err(error) = crate::services::focus::restore_previous_focus() {
+                    tracing::error!("快捷粘贴前恢复窗口焦点失败：{error}");
+                }
             }
             let history_config = crate::config_runtime::history_config(cx);
             let move_to_first = paste_order_target(TabId::Clipboard, cx);
@@ -175,11 +183,21 @@ impl MainWindow {
         cx.notify();
     }
 
-    pub(crate) fn paste_selected_item_as_plain_text(&mut self, cx: &mut Context<Self>) -> bool {
+    /// `into_main_input` 为 true 时粘贴到当前持有焦点的主窗口输入框，不恢复之前的窗口焦点。
+    pub(crate) fn paste_selected_item_as_plain_text(
+        &mut self,
+        into_main_input: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(item) = self.selected_list_item() else {
             return false;
         };
-        self.paste_plain_text_item(item.item_id, Some((self.active_tab, item.history_id)), cx);
+        self.paste_plain_text_item(
+            item.item_id,
+            Some((self.active_tab, item.history_id)),
+            into_main_input,
+            cx,
+        );
         true
     }
 
@@ -233,9 +251,10 @@ impl MainWindow {
         &mut self,
         item_id: ClipboardItemId,
         refresh: Option<(TabId, HistoryItemId)>,
+        into_main_input: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Err(error) = crate::services::focus::restore_previous_focus() {
+        if !into_main_input && let Err(error) = crate::services::focus::restore_previous_focus() {
             tracing::error!("纯文本粘贴前恢复窗口焦点失败：{error}");
         }
         let move_to_first = refresh.and_then(|(source_tab, _)| paste_order_target(source_tab, cx));
