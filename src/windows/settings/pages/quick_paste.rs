@@ -7,7 +7,9 @@ use gpui_component::{ActiveTheme as _, Sizable as _, v_flex};
 
 use super::super::{
     SettingsWindowView,
-    components::{settings_dropdown, settings_error_row, settings_page_header},
+    components::{
+        settings_dropdown, settings_error_row, settings_page_header, settings_section_title,
+    },
 };
 use crate::{
     config::QuickPasteConfig,
@@ -247,7 +249,23 @@ impl SettingsWindowView {
                     ),
                     keep_last_position_switch,
                 ),
-            );
+            )
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.related_settings"),
+            ))
+            .child(self.page_link_row(
+                theme,
+                SettingsPage::Shortcuts,
+                translator.translate("settings.quick_paste.shortcuts_link"),
+                cx,
+            ))
+            .child(self.page_link_row(
+                theme,
+                SettingsPage::Notifications,
+                translator.translate("settings.quick_paste.sound_link"),
+                cx,
+            ));
         if let Some(error) = &self.quick_paste_error {
             section = section.child(settings_error_row(theme, error));
         }

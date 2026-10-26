@@ -418,6 +418,27 @@ pub(in crate::windows::settings) fn settings_page_header(
         .into_any_element()
 }
 
+/// 页面内的分组标题，用于把同一页的设置按用途分段。
+///
+/// 标题不画分割线：上方由前一组最后一行的底边分隔，下方直接贴住本组第一行，
+/// 让标题在视觉上归属于它下面的设置。
+pub(in crate::windows::settings) fn settings_section_title(
+    theme: gpui_component::ThemeColor,
+    title: String,
+) -> AnyElement {
+    div()
+        .w_full()
+        .flex_shrink_0()
+        .px_4()
+        .pt(ui_rem(18.0))
+        .pb_1()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme.muted_foreground)
+        .child(title)
+        .into_any_element()
+}
+
 pub(in crate::windows::settings) fn setting_row(
     theme: gpui_component::ThemeColor,
     title: String,

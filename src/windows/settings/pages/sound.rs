@@ -7,7 +7,9 @@ use gpui::{AnyElement, Context};
 use super::super::SETTINGS_SOUND_SLIDER_WIDTH;
 use super::super::{
     SettingsWindowView,
-    components::{settings_dropdown, settings_error_row, settings_page_header},
+    components::{
+        settings_dropdown, settings_error_row, settings_page_header, settings_section_title,
+    },
 };
 use crate::{
     config::{SoundConfig, SoundPreset},
@@ -22,26 +24,30 @@ use gpui_component::switch::Switch;
 use gpui_component::{ActiveTheme as _, Disableable as _, IconNamed, Sizable as _, h_flex, v_flex};
 
 impl SettingsWindowView {
-    pub(in crate::windows::settings) fn render_sound(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::windows::settings) fn render_notifications(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme().colors;
         let translator = i18n::translator(cx);
         let sound_config = config_runtime::sound_config(cx);
         let view = cx.entity().clone();
-        let reset_error = translator.translate("settings.sound.reset_error");
+        let reset_error = translator.translate("settings.notifications.reset_error");
         let reset_view = view.clone();
-        let reset_button = Button::new("settings-sound-reset")
+        let reset_button = Button::new("settings-notifications-reset")
             .warning()
             .small()
             .label(translator.translate("settings.action.reset_page"))
             .on_click(move |_, _, cx| {
-                let result = config_runtime::reset_sound_config(cx);
+                let result = config_runtime::reset_notification_config(cx)
+                    .and_then(|_| config_runtime::reset_sound_config(cx));
                 let error_message = result.as_ref().err().map(|error| {
-                    tracing::error!("重置音效设置失败：{error}");
+                    tracing::error!("重置通知与音效设置失败：{error}");
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
-                    view.sound_error =
-                        notify_settings_error(SettingsPage::Sound, error_message, cx);
+                    view.notification_error =
+                        notify_settings_error(SettingsPage::Notifications, error_message, cx);
                     cx.notify();
                 });
             });
@@ -188,9 +194,18 @@ impl SettingsWindowView {
             .bg(theme.title_bar)
             .child(settings_page_header(
                 theme,
-                translator.translate("settings.page.sound"),
-                translator.translate("settings.sound.description"),
+                translator.translate("settings.page.notifications"),
+                translator.translate("settings.notifications.description"),
                 reset_button,
+            ))
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.notifications"),
+            ))
+            .children(self.render_notification_rows(cx))
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.sound"),
             ))
             .child(self.setting_row(
                 theme,
@@ -289,7 +304,7 @@ impl SettingsWindowView {
                         .on_click(|_, _, _| sound::open_sound_directory()),
                 ),
             );
-        if let Some(error) = &self.sound_error {
+        if let Some(error) = &self.notification_error {
             section = section.child(settings_error_row(theme, error));
         }
         section.into_any_element()
@@ -398,7 +413,8 @@ pub(in crate::windows::settings) fn persist_sound_change<F>(
         }
     };
     view.update(cx, |view, cx| {
-        view.sound_error = notify_settings_error(SettingsPage::Sound, error_message, cx);
+        view.notification_error =
+            notify_settings_error(SettingsPage::Notifications, error_message, cx);
         cx.notify();
     });
 }
@@ -414,8 +430,8 @@ pub(in crate::windows::settings) fn persist_sound_change_in_view<F>(
 {
     let mut sound_config = config_runtime::sound_config(cx);
     update(&mut sound_config);
-    view.sound_error = notify_settings_error(
-        SettingsPage::Sound,
+    view.notification_error = notify_settings_error(
+        SettingsPage::Notifications,
         match config_runtime::set_sound_config(sound_config, cx) {
             Ok(_) => None,
             Err(error) => {
