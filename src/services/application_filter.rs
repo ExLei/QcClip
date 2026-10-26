@@ -1,4 +1,7 @@
-use std::sync::{Arc, OnceLock};
+use std::{
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 use gpui::{App, AppContext as _, BorrowAppContext as _, Global, RenderImage};
 
@@ -188,24 +191,27 @@ pub(crate) fn resolve_manual_application(
     if query.is_empty() {
         return Err("请输入应用进程名称或应用名称".to_owned());
     }
-    let query = query.to_ascii_lowercase();
     #[cfg(target_os = "windows")]
     {
+        // 显式进程名和绝对路径不依赖窗口或进程存活，名称规则也不绑定版本目录。
+        if let Some(application) = manual_executable_application(query) {
+            return Ok(application);
+        }
         if let Some(application) = enumerate_windows_applications()
             .into_iter()
             .map(|application| application.application)
             .find(|application| {
-                application.process_name.to_ascii_lowercase() == query
-                    || application.display_name.to_ascii_lowercase() == query
-                    || application.process_path.to_ascii_lowercase() == query
+                application.process_name.eq_ignore_ascii_case(query)
+                    || application.display_name.eq_ignore_ascii_case(query)
+                    || application.process_path.eq_ignore_ascii_case(query)
             })
         {
             return Ok(application);
         }
         if let Some(current) = current_foreground_window().and_then(application_for_window)
-            && (current.process_name.to_ascii_lowercase() == query
-                || current.display_name.to_ascii_lowercase() == query
-                || current.process_path.to_ascii_lowercase() == query)
+            && (current.process_name.eq_ignore_ascii_case(query)
+                || current.display_name.eq_ignore_ascii_case(query)
+                || current.process_path.eq_ignore_ascii_case(query))
         {
             return Ok(current);
         }
@@ -216,6 +222,35 @@ pub(crate) fn resolve_manual_application(
         let _ = query;
         Err("当前平台不支持读取前台应用".to_owned())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn manual_executable_application(input: &str) -> Option<ApplicationFilterApplication> {
+    let input = input
+        .strip_prefix('"')
+        .and_then(|input| input.strip_suffix('"'))
+        .unwrap_or(input);
+    let path = Path::new(input);
+    let process_name = path.file_name()?.to_str()?;
+    if !path.extension()?.eq_ignore_ascii_case("exe")
+        || process_name.len() <= 4
+        || input.chars().any(|character| {
+            character.is_control() || matches!(character, '<' | '>' | '"' | '|' | '?' | '*')
+        })
+        || (!path.is_absolute() && input != process_name)
+        || process_name.contains(':')
+    {
+        return None;
+    }
+    Some(ApplicationFilterApplication {
+        process_name: process_name.to_owned(),
+        process_path: if path.is_absolute() {
+            input.to_owned()
+        } else {
+            String::new()
+        },
+        display_name: path.file_stem()?.to_str()?.to_owned(),
+    })
 }
 
 pub(crate) fn same_application(
@@ -253,11 +288,17 @@ fn source_matches_application(
     source: &SourceApplication,
     filter: &ApplicationFilterApplication,
 ) -> bool {
-    if let Some(source_path) = source.path.as_deref()
-        && !source_path.is_empty()
-        && !filter.process_path.is_empty()
-    {
-        return source_path.eq_ignore_ascii_case(&filter.process_path);
+    if let Some(source_path) = source.path.as_deref().filter(|path| !path.is_empty()) {
+        if !filter.process_path.is_empty() {
+            return source_path.eq_ignore_ascii_case(&filter.process_path);
+        }
+        if Path::new(source_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(&filter.process_name))
+        {
+            return true;
+        }
     }
 
     let Some(source_name) = source.name.as_deref().filter(|name| !name.is_empty()) else {
@@ -265,9 +306,9 @@ fn source_matches_application(
     };
     source_name.eq_ignore_ascii_case(&filter.display_name)
         || source_name.eq_ignore_ascii_case(&filter.process_name)
-        || filter
-            .process_name
-            .strip_suffix(".exe")
+        || Path::new(&filter.process_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
             .is_some_and(|process_name| source_name.eq_ignore_ascii_case(process_name))
 }
 
@@ -374,7 +415,6 @@ fn enumerate_windows_applications() -> Vec<ApplicationInfo> {
 fn application_for_hwnd(
     window: windows::Win32::Foundation::HWND,
 ) -> Option<ApplicationFilterApplication> {
-    use std::path::Path;
     let process_path = process_path_from_window(window).unwrap_or_default();
     let process_name = Path::new(&process_path)
         .file_name()
@@ -446,4 +486,130 @@ fn load_application_icon(path: &str) -> Option<Arc<RenderImage>> {
     }
     let image = image::RgbaImage::from_raw(icon.width, icon.height, pixels)?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(image)])))
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_process_name_does_not_require_a_running_application() {
+        let application = resolve_manual_application("  qcclip-non-running-filter-test.exe  ")
+            .expect("未运行的进程名应可添加");
+        assert_eq!(
+            application.process_name,
+            "qcclip-non-running-filter-test.exe"
+        );
+        assert_eq!(application.display_name, "qcclip-non-running-filter-test");
+        assert!(application.process_path.is_empty());
+    }
+
+    #[test]
+    fn manual_webview_rule_matches_different_runtime_versions() {
+        let filter = resolve_manual_application("msedgewebview2.exe").unwrap();
+        for version in ["155.0.4283.60", "155.0.4283.62"] {
+            let path = format!(
+                r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\{version}\msedgewebview2.exe"
+            );
+            let application = ApplicationFilterApplication {
+                process_name: "msedgewebview2.exe".to_owned(),
+                process_path: path.clone(),
+                display_name: "msedgewebview2".to_owned(),
+            };
+            assert!(same_application(&application, &filter));
+            assert!(source_matches_application(
+                &SourceApplication {
+                    name: Some("msedgewebview2".to_owned()),
+                    path: Some(path.clone()),
+                },
+                &filter,
+            ));
+            assert!(source_matches_application(
+                &SourceApplication {
+                    name: None,
+                    path: Some(path),
+                },
+                &filter,
+            ));
+        }
+    }
+
+    #[test]
+    fn manual_process_name_matches_without_source_path_case_insensitively() {
+        let filter = resolve_manual_application("MSEDGEWEBVIEW2.EXE").unwrap();
+        for name in ["msedgewebview2", "msedgewebview2.exe"] {
+            assert!(source_matches_application(
+                &SourceApplication {
+                    name: Some(name.to_owned()),
+                    path: None,
+                },
+                &filter,
+            ));
+        }
+    }
+
+    #[test]
+    fn manual_absolute_path_keeps_path_specific_matching() {
+        let path = r"C:\QcClip Test\msedgewebview2.exe";
+        let filter = resolve_manual_application(&format!("\"{path}\"")).unwrap();
+        assert_eq!(filter.process_path, path);
+        assert_eq!(filter.process_name, "msedgewebview2.exe");
+        for (source_path, expected) in [
+            (r"c:\qcclip test\MSEDGEWEBVIEW2.EXE", true),
+            (r"C:\Other\msedgewebview2.exe", false),
+        ] {
+            let application = ApplicationFilterApplication {
+                process_path: source_path.to_owned(),
+                ..filter.clone()
+            };
+            assert_eq!(same_application(&application, &filter), expected);
+            assert_eq!(
+                source_matches_application(
+                    &SourceApplication {
+                        name: Some("msedgewebview2".to_owned()),
+                        path: Some(source_path.to_owned()),
+                    },
+                    &filter,
+                ),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn manual_executable_rejects_invalid_or_ambiguous_inputs() {
+        for input in [
+            "",
+            ".exe",
+            "msedgewebview2",
+            "*.exe",
+            "bad?.exe",
+            "bad\nname.exe",
+            "name.exe:other.exe",
+            r"relative\msedgewebview2.exe",
+            r"C:msedgewebview2.exe",
+            r"\msedgewebview2.exe",
+            "\"msedgewebview2.exe",
+        ] {
+            assert!(
+                manual_executable_application(input).is_none(),
+                "不应接受无效或不明确的输入：{input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn manual_process_rule_does_not_match_other_or_missing_sources() {
+        let filter = resolve_manual_application("msedgewebview2.exe").unwrap();
+        for source in [
+            SourceApplication::default(),
+            SourceApplication {
+                name: Some("msedge".to_owned()),
+                path: Some(r"C:\Browser\msedge.exe".to_owned()),
+            },
+        ] {
+            assert!(!source_matches_application(&source, &filter));
+        }
+        assert!(resolve_manual_application("   ").is_err());
+    }
 }
