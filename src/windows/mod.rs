@@ -7,4 +7,5 @@ pub(crate) mod note_editor;
 pub(crate) mod notification;
 pub(crate) mod preview;
 pub(crate) mod quick_paste;
+pub(crate) mod renderer_warning;
 pub(crate) mod settings;

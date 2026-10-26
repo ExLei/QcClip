@@ -76,8 +76,11 @@ raw-input = { path = "vendor/raw-input" }
 winreg = "0.55"
 windows = { version = "0.62.2", features = [
     "Win32_Globalization",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
     "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
     "Win32_Storage_FileSystem",

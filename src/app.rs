@@ -64,6 +64,7 @@ pub fn run() {
         data_root = ?app_paths.data_root(), portable = app_paths.is_portable(),
         "QcClip 数据目录已确定"
     );
+    crate::platform::system_info::log_in_background();
     let import_error = match apply_pending_import(app_paths.data_root()) {
         Ok(true) => {
             tracing::info!("已应用暂存的数据导入内容");
@@ -324,6 +325,7 @@ pub fn run() {
                     tracing::error!("无法创建剪贴板窗口：{error}");
                     panic!("无法创建剪贴板窗口：{error}");
                 });
+            crate::windows::renderer_warning::check(main_window.into(), cx);
             crate::windows::main::MainWindowService::set_window(
                 main_window.into(),
                 initially_visible,

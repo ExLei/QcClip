@@ -159,6 +159,7 @@ pub(crate) struct PersistedState {
     pub(crate) main_window: PersistedMainWindowState,
     pub(crate) preview_window: PersistedPreviewWindowState,
     pub(crate) legacy_migration_prompt_dismissed: bool,
+    pub(crate) software_rendering_warning_dismissed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -233,6 +234,7 @@ impl Default for PersistedState {
             main_window: PersistedMainWindowState::default(),
             preview_window: PersistedPreviewWindowState::default(),
             legacy_migration_prompt_dismissed: false,
+            software_rendering_warning_dismissed: false,
         }
     }
 }

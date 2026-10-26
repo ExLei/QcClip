@@ -11,5 +11,6 @@ pub mod input;
 pub mod os_version;
 pub mod shell_open;
 pub(crate) mod single_instance;
+pub(crate) mod system_info;
 pub mod window;
 pub(crate) mod window_appearance;
