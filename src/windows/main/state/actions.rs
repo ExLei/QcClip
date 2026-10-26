@@ -15,24 +15,6 @@ fn paste_order_target(source_tab: TabId, cx: &gpui::App) -> Option<PasteOrderTar
 }
 
 impl MainWindow {
-    fn refresh_after_paste(
-        &mut self,
-        source_tab: TabId,
-        history_id: HistoryItemId,
-        reordered: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if !reordered
-            && self.active_tab == source_tab
-            && matches!(self.list_status, ListStatus::Ready)
-            && self.history_query().paste_filter.is_none()
-        {
-            self.refresh_loaded_list_item(source_tab, history_id, cx);
-        } else {
-            self.refresh_list_item_for_tab(source_tab, history_id, cx);
-        }
-    }
-
     /// `into_main_input` 为 true 时粘贴到当前持有焦点的主窗口输入框，不隐藏窗口也不恢复焦点。
     pub(crate) fn paste_history_index(
         &mut self,
@@ -85,11 +67,10 @@ impl MainWindow {
                     .paste_item(item_id, move_to_first)
                     .map_err(|error| error.to_string())
             });
-            cx.spawn(async move |cx| match paste_task.await {
-                Ok(()) => {
-                    cx.update(|cx| crate::windows::main::MainWindowService::refresh_history(cx))
+            cx.spawn(async move |_| {
+                if let Err(error) = paste_task.await {
+                    tracing::error!("快捷粘贴第 {} 项失败：{error}", index + 1);
                 }
-                Err(error) => tracing::error!("快捷粘贴第 {} 项失败：{error}", index + 1),
             })
             .detach();
         });
@@ -109,7 +90,6 @@ impl MainWindow {
         let move_to_first = paste_order_target(source_tab, cx);
 
         let paste_service = self.paste_service.clone();
-        let this = cx.weak_entity();
         cx.defer(move |cx| {
             crate::windows::main::hide_main_window(cx);
             if let Err(error) = crate::services::focus::restore_previous_focus() {
@@ -118,20 +98,10 @@ impl MainWindow {
 
             let paste_task = cx
                 .background_spawn(async move { paste_service.paste_item(item_id, move_to_first) });
-            cx.spawn(async move |cx| match paste_task.await {
-                Ok(()) => {
-                    if let Some(this) = this.upgrade() {
-                        this.update(cx, |this, cx| {
-                            this.refresh_after_paste(
-                                source_tab,
-                                history_id,
-                                move_to_first.is_some(),
-                                cx,
-                            );
-                        });
-                    }
+            cx.spawn(async move |_| {
+                if let Err(error) = paste_task.await {
+                    tracing::error!("剪贴板粘贴失败：{error}");
                 }
-                Err(error) => tracing::error!("剪贴板粘贴失败：{error}"),
             })
             .detach();
         });
@@ -164,20 +134,10 @@ impl MainWindow {
         let paste_task = cx.background_spawn(async move {
             paste_service.paste_item_format(item_id, &format_namespace, &format_key, move_to_first)
         });
-        cx.spawn(async move |this, cx| match paste_task.await {
-            Ok(()) => {
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        this.refresh_after_paste(
-                            source_tab,
-                            history_id,
-                            move_to_first.is_some(),
-                            cx,
-                        );
-                    });
-                }
+        cx.spawn(async move |_, _| {
+            if let Err(error) = paste_task.await {
+                tracing::error!("指定格式粘贴失败：{error}");
             }
-            Err(error) => tracing::error!("指定格式粘贴失败：{error}"),
         })
         .detach();
         cx.notify();
@@ -192,12 +152,7 @@ impl MainWindow {
         let Some(item) = self.selected_list_item() else {
             return false;
         };
-        self.paste_plain_text_item(
-            item.item_id,
-            Some((self.active_tab, item.history_id)),
-            into_main_input,
-            cx,
-        );
+        self.paste_plain_text_item(item.item_id, self.active_tab, into_main_input, cx);
         true
     }
 
@@ -205,31 +160,12 @@ impl MainWindow {
         if let Err(error) = crate::services::focus::restore_previous_focus() {
             tracing::error!("纯文本粘贴前恢复窗口焦点失败：{error}");
         }
-        let active_tab = self.active_tab;
         let move_to_first = paste_order_target(TabId::Clipboard, cx);
         let paste_service = self.paste_service.clone();
         let paste_task = cx
             .background_spawn(async move { paste_service.paste_latest_plain_text(move_to_first) });
-        cx.spawn(async move |this, cx| match paste_task.await {
-            Ok(item_id) => {
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        if let Some(list_item_id) = this
-                            .items
-                            .iter()
-                            .find(|item| item.item_id == item_id)
-                            .map(|item| item.history_id)
-                        {
-                            this.refresh_after_paste(
-                                active_tab,
-                                list_item_id,
-                                move_to_first.is_some(),
-                                cx,
-                            );
-                        }
-                    });
-                }
-            }
+        cx.spawn(async move |_, cx| match paste_task.await {
+            Ok(_) => {}
             Err(error) => {
                 tracing::error!("纯文本粘贴失败：{error}");
                 if matches!(
@@ -250,33 +186,20 @@ impl MainWindow {
     fn paste_plain_text_item(
         &mut self,
         item_id: ClipboardItemId,
-        refresh: Option<(TabId, HistoryItemId)>,
+        source_tab: TabId,
         into_main_input: bool,
         cx: &mut Context<Self>,
     ) {
         if !into_main_input && let Err(error) = crate::services::focus::restore_previous_focus() {
             tracing::error!("纯文本粘贴前恢复窗口焦点失败：{error}");
         }
-        let move_to_first = refresh.and_then(|(source_tab, _)| paste_order_target(source_tab, cx));
+        let move_to_first = paste_order_target(source_tab, cx);
         let paste_service = self.paste_service.clone();
         let paste_task = cx.background_spawn(async move {
             paste_service.paste_item_plain_text(item_id, move_to_first)
         });
-        cx.spawn(async move |this, cx| match paste_task.await {
-            Ok(()) => {
-                if let Some((source_tab, history_id)) = refresh
-                    && let Some(this) = this.upgrade()
-                {
-                    this.update(cx, |this, cx| {
-                        this.refresh_after_paste(
-                            source_tab,
-                            history_id,
-                            move_to_first.is_some(),
-                            cx,
-                        );
-                    });
-                }
-            }
+        cx.spawn(async move |_, cx| match paste_task.await {
+            Ok(()) => {}
             Err(error) => {
                 tracing::error!("纯文本粘贴失败：{error}");
                 if matches!(
@@ -354,7 +277,6 @@ impl MainWindow {
 
     pub(crate) fn paste_multi_selected_items(&mut self, cx: &mut Context<Self>) {
         let selected_ids = self.multi_selected_item_ids.clone();
-        let refresh_list_ids = selected_ids.clone();
         let active_tab = self.active_tab;
         let move_to_first = paste_order_target(active_tab, cx);
         let history_repository = self.history_repository.clone();
@@ -376,7 +298,7 @@ impl MainWindow {
                 .map(|prepared| (prepared, item_ids))
                 .map_err(|error| error.to_string())
         });
-        cx.spawn(async move |this, cx| match preparation_task.await {
+        cx.spawn(async move |_, cx| match preparation_task.await {
             Ok((prepared, _item_ids)) => {
                 cx.update(|cx| {
                     crate::windows::main::hide_main_window(cx);
@@ -391,24 +313,6 @@ impl MainWindow {
                 });
                 cx.spawn(async move |cx| {
                     let result = paste_task.await;
-                    if result.is_ok() {
-                        if let Some(this) = this.upgrade() {
-                            this.update(cx, |this, cx| {
-                                if this.active_tab != active_tab {
-                                    this.refresh_history(cx);
-                                } else {
-                                    for list_item_id in &refresh_list_ids {
-                                        this.refresh_after_paste(
-                                            active_tab,
-                                            *list_item_id,
-                                            move_to_first.is_some(),
-                                            cx,
-                                        );
-                                    }
-                                }
-                            });
-                        }
-                    }
                     cx.update(|cx| {
                         show_multi_selection_feedback(
                             result,

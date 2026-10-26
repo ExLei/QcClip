@@ -460,9 +460,10 @@ impl QuickPasteWindowService {
                 .paste_item(item_id, move_to_first)
                 .map_err(|error| error.to_string())
         });
-        cx.spawn(async move |cx| match paste_task.await {
-            Ok(()) => cx.update(|cx| crate::windows::main::MainWindowService::refresh_history(cx)),
-            Err(error) => tracing::error!("便捷粘贴失败：{error}"),
+        cx.spawn(async move |_| {
+            if let Err(error) = paste_task.await {
+                tracing::error!("便捷粘贴失败：{error}");
+            }
         })
         .detach();
     }

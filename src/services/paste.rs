@@ -1,6 +1,7 @@
 use std::{
     io::Cursor,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -10,7 +11,7 @@ use thiserror::Error;
 use crate::{
     domain::{
         capture::{FormatKind, FormatRole, classify_format_role},
-        clipboard::ClipboardItemId,
+        clipboard::{ClipboardItemId, HistoryItemId},
     },
     platform::{
         clipboard::{
@@ -62,6 +63,40 @@ pub const IMAGE_FILE_FORMAT_KEY: &str = "qcclip-image-file";
 pub(crate) enum PasteOrderTarget {
     Clipboard,
     Favorites,
+}
+
+/// 粘贴成功并写入计数后发布的变更。界面订阅后按需就地同步，粘贴入口不需要主动刷新界面。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PastedItem {
+    pub(crate) item_id: ClipboardItemId,
+    /// 剪贴板历史记录 ID 和更新后的粘贴次数；内容不在历史中时为空。
+    pub(crate) history: Option<(HistoryItemId, u64)>,
+    /// 收藏记录 ID 和更新后的粘贴次数；内容未收藏时为空。
+    pub(crate) favorite: Option<(i64, u64)>,
+    /// 实际被移到首位的列表；未启用、条目已置顶或已在首位时为空。
+    pub(crate) moved_to_first: Option<PasteOrderTarget>,
+}
+
+static PASTED_ITEM_SUBSCRIBERS: Mutex<Vec<async_channel::Sender<PastedItem>>> =
+    Mutex::new(Vec::new());
+
+/// 订阅粘贴计数变更。接收端被丢弃后，下一次发布时会自动移除该订阅。
+pub(crate) fn subscribe_pasted_items() -> async_channel::Receiver<PastedItem> {
+    let (sender, receiver) = async_channel::unbounded();
+    lock_pasted_item_subscribers().push(sender);
+    receiver
+}
+
+fn publish_pasted_item(event: PastedItem) {
+    lock_pasted_item_subscribers().retain(|sender| sender.try_send(event).is_ok());
+}
+
+fn lock_pasted_item_subscribers()
+-> std::sync::MutexGuard<'static, Vec<async_channel::Sender<PastedItem>>> {
+    match PASTED_ITEM_SUBSCRIBERS.lock() {
+        Ok(subscribers) => subscribers,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -135,8 +170,7 @@ impl PasteService {
 
         paste_into_active_window(&payloads, &self.clipboard_write_suppressor)
             .map_err(PasteError::Clipboard)?;
-        self.update_paste_counts(&connection, item_id, move_to_first)?;
-        Ok(())
+        self.record_paste(&connection, item_id, move_to_first)
     }
 
     pub(crate) fn paste_item_format(
@@ -175,8 +209,7 @@ impl PasteService {
 
         paste_into_active_window(&payloads, &self.clipboard_write_suppressor)
             .map_err(PasteError::Clipboard)?;
-        self.update_paste_counts(&connection, item_id, move_to_first)?;
-        Ok(())
+        self.record_paste(&connection, item_id, move_to_first)
     }
 
     pub fn copy_item(&self, item_id: i64) -> Result<(), PasteError> {
@@ -233,14 +266,18 @@ impl PasteService {
         if connection.is_readonly(rusqlite::MAIN_DB)? {
             return Ok(());
         }
+        let mut events = Vec::with_capacity(item_ids.len());
         for item_id in &item_ids {
-            self.update_paste_counts(&connection, *item_id, None)?;
+            events.extend(self.update_paste_counts(&connection, *item_id, None)?);
         }
         if let Some(target) = move_to_first {
-            for item_id in item_ids.iter().rev() {
-                self.move_item_to_first(*item_id, target)?;
+            for event in events.iter_mut().rev() {
+                if self.move_item_to_first(event.item_id, target)? {
+                    event.moved_to_first = Some(target);
+                }
             }
         }
+        events.into_iter().for_each(publish_pasted_item);
         Ok(())
     }
 
@@ -267,8 +304,7 @@ impl PasteService {
 
         paste_into_active_window(&[payload], &self.clipboard_write_suppressor)
             .map_err(PasteError::Clipboard)?;
-        self.update_paste_counts(&connection, item_id, move_to_first)?;
-        Ok(())
+        self.record_paste(&connection, item_id, move_to_first)
     }
 
     /// 将历史排序中的首个剪贴板条目以纯文本粘贴到当前活动窗口。
@@ -604,49 +640,85 @@ impl PasteService {
         })
     }
 
-    fn update_paste_counts(
+    /// 写入粘贴计数和排序后发布变更；只读数据库不写入也不发布。
+    fn record_paste(
         &self,
         connection: &Connection,
         item_id: i64,
         move_to_first: Option<PasteOrderTarget>,
     ) -> Result<(), PasteError> {
-        if connection.is_readonly(rusqlite::MAIN_DB)? {
-            return Ok(());
-        }
-        let timestamp = current_timestamp_millis();
-        connection.execute(
-            "UPDATE clipboard_history
-             SET paste_count = paste_count + 1,
-                 last_pasted_at = ?1,
-                 updated_at = ?1
-             WHERE item_id = ?2",
-            rusqlite::params![timestamp, item_id],
-        )?;
-        connection.execute(
-            "UPDATE favorites
-             SET paste_count = paste_count + 1,
-                 last_pasted_at = ?1,
-                 updated_at = ?1
-             WHERE item_id = ?2",
-            rusqlite::params![timestamp, item_id],
-        )?;
-        if let Some(target) = move_to_first {
-            self.move_item_to_first(item_id, target)?;
+        if let Some(event) = self.update_paste_counts(connection, item_id, move_to_first)? {
+            publish_pasted_item(event);
         }
         Ok(())
     }
 
-    fn move_item_to_first(&self, item_id: i64, target: PasteOrderTarget) -> Result<(), PasteError> {
-        match target {
+    fn update_paste_counts(
+        &self,
+        connection: &Connection,
+        item_id: i64,
+        move_to_first: Option<PasteOrderTarget>,
+    ) -> Result<Option<PastedItem>, PasteError> {
+        if connection.is_readonly(rusqlite::MAIN_DB)? {
+            return Ok(None);
+        }
+        let timestamp = current_timestamp_millis();
+        let read_count = |row: &rusqlite::Row<'_>| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+        };
+        let history = connection
+            .query_row(
+                "UPDATE clipboard_history
+                 SET paste_count = paste_count + 1,
+                     last_pasted_at = ?1,
+                     updated_at = ?1
+                 WHERE item_id = ?2
+                 RETURNING id, paste_count",
+                rusqlite::params![timestamp, item_id],
+                read_count,
+            )
+            .optional()?;
+        let favorite = connection
+            .query_row(
+                "UPDATE favorites
+                 SET paste_count = paste_count + 1,
+                     last_pasted_at = ?1,
+                     updated_at = ?1
+                 WHERE item_id = ?2
+                 RETURNING id, paste_count",
+                rusqlite::params![timestamp, item_id],
+                read_count,
+            )
+            .optional()?;
+        let mut event = PastedItem {
+            item_id,
+            history,
+            favorite,
+            moved_to_first: None,
+        };
+        if let Some(target) = move_to_first
+            && self.move_item_to_first(item_id, target)?
+        {
+            event.moved_to_first = Some(target);
+        }
+        Ok(Some(event))
+    }
+
+    /// 返回条目是否实际改变了位置。
+    fn move_item_to_first(
+        &self,
+        item_id: i64,
+        target: PasteOrderTarget,
+    ) -> Result<bool, PasteError> {
+        Ok(match target {
             PasteOrderTarget::Clipboard => {
                 HistoryRepository::new(self.database.clone(), self.blob_store.clone())
-                    .move_item_to_top(item_id)?;
+                    .move_item_to_top(item_id)?
             }
             PasteOrderTarget::Favorites => {
-                FavoriteRepository::new(self.database.clone()).move_item_to_top(item_id)?;
+                FavoriteRepository::new(self.database.clone()).move_item_to_top(item_id)?
             }
-        }
-        Ok(())
+        })
     }
 }
 
@@ -1156,9 +1228,10 @@ mod tests {
                 .is_empty()
         );
         let connection = database.connect().expect("无法连接只读数据库");
-        service
+        let event = service
             .update_paste_counts(&connection, item_id, Some(PasteOrderTarget::Clipboard))
             .expect("只读模式应跳过计数和排序写入");
+        assert_eq!(event, None);
         let count: i64 = connection
             .query_row(
                 "SELECT paste_count FROM clipboard_history WHERE id = ?1",
@@ -1505,9 +1578,26 @@ mod tests {
             )
             .expect("无法创建测试收藏");
         let service = PasteService::new(database, store);
-        service
+        let event = service
             .update_paste_counts(&connection, item_id, None)
-            .expect("无法更新粘贴计数");
+            .expect("无法更新粘贴计数")
+            .expect("可写数据库应返回粘贴变更");
+        let favorite_id: i64 = connection
+            .query_row(
+                "SELECT id FROM favorites WHERE item_id = ?1",
+                [item_id],
+                |row| row.get(0),
+            )
+            .expect("无法读取收藏 ID");
+        assert_eq!(
+            event,
+            PastedItem {
+                item_id,
+                history: Some((history_id, 1)),
+                favorite: Some((favorite_id, 1)),
+                moved_to_first: None,
+            }
+        );
         let history_count: i64 = connection
             .query_row(
                 "SELECT paste_count FROM clipboard_history WHERE item_id = ?1",
@@ -1524,5 +1614,52 @@ mod tests {
             .expect("无法读取收藏粘贴计数");
         assert_eq!(history_count, 1);
         assert_eq!(favorite_count, 1);
+    }
+
+    #[test]
+    fn pasted_item_reports_only_actual_moves_to_first() {
+        let directory = tempfile::tempdir().expect("无法创建临时目录");
+        let database =
+            Database::open(directory.path().join("test.sqlite3")).expect("无法创建数据库");
+        let store = RawBlobStore::new(directory.path()).expect("无法创建文件存储");
+        let capture = CaptureService::new(database.clone(), store.clone());
+        let older_history_id = capture
+            .store_captured_clipboard(&MockClipboardSource::text("较早").capture())
+            .expect("无法保存较早内容");
+        capture
+            .store_captured_clipboard(&MockClipboardSource::text("较新").capture())
+            .expect("无法保存较新内容");
+        let connection = database.connect().expect("无法连接数据库");
+        let older_item_id: i64 = connection
+            .query_row(
+                "SELECT item_id FROM clipboard_history WHERE id = ?1",
+                [older_history_id],
+                |row| row.get(0),
+            )
+            .expect("无法读取内容 ID");
+        let service = PasteService::new(database, store);
+
+        let moved = service
+            .update_paste_counts(
+                &connection,
+                older_item_id,
+                Some(PasteOrderTarget::Clipboard),
+            )
+            .expect("无法更新粘贴计数")
+            .expect("可写数据库应返回粘贴变更");
+        assert_eq!(moved.history, Some((older_history_id, 1)));
+        assert_eq!(moved.favorite, None);
+        assert_eq!(moved.moved_to_first, Some(PasteOrderTarget::Clipboard));
+
+        let already_first = service
+            .update_paste_counts(
+                &connection,
+                older_item_id,
+                Some(PasteOrderTarget::Clipboard),
+            )
+            .expect("无法更新粘贴计数")
+            .expect("可写数据库应返回粘贴变更");
+        assert_eq!(already_first.history, Some((older_history_id, 2)));
+        assert_eq!(already_first.moved_to_first, None);
     }
 }

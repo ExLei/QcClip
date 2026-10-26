@@ -849,6 +849,45 @@ impl MainWindow {
         .detach();
     }
 
+    /// 同步任意来源的粘贴计数变更。通常只就地更新内存中的计数；只有当前列表的顺序
+    /// 或粘贴状态筛选结果可能变化时，才按单条增量同步位置和成员。
+    pub(crate) fn apply_pasted_item(
+        &mut self,
+        event: crate::services::paste::PastedItem,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::services::paste::PasteOrderTarget;
+
+        let (record, order_target) = match self.active_tab {
+            TabId::Clipboard => (event.history, PasteOrderTarget::Clipboard),
+            TabId::Favorites => (event.favorite, PasteOrderTarget::Favorites),
+            TabId::Emoji => return,
+        };
+        let Some((list_item_id, paste_count)) = record else {
+            return;
+        };
+        // 首次粘贴会让条目在“已粘贴/未粘贴”筛选之间切换。
+        let filter_membership_changed =
+            paste_count == 1 && self.history_query().paste_filter.is_some();
+        if event.moved_to_first == Some(order_target) || filter_membership_changed {
+            self.refresh_list_item(list_item_id, cx);
+            return;
+        }
+
+        if let Some(index) = self.list_order_positions.get(&list_item_id).copied() {
+            self.list_heatmap.update(index, paste_count);
+        }
+        for item in &mut self.items {
+            if item.history_id == list_item_id {
+                item.paste_count = paste_count;
+            }
+        }
+        if let Some(item) = self.loaded_items.get_mut(&list_item_id) {
+            item.paste_count = paste_count;
+        }
+        cx.notify();
+    }
+
     fn apply_loaded_list_record(&mut self, record: HistoryListRecord) {
         if let Some(index) = self.list_order_positions.get(&record.history_id).copied() {
             self.list_heatmap.update(index, record.paste_count);

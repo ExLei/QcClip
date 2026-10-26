@@ -70,6 +70,22 @@ impl MainWindowService {
         })
         .detach();
 
+        // 粘贴可能来自便捷粘贴、快捷键或主窗口自身，统一由粘贴计数变更事件同步列表。
+        let pasted_items = crate::services::paste::subscribe_pasted_items();
+        cx.spawn(async move |cx| {
+            while let Ok(event) = pasted_items.recv().await {
+                cx.update(|cx| {
+                    let main_view = cx
+                        .try_global::<Self>()
+                        .and_then(|service| service.main_view.clone());
+                    if let Some(main_view) = main_view {
+                        main_view.update(cx, |view, cx| view.apply_pasted_item(event, cx));
+                    }
+                });
+            }
+        })
+        .detach();
+
         let (subscription_id, receiver) = input::subscribe_mouse_events();
         cx.update_global::<Self, _>(|service, _| {
             service.mouse_event_listener_id = Some(subscription_id);
