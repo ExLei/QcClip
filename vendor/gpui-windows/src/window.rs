@@ -79,6 +79,8 @@ pub struct WindowsWindowState {
     pub cursor_visible: Arc<AtomicBool>,
     pub nc_button_pressed: Cell<Option<u32>>,
     pub dragging: Cell<bool>,
+    /// 不可激活窗口进入移动循环前的前台窗口，移动结束后若焦点被抢走则恢复。
+    pub foreground_before_move: Cell<Option<HWND>>,
 
     pub display: Cell<WindowsDisplay>,
     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
@@ -179,6 +181,7 @@ impl WindowsWindowState {
             cursor_visible,
             nc_button_pressed: Cell::new(nc_button_pressed),
             dragging: Cell::new(false),
+            foreground_before_move: Cell::new(None),
             display: Cell::new(display),
             fullscreen: Cell::new(fullscreen),
             initial_placement: Cell::new(initial_placement),

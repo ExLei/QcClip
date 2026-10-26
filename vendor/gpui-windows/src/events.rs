@@ -130,7 +130,9 @@ impl WindowsWindowInner {
             // whichever window was active before the click. If that handler consumes the
             // press, `DefWindowProc` never sees it, so the window is never activated at all.
             // So, let's eagerly activate the window.
-            WM_MOUSEACTIVATE => Some(MA_ACTIVATE as isize),
+            // 带 WS_EX_NOACTIVATE 的窗口必须返回 MA_NOACTIVATE：当前台窗口属于同一线程时，
+            // MA_ACTIVATE 会直接把同线程窗口设为前台，绕过 WS_EX_NOACTIVATE。
+            WM_MOUSEACTIVATE => Some(mouse_activate_result(handle)),
             WM_ACTIVATE => self.handle_activate_msg(wparam),
             WM_CREATE => self.handle_create_msg(handle),
             WM_MOVE => self.handle_move_msg(handle, lparam),
@@ -361,6 +363,15 @@ impl WindowsWindowInner {
         if self.state.dragging.get() {
             self.state.dragging.set(false);
             let _ = unsafe { PostMessageW(Some(handle), WM_LBUTTONUP, WPARAM(0), LPARAM(0)) };
+        }
+
+        // 移动循环结束后，若不可激活窗口仍被系统设为前台，则把前台交还给移动前的窗口。
+        if let Some(previous) = self.state.foreground_before_move.take()
+            && is_non_activating_window(handle)
+            && unsafe { GetForegroundWindow() } == handle
+            && unsafe { IsWindow(Some(previous)).as_bool() }
+        {
+            let _ = unsafe { SetForegroundWindow(previous) };
         }
 
         unsafe {
@@ -1177,6 +1188,23 @@ impl WindowsWindowInner {
                 HTMINBUTTON => self.state.nc_button_pressed.set(Some(HTMINBUTTON)),
                 HTMAXBUTTON => self.state.nc_button_pressed.set(Some(HTMAXBUTTON)),
                 HTCLOSE => self.state.nc_button_pressed.set(Some(HTCLOSE)),
+                // DefWindowProc 处理标题栏按下时会先激活窗口再进入移动循环，同线程前台窗口下
+                // 会绕过 WS_EX_NOACTIVATE。不可激活窗口直接进入系统移动循环，跳过激活步骤。
+                HTCAPTION if is_non_activating_window(handle) => {
+                    let foreground = unsafe { GetForegroundWindow() };
+                    self.state.foreground_before_move.set(
+                        (!foreground.is_invalid() && foreground != handle).then_some(foreground),
+                    );
+                    unsafe {
+                        SendMessageW(
+                            handle,
+                            WM_SYSCOMMAND,
+                            Some(WPARAM((SC_MOVE | HTCAPTION) as usize)),
+                            Some(lparam),
+                        )
+                    };
+                    return Some(0);
+                }
                 _ => return None,
             };
             Some(0)
@@ -2005,6 +2033,19 @@ fn get_frame_thicknessy(dpi: u32) -> i32 {
     let resize_frame_thickness = unsafe { GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) };
     let padding_thickness = unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
     resize_frame_thickness + padding_thickness
+}
+
+fn is_non_activating_window(handle: HWND) -> bool {
+    let ex_style = unsafe { get_window_long(handle, GWL_EXSTYLE) };
+    ex_style & WS_EX_NOACTIVATE.0 as isize != 0
+}
+
+fn mouse_activate_result(handle: HWND) -> isize {
+    if is_non_activating_window(handle) {
+        MA_NOACTIVATE as isize
+    } else {
+        MA_ACTIVATE as isize
+    }
 }
 
 fn notify_frame_changed(handle: HWND) {
