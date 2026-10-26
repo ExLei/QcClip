@@ -1320,6 +1320,7 @@ fn is_location_managed_root_entry(name: &str) -> bool {
         || name.starts_with(".relocate-pending-")
         || name.starts_with(".reset-staging-")
         || name.starts_with(".reset-rollback-")
+        || name.starts_with(".legacy-migration-")
 }
 
 fn path_is_within_root(path: &Path, root: &Path) -> Result<bool, io::Error> {

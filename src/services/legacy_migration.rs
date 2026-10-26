@@ -226,7 +226,11 @@ pub(crate) fn prepare(
             "请选择需要迁移的数据范围".to_owned(),
         ));
     }
-    let scratch = tempfile::tempdir()?;
+    // 系统临时目录可能位于不支持规范化路径的卷（如内存盘），会导致 os error 1；
+    // 放在当前数据目录下，该目录启动时已通过规范化校验。
+    let scratch = tempfile::Builder::new()
+        .prefix(".legacy-migration-")
+        .tempdir_in(destination)?;
     let mut preview = MigrationPreview::default();
     let root = if source.is_file() {
         let extracted = scratch.path().join("source");
