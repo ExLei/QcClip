@@ -4,22 +4,21 @@ use super::super::{SettingsPage, notify_settings_error};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context};
 
-use super::super::SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH;
 use super::super::{
     SettingsWindowView,
     components::{
-        clickable_setting_row, compact_clickable_setting_row, compact_setting_row, setting_row,
-        settings_dropdown, settings_dropdown_with_font, settings_error_row, settings_page_header,
+        clickable_setting_row, setting_row, settings_dropdown, settings_dropdown_with_font,
+        settings_error_row, settings_page_header, settings_section_title,
     },
 };
 use crate::{
     config::{
-        AnimationConfig, AppearanceConfig, AppearanceMode, CardItemGap, ListItemHeight,
-        ListItemStyle, PreviewInformationField, TitlebarPosition, WindowMaterial,
+        AnimationConfig, AppearanceConfig, AppearanceMode, ListItemHeight, ListItemStyle,
+        TitlebarPosition, WindowMaterial,
     },
     config_runtime, i18n,
     ui::theme::{ThemeOption, available_theme_options},
-    ui::{SingleSelectOption, single_select, single_select_grid},
+    ui::{SingleSelectOption, single_select},
     windows::menu::{DropdownItem, DropdownItemId},
 };
 use gpui::{App, Entity, Window, div, px};
@@ -30,7 +29,7 @@ use gpui_component::switch::Switch;
 use gpui_component::{ActiveTheme as _, Sizable as _, ThemeMode, WindowExt as _, h_flex, v_flex};
 
 impl SettingsWindowView {
-    pub(in crate::windows::settings) fn render_personalization(
+    pub(in crate::windows::settings) fn render_appearance(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -44,19 +43,21 @@ impl SettingsWindowView {
         let view = cx.entity().clone();
         let reset_error = translator.translate("settings.personalization.reset_error");
         let reset_view = view.clone();
-        let reset_button = Button::new("settings-personalization-reset")
+        let reset_button = Button::new("settings-appearance-reset")
             .warning()
             .small()
             .label(translator.translate("settings.action.reset_page"))
             .on_click(move |_, _, cx| {
-                let result = config_runtime::reset_appearance_config(cx);
+                let mut appearance = config_runtime::appearance_config(cx);
+                reset_appearance_page_fields(&mut appearance);
+                let result = config_runtime::set_appearance_config(appearance, cx);
                 let error_message = result.as_ref().err().map(|error| {
-                    tracing::error!("重置个性化设置失败：{error}");
+                    tracing::error!("重置外观设置失败：{error}");
                     reset_error.clone()
                 });
                 reset_view.update(cx, |view, cx| {
                     view.appearance_error =
-                        notify_settings_error(SettingsPage::Personalization, error_message, cx);
+                        notify_settings_error(SettingsPage::Appearance, error_message, cx);
                     cx.notify();
                 });
             });
@@ -451,131 +452,6 @@ impl SettingsWindowView {
             cx,
         );
 
-        let list_style_selector = single_select(
-            "settings-list-item-style-select",
-            ListItemStyle::ALL
-                .into_iter()
-                .map(|style| {
-                    SingleSelectOption::new(
-                        style,
-                        translator.translate(list_item_style_label_key(style)),
-                    )
-                })
-                .collect::<Vec<_>>(),
-            appearance.list_item_style,
-            {
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |style, cx| {
-                    persist_appearance_change(
-                        view.clone(),
-                        "列表项风格",
-                        move |appearance| appearance.list_item_style = style,
-                        save_error.clone(),
-                        cx,
-                    );
-                }
-            },
-            theme,
-            single_select_animation,
-        );
-        let card_gap_selector = single_select_grid(
-            "settings-card-item-gap-select",
-            CardItemGap::ALL
-                .into_iter()
-                .map(|gap| SingleSelectOption::new(gap, gap.code()))
-                .collect::<Vec<_>>(),
-            appearance.card_item_gap,
-            3,
-            {
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |gap, cx| {
-                    persist_appearance_change(
-                        view.clone(),
-                        "卡片间距",
-                        move |appearance| appearance.card_item_gap = gap,
-                        save_error.clone(),
-                        cx,
-                    );
-                }
-            },
-            theme,
-            single_select_animation,
-        );
-        let list_item_height_selector = single_select(
-            "settings-list-item-height-select",
-            ListItemHeight::ALL.into_iter().map(|height| {
-                SingleSelectOption::new(
-                    height,
-                    translator.translate(list_item_height_label_key(height)),
-                )
-            }),
-            appearance.list_item_height,
-            {
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |height, cx| {
-                    persist_appearance_change(
-                        view.clone(),
-                        "列表项行高",
-                        move |appearance| appearance.list_item_height = height,
-                        save_error.clone(),
-                        cx,
-                    );
-                }
-            },
-            theme,
-            single_select_animation,
-        );
-        let adaptive_max_lines_selector = h_flex()
-            .w(ui_rem(SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH))
-            .gap_3()
-            .child(Slider::new(&self.adaptive_max_lines_slider).flex_1())
-            .child(
-                div()
-                    .w(ui_rem(36.0))
-                    .text_sm()
-                    .text_center()
-                    .text_color(theme.foreground)
-                    .child(appearance.adaptive_max_lines.to_string()),
-            );
-        let only_show_notes_switch = Switch::new("settings-only-show-notes")
-            .checked(appearance.only_show_notes)
-            .accessibility_label(translator.translate("settings.personalization.only_show_notes"))
-            .on_click({
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |checked, _, cx| {
-                    persist_appearance_change(
-                        view.clone(),
-                        "仅显示备注",
-                        move |appearance| appearance.only_show_notes = *checked,
-                        save_error.clone(),
-                        cx,
-                    )
-                }
-            });
-
-        let gallery_gif_autoplay_switch = Switch::new("settings-gallery-gif-autoplay")
-            .checked(appearance.gallery_gif_autoplay)
-            .accessibility_label(
-                translator.translate("settings.personalization.gallery_gif_autoplay"),
-            )
-            .on_click({
-                let view = view.clone();
-                let save_error = save_error.clone();
-                move |checked, _, cx| {
-                    persist_appearance_change(
-                        view.clone(),
-                        "图库 GIF 自动播放",
-                        move |appearance| appearance.gallery_gif_autoplay = *checked,
-                        save_error.clone(),
-                        cx,
-                    )
-                }
-            });
-
         let mut section = v_flex()
             .w_full()
             .min_w_0()
@@ -587,9 +463,13 @@ impl SettingsWindowView {
             .bg(theme.title_bar)
             .child(settings_page_header(
                 theme,
-                translator.translate("settings.page.personalization"),
+                translator.translate("settings.page.appearance"),
                 translator.translate("settings.personalization.description"),
                 reset_button,
+            ))
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.theme"),
             ))
             .child(
                 self.setting_row(
@@ -651,6 +531,23 @@ impl SettingsWindowView {
                     font_selector,
                 ),
             )
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.window_material"),
+            ))
+            .child(
+                div()
+                    .w_full()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .px_4()
+                    .py_3()
+                    .child(window_material_panel),
+            )
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.layout"),
+            ))
             .child(
                 self.setting_row(
                     theme,
@@ -667,40 +564,6 @@ impl SettingsWindowView {
                 theme,
                 translator.translate("settings.personalization.tab_bar"),
                 self.render_tab_bar_editor(cx),
-            ))
-            .child(self.highlight_element(
-                theme,
-                translator.translate("settings.item_display.title"),
-                compact_clickable_setting_row(
-                    "settings-item-display",
-                    theme,
-                    translator.translate("settings.item_display.title"),
-                    {
-                        let view = view.clone();
-                        move |_, window, cx| {
-                            super::item_display_editor::open_item_display_sheet(
-                                view.clone(),
-                                window,
-                                cx,
-                            )
-                        }
-                    },
-                ),
-            ))
-            .child(self.highlight_element(
-                theme,
-                translator.translate("settings.personalization.preview_information"),
-                compact_clickable_setting_row(
-                    "settings-preview-information",
-                    theme,
-                    translator.translate("settings.personalization.preview_information"),
-                    {
-                        let view = view.clone();
-                        move |_, window, cx| {
-                            open_preview_information_sheet(view.clone(), window, cx)
-                        }
-                    },
-                ),
             ))
             .child(
                 self.highlight_element(
@@ -721,173 +584,12 @@ impl SettingsWindowView {
                         },
                     ),
                 ),
-            )
-            .child(
-                self.setting_row(
-                    theme,
-                    translator.translate("settings.personalization.gallery_gif_autoplay"),
-                    Some(
-                        translator
-                            .translate("settings.personalization.gallery_gif_autoplay_description")
-                            .into(),
-                    ),
-                    gallery_gif_autoplay_switch,
-                ),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .px_4()
-                    .py_3()
-                    .child(window_material_panel),
-            )
-            .child(
-                self.setting_row(
-                    theme,
-                    translator.translate("settings.personalization.list_item_style"),
-                    Some(
-                        translator
-                            .translate("settings.personalization.list_item_style_description")
-                            .into(),
-                    ),
-                    list_style_selector,
-                ),
             );
-        section = section.child(
-            self.setting_row(
-                theme,
-                translator.translate("settings.personalization.list_item_height"),
-                Some(
-                    translator
-                        .translate("settings.personalization.list_item_height_description")
-                        .into(),
-                ),
-                list_item_height_selector,
-            ),
-        );
-        if appearance.list_item_height == ListItemHeight::Adaptive {
-            section = section.child(
-                self.setting_row(
-                    theme,
-                    translator.translate("settings.personalization.adaptive_max_lines"),
-                    Some(
-                        translator
-                            .translate("settings.personalization.adaptive_max_lines_description")
-                            .into(),
-                    ),
-                    adaptive_max_lines_selector,
-                ),
-            );
-        }
-        section = section.child(
-            self.setting_row(
-                theme,
-                translator.translate("settings.personalization.only_show_notes"),
-                Some(
-                    translator
-                        .translate("settings.personalization.only_show_notes_description")
-                        .into(),
-                ),
-                only_show_notes_switch,
-            ),
-        );
-        if appearance.list_item_style == ListItemStyle::Card {
-            section = section.child(
-                self.setting_row(
-                    theme,
-                    translator.translate("settings.personalization.card_item_gap"),
-                    Some(
-                        translator
-                            .translate("settings.personalization.card_item_gap_description")
-                            .into(),
-                    ),
-                    card_gap_selector,
-                ),
-            );
-        }
         if let Some(error) = &self.appearance_error {
             section = section.child(settings_error_row(theme, error));
         }
         section.into_any_element()
     }
-}
-
-fn open_preview_information_sheet(
-    view: Entity<SettingsWindowView>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let save_error = i18n::translator(cx).translate("settings.personalization.save_error");
-    window.open_sheet(cx, move |sheet, _, cx| {
-        let theme = cx.theme().colors;
-        let translator = i18n::translator(cx);
-        let information = config_runtime::preview_information_config(cx);
-        let mut controls = h_flex().w_full().flex_shrink_0().gap_2().pb_2();
-        for (enabled, action) in [(true, "enable_all"), (false, "disable_all")] {
-            controls = controls.child(
-                Button::new(format!("settings-preview-information-{action}"))
-                    .small()
-                    .label(translator.translate(&format!(
-                        "settings.personalization.preview_information.{action}"
-                    )))
-                    .on_click({
-                        let view = view.clone();
-                        let save_error = save_error.clone();
-                        move |_, _, cx| {
-                            persist_appearance_change(
-                                view.clone(),
-                                "预览信息展示",
-                                move |appearance| {
-                                    appearance.preview_information.fields = if enabled {
-                                        PreviewInformationField::ALL.to_vec()
-                                    } else {
-                                        Vec::new()
-                                    };
-                                },
-                                save_error.clone(),
-                                cx,
-                            );
-                        }
-                    }),
-            );
-        }
-        let mut content = v_flex()
-            .size_full()
-            .min_h_0()
-            .overflow_y_scrollbar()
-            .child(controls);
-        for field in PreviewInformationField::ALL {
-            let label = translator.translate(field.label_key());
-            let switch = Switch::new(format!("settings-preview-information-{}", field.key()))
-                .checked(information.enabled(field))
-                .accessibility_label(label.clone())
-                .on_click({
-                    let view = view.clone();
-                    let save_error = save_error.clone();
-                    move |checked, _, cx| {
-                        persist_appearance_change(
-                            view.clone(),
-                            "预览信息展示",
-                            move |appearance| {
-                                appearance.preview_information.set_enabled(field, *checked)
-                            },
-                            save_error.clone(),
-                            cx,
-                        );
-                    }
-                });
-            content = content.child(compact_setting_row(theme, label, switch));
-        }
-        sheet
-            .title(translator.translate("settings.personalization.preview_information"))
-            .size(ui_rem(420.0))
-            .resizable(false)
-            .shadow_none()
-            .map(|this| crate::window_material::sheet_surface(this, cx))
-            .child(content)
-    });
 }
 
 fn open_animations_sheet(view: Entity<SettingsWindowView>, window: &mut Window, cx: &mut App) {
@@ -979,8 +681,7 @@ fn set_all_animations(
         }
     };
     view.update(cx, |view, cx| {
-        view.appearance_error =
-            notify_settings_error(SettingsPage::Personalization, error_message, cx);
+        view.appearance_error = notify_settings_error(view.active_page, error_message, cx);
         cx.notify();
     });
 }
@@ -1004,8 +705,7 @@ pub(super) fn persist_appearance_change<F>(
         }
     };
     view.update(cx, |view, cx| {
-        view.appearance_error =
-            notify_settings_error(SettingsPage::Personalization, error_message, cx);
+        view.appearance_error = notify_settings_error(view.active_page, error_message, cx);
         cx.notify();
     });
 }
@@ -1033,8 +733,7 @@ fn choose_background_image(view: Entity<SettingsWindowView>, save_error: String,
                 }
             };
             view.update(cx, |view, cx| {
-                view.appearance_error =
-                    notify_settings_error(SettingsPage::Personalization, error_message, cx);
+                view.appearance_error = notify_settings_error(view.active_page, error_message, cx);
                 cx.notify();
             });
         });
@@ -1054,7 +753,7 @@ pub(in crate::windows::settings) fn persist_appearance_change_in_view<F>(
     let mut appearance = config_runtime::appearance_config(cx);
     update(&mut appearance);
     view.appearance_error = notify_settings_error(
-        SettingsPage::Personalization,
+        view.active_page,
         match config_runtime::set_appearance_config(appearance, cx) {
             Ok(_) => None,
             Err(error) => {
@@ -1065,6 +764,24 @@ pub(in crate::windows::settings) fn persist_appearance_change_in_view<F>(
         cx,
     );
     cx.notify();
+}
+
+/// 把“外观”页展示的字段恢复为默认值，列表与预览相关字段保持不变。
+fn reset_appearance_page_fields(appearance: &mut AppearanceConfig) {
+    let default = AppearanceConfig::default();
+    appearance.mode = default.mode;
+    appearance.light_theme = default.light_theme;
+    appearance.dark_theme = default.dark_theme;
+    appearance.ui_scale_percent = default.ui_scale_percent;
+    appearance.app_font_family = default.app_font_family;
+    appearance.window_material = default.window_material;
+    appearance.window_material_opacity = default.window_material_opacity;
+    appearance.window_material_brightness = default.window_material_brightness;
+    appearance.background_image_path = default.background_image_path;
+    appearance.background_image_blur = default.background_image_blur;
+    appearance.titlebar_position = default.titlebar_position;
+    appearance.tab_bar = default.tab_bar;
+    appearance.animations = default.animations;
 }
 
 fn theme_options_for_mode(
@@ -1109,14 +826,14 @@ const fn titlebar_position_label_key(position: TitlebarPosition) -> &'static str
     }
 }
 
-const fn list_item_style_label_key(style: ListItemStyle) -> &'static str {
+pub(super) const fn list_item_style_label_key(style: ListItemStyle) -> &'static str {
     match style {
         ListItemStyle::Seamless => "settings.personalization.list_item_style.seamless",
         ListItemStyle::Card => "settings.personalization.list_item_style.card",
     }
 }
 
-const fn list_item_height_label_key(height: ListItemHeight) -> &'static str {
+pub(super) const fn list_item_height_label_key(height: ListItemHeight) -> &'static str {
     match height {
         ListItemHeight::Adaptive => "settings.personalization.list_item_height.adaptive",
         ListItemHeight::Large => "settings.personalization.list_item_height.large",

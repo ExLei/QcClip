@@ -6,7 +6,7 @@ use gpui_component::switch::Switch;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 
 use super::super::{SettingsPage, SettingsWindowView, notify_settings_error};
-use super::clipboard::persist_clipboard_change;
+use super::main_window::persist_clipboard_change;
 use crate::{config::ClipboardFormatConfig, config_runtime, i18n};
 
 impl SettingsWindowView {
@@ -170,7 +170,7 @@ impl SettingsWindowView {
                     let succeeded = error.is_none();
                     add_view.update(cx, |view, cx| {
                         view.clipboard_error =
-                            notify_settings_error(SettingsPage::Clipboard, error, cx);
+                            notify_settings_error(SettingsPage::Capture, error, cx);
                         cx.notify();
                     });
                     if succeeded {
@@ -236,6 +236,9 @@ impl SettingsWindowView {
                         ),
                 );
         }
-        section.into_any_element()
+        section
+            .border_b_1()
+            .border_color(theme.border)
+            .into_any_element()
     }
 }

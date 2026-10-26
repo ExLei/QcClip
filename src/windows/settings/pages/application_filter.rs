@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::super::{
     SettingsWindowView,
-    components::{settings_error_row, settings_page_header},
+    components::{settings_error_row, settings_page_header, settings_section_title},
 };
 use crate::{
     config::{ApplicationFilterApplication, ApplicationFilterConfig},
@@ -23,7 +23,7 @@ use crate::{
 };
 
 impl SettingsWindowView {
-    pub(in crate::windows::settings) fn render_application_filter(
+    pub(in crate::windows::settings) fn render_capture(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -101,7 +101,7 @@ impl SettingsWindowView {
                             .and_then(|application| add_application(application, cx));
                         view.update(cx, |view, cx| {
                             view.application_filter_error = notify_settings_error(
-                                SettingsPage::ApplicationFilter,
+                                SettingsPage::Capture,
                                 result.err().map(|_| {
                                     i18n::translator(cx)
                                         .translate("settings.application_filter.manual_error")
@@ -164,9 +164,18 @@ impl SettingsWindowView {
             .bg(theme.title_bar)
             .child(settings_page_header(
                 theme,
-                translator.translate("settings.page.application_filter"),
-                translator.translate("settings.application_filter.description"),
+                translator.translate("settings.page.capture"),
+                translator.translate("settings.capture.description"),
                 div(),
+            ))
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.section.capture_formats"),
+            ))
+            .child(self.render_clipboard_formats(cx))
+            .child(settings_section_title(
+                theme,
+                translator.translate("settings.page.application_filter"),
             ))
             .child(
                 self.setting_row(
@@ -279,7 +288,10 @@ impl SettingsWindowView {
                     .child(translator.translate("settings.application_filter.loading")),
             );
         }
-        if let Some(error) = &self.application_filter_error {
+        for error in [&self.clipboard_error, &self.application_filter_error]
+            .into_iter()
+            .flatten()
+        {
             section = section.child(settings_error_row(theme, error));
         }
         section.into_any_element()
@@ -319,8 +331,7 @@ fn persist_application_filter(
             i18n::translator(cx).translate("settings.application_filter.save_error")
         });
     view.update(cx, |view, cx| {
-        view.application_filter_error =
-            notify_settings_error(SettingsPage::ApplicationFilter, error, cx);
+        view.application_filter_error = notify_settings_error(SettingsPage::Capture, error, cx);
         cx.notify();
     });
 }

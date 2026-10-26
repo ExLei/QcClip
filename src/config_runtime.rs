@@ -498,9 +498,10 @@ pub(crate) fn reset_general_config(cx: &mut App) -> Result<bool, ConfigError> {
             runtime.config.clone(),
         )
     });
-    let default = AppConfig::default().general;
-    let default_update_notification = AppConfig::default().updates.notification_enabled;
-    if current == default && next.updates.notification_enabled == default_update_notification {
+    let mut default = AppConfig::default().general;
+    default.global_notification_enabled = current.global_notification_enabled;
+    default.notifications = current.notifications.clone();
+    if current == default {
         return Ok(false);
     }
 
@@ -510,7 +511,6 @@ pub(crate) fn reset_general_config(cx: &mut App) -> Result<bool, ConfigError> {
     }
     let language = default.language;
     next.general = default;
-    next.updates.notification_enabled = default_update_notification;
     if let Err(error) = persist_config(&path, &next) {
         if current.launch_at_login != next.general.launch_at_login {
             if let Err(restore_error) =
@@ -529,6 +529,27 @@ pub(crate) fn reset_general_config(cx: &mut App) -> Result<bool, ConfigError> {
         runtime.config = next;
     });
     i18n::set_locale(Locale::new(language.code()), cx);
+    cx.refresh_windows();
+    Ok(true)
+}
+
+pub(crate) fn reset_notification_config(cx: &mut App) -> Result<bool, ConfigError> {
+    let (path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
+        (runtime.path.clone(), runtime.config.clone())
+    });
+    let default = AppConfig::default();
+    if next.general.global_notification_enabled == default.general.global_notification_enabled
+        && next.general.notifications == default.general.notifications
+        && next.updates.notification_enabled == default.updates.notification_enabled
+    {
+        return Ok(false);
+    }
+
+    next.general.global_notification_enabled = default.general.global_notification_enabled;
+    next.general.notifications = default.general.notifications;
+    next.updates.notification_enabled = default.updates.notification_enabled;
+    persist_config(&path, &next)?;
+    cx.update_global::<ConfigRuntime, _>(|runtime, _| runtime.config = next);
     crate::windows::notification::NotificationService::dismiss_disabled(cx);
     cx.refresh_windows();
     Ok(true)
@@ -646,29 +667,6 @@ fn background_image_needs_refresh(current: &AppearanceConfig, next: &AppearanceC
             && next.window_material == WindowMaterial::CustomImage)
 }
 
-pub(crate) fn reset_appearance_config(cx: &mut App) -> Result<bool, ConfigError> {
-    let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
-        (
-            runtime.config.appearance.clone(),
-            runtime.path.clone(),
-            runtime.config.clone(),
-        )
-    });
-    let default = AppearanceConfig::default();
-    if current == default {
-        return Ok(false);
-    }
-
-    next.appearance = default.clone();
-    persist_config(&path, &next)?;
-
-    cx.update_global::<ConfigRuntime, _>(|runtime, _| {
-        runtime.config = next;
-    });
-    apply_appearance_change(&current, &default, cx);
-    Ok(true)
-}
-
 pub(crate) fn set_clipboard_config(
     clipboard: ClipboardConfig,
     cx: &mut App,
@@ -713,36 +711,6 @@ pub(crate) fn set_clipboard_config(
         || current.preview_types != preview_types
     {
         crate::windows::main::MainWindowService::cancel_hover_preview(cx);
-    }
-    cx.refresh_windows();
-    Ok(true)
-}
-
-pub(crate) fn reset_clipboard_config(cx: &mut App) -> Result<bool, ConfigError> {
-    let (current, path, mut next) = cx.read_global::<ConfigRuntime, _>(|runtime, _| {
-        (
-            runtime.config.clipboard.clone(),
-            runtime.path.clone(),
-            runtime.config.clone(),
-        )
-    });
-    let default = AppConfig::default().clipboard;
-    if current == default {
-        return Ok(false);
-    }
-
-    next.clipboard = default.clone();
-    persist_config(&path, &next)?;
-    crate::platform::clipboard::set_capture_format_config(default.capture_formats);
-
-    cx.update_global::<ConfigRuntime, _>(|runtime, _| {
-        runtime.config = next;
-    });
-    if current.edge_hide && current.window_position == ClipboardConfig::default().window_position {
-        crate::windows::main::MainWindowService::set_edge_hide_enabled(false, cx);
-    }
-    if current.window_position != ClipboardConfig::default().window_position {
-        crate::windows::main::MainWindowService::refresh_window_position(cx);
     }
     cx.refresh_windows();
     Ok(true)
