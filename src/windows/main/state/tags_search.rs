@@ -339,10 +339,7 @@ impl MainWindow {
         let paste_value = emoji.clone();
         let this = cx.weak_entity();
         cx.defer(move |cx| {
-            crate::windows::main::hide_main_window(cx);
-            if let Err(error) = crate::services::focus::restore_previous_focus() {
-                tracing::error!("粘贴表情前恢复窗口焦点失败：{error}");
-            }
+            crate::windows::main::prepare_paste_target("粘贴表情", cx);
 
             let paste_task =
                 cx.background_spawn(async move { paste_service.paste_text(&paste_value) });
@@ -369,10 +366,7 @@ impl MainWindow {
         let paste_value = symbol.clone();
         let this = cx.weak_entity();
         cx.defer(move |cx| {
-            crate::windows::main::hide_main_window(cx);
-            if let Err(error) = crate::services::focus::restore_previous_focus() {
-                tracing::error!("粘贴符号前恢复窗口焦点失败：{error}");
-            }
+            crate::windows::main::prepare_paste_target("粘贴符号", cx);
 
             let paste_task =
                 cx.background_spawn(async move { paste_service.paste_text(&paste_value) });

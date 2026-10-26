@@ -629,10 +629,7 @@ impl MainWindow {
     pub(crate) fn paste_gallery_image(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let paste_service = self.paste_service.clone();
         cx.defer(move |cx| {
-            crate::windows::main::hide_main_window(cx);
-            if let Err(error) = crate::services::focus::restore_previous_focus() {
-                tracing::error!("粘贴图库图片前恢复窗口焦点失败：{error}");
-            }
+            crate::windows::main::prepare_paste_target("粘贴图库图片", cx);
             let task = cx.background_spawn(async move { paste_service.paste_gallery_image(&path) });
             cx.spawn(async move |cx| {
                 if let Err(error) = task.await {

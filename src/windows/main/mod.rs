@@ -734,6 +734,15 @@ pub fn hide_main_window(cx: &mut App) {
     }
 }
 
+/// 主窗口发起粘贴前的统一准备：未固定时隐藏主窗口（固定时保持显示），
+/// 再把焦点交还给进入主窗口前的目标窗口。`action` 用于日志，如“列表粘贴”。
+pub(crate) fn prepare_paste_target(action: &str, cx: &mut App) {
+    hide_main_window(cx);
+    if let Err(error) = crate::services::focus::restore_previous_focus() {
+        tracing::error!("{action}前恢复窗口焦点失败：{error}");
+    }
+}
+
 pub fn toggle_main_window(cx: &mut App) {
     if let Err(error) = window_visibility::toggle_visibility(cx) {
         tracing::error!("切换主窗口失败：{error}");

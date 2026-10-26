@@ -14,6 +14,28 @@ fn paste_order_target(source_tab: TabId, cx: &gpui::App) -> Option<PasteOrderTar
     }
 }
 
+/// 等待纯文本粘贴结果；没有可用的纯文本格式时提示用户。
+fn spawn_plain_text_paste(
+    paste_task: gpui::Task<Result<(), crate::services::paste::PasteError>>,
+    cx: &mut gpui::App,
+) {
+    cx.spawn(async move |cx| {
+        let Err(error) = paste_task.await else {
+            return;
+        };
+        tracing::error!("纯文本粘贴失败：{error}");
+        if matches!(
+            error,
+            crate::services::paste::PasteError::NoRestorableFormat
+        ) {
+            cx.update(|cx| {
+                crate::windows::main::MainWindowService::show_plain_text_paste_unavailable(cx);
+            });
+        }
+    })
+    .detach();
+}
+
 impl MainWindow {
     /// `into_main_input` 为 true 时粘贴到当前持有焦点的主窗口输入框，不隐藏窗口也不恢复焦点。
     pub(crate) fn paste_history_index(
@@ -32,10 +54,7 @@ impl MainWindow {
         let paste_service = self.paste_service.clone();
         cx.defer(move |cx| {
             if !into_main_input {
-                crate::windows::main::hide_main_window(cx);
-                if let Err(error) = crate::services::focus::restore_previous_focus() {
-                    tracing::error!("快捷粘贴前恢复窗口焦点失败：{error}");
-                }
+                crate::windows::main::prepare_paste_target("快捷粘贴", cx);
             }
             let history_config = crate::config_runtime::history_config(cx);
             let move_to_first = paste_order_target(TabId::Clipboard, cx);
@@ -91,10 +110,7 @@ impl MainWindow {
 
         let paste_service = self.paste_service.clone();
         cx.defer(move |cx| {
-            crate::windows::main::hide_main_window(cx);
-            if let Err(error) = crate::services::focus::restore_previous_focus() {
-                tracing::error!("列表粘贴前恢复窗口焦点失败：{error}");
-            }
+            crate::windows::main::prepare_paste_target("列表粘贴", cx);
 
             let paste_task = cx
                 .background_spawn(async move { paste_service.paste_item(item_id, move_to_first) });
@@ -126,20 +142,26 @@ impl MainWindow {
         self.select_item(history_id);
         let source_tab = self.active_tab;
         let move_to_first = paste_order_target(source_tab, cx);
-        if let Err(error) = crate::services::focus::restore_previous_focus() {
-            tracing::error!("指定格式粘贴前恢复窗口焦点失败：{error}");
-        }
 
         let paste_service = self.paste_service.clone();
-        let paste_task = cx.background_spawn(async move {
-            paste_service.paste_item_format(item_id, &format_namespace, &format_key, move_to_first)
+        cx.defer(move |cx| {
+            crate::windows::main::prepare_paste_target("指定格式粘贴", cx);
+
+            let paste_task = cx.background_spawn(async move {
+                paste_service.paste_item_format(
+                    item_id,
+                    &format_namespace,
+                    &format_key,
+                    move_to_first,
+                )
+            });
+            cx.spawn(async move |_| {
+                if let Err(error) = paste_task.await {
+                    tracing::error!("指定格式粘贴失败：{error}");
+                }
+            })
+            .detach();
         });
-        cx.spawn(async move |_, _| {
-            if let Err(error) = paste_task.await {
-                tracing::error!("指定格式粘贴失败：{error}");
-            }
-        })
-        .detach();
         cx.notify();
     }
 
@@ -157,30 +179,17 @@ impl MainWindow {
     }
 
     pub(crate) fn paste_latest_item_as_plain_text(&mut self, cx: &mut Context<Self>) {
-        if let Err(error) = crate::services::focus::restore_previous_focus() {
-            tracing::error!("纯文本粘贴前恢复窗口焦点失败：{error}");
-        }
         let move_to_first = paste_order_target(TabId::Clipboard, cx);
         let paste_service = self.paste_service.clone();
-        let paste_task = cx
-            .background_spawn(async move { paste_service.paste_latest_plain_text(move_to_first) });
-        cx.spawn(async move |_, cx| match paste_task.await {
-            Ok(_) => {}
-            Err(error) => {
-                tracing::error!("纯文本粘贴失败：{error}");
-                if matches!(
-                    error,
-                    crate::services::paste::PasteError::NoRestorableFormat
-                ) {
-                    cx.update(|cx| {
-                        crate::windows::main::MainWindowService::show_plain_text_paste_unavailable(
-                            cx,
-                        );
-                    });
-                }
-            }
-        })
-        .detach();
+        cx.defer(move |cx| {
+            crate::windows::main::prepare_paste_target("纯文本粘贴", cx);
+            let paste_task = cx.background_spawn(async move {
+                paste_service
+                    .paste_latest_plain_text(move_to_first)
+                    .map(|_| ())
+            });
+            spawn_plain_text_paste(paste_task, cx);
+        });
     }
 
     fn paste_plain_text_item(
@@ -190,31 +199,17 @@ impl MainWindow {
         into_main_input: bool,
         cx: &mut Context<Self>,
     ) {
-        if !into_main_input && let Err(error) = crate::services::focus::restore_previous_focus() {
-            tracing::error!("纯文本粘贴前恢复窗口焦点失败：{error}");
-        }
         let move_to_first = paste_order_target(source_tab, cx);
         let paste_service = self.paste_service.clone();
-        let paste_task = cx.background_spawn(async move {
-            paste_service.paste_item_plain_text(item_id, move_to_first)
-        });
-        cx.spawn(async move |_, cx| match paste_task.await {
-            Ok(()) => {}
-            Err(error) => {
-                tracing::error!("纯文本粘贴失败：{error}");
-                if matches!(
-                    error,
-                    crate::services::paste::PasteError::NoRestorableFormat
-                ) {
-                    cx.update(|cx| {
-                        crate::windows::main::MainWindowService::show_plain_text_paste_unavailable(
-                            cx,
-                        );
-                    });
-                }
+        cx.defer(move |cx| {
+            if !into_main_input {
+                crate::windows::main::prepare_paste_target("纯文本粘贴", cx);
             }
-        })
-        .detach();
+            let paste_task = cx.background_spawn(async move {
+                paste_service.paste_item_plain_text(item_id, move_to_first)
+            });
+            spawn_plain_text_paste(paste_task, cx);
+        });
         cx.notify();
     }
 
@@ -301,10 +296,7 @@ impl MainWindow {
         cx.spawn(async move |_, cx| match preparation_task.await {
             Ok((prepared, _item_ids)) => {
                 cx.update(|cx| {
-                    crate::windows::main::hide_main_window(cx);
-                    if let Err(error) = crate::services::focus::restore_previous_focus() {
-                        tracing::error!("合并粘贴前恢复窗口焦点失败：{error}");
-                    }
+                    crate::windows::main::prepare_paste_target("合并粘贴", cx);
                 });
                 let paste_task = cx.background_spawn(async move {
                     paste_service
