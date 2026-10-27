@@ -2461,9 +2461,12 @@ mod tests {
         for id in SessionShortcutId::ALL {
             let shortcut = shortcuts.session(id);
             assert!(!shortcut.only_in_window);
-            let hotkey =
-                binding_to_hotkey(shortcut.binding.as_ref().expect("默认窗口快捷键应有绑定"))
-                    .expect("默认窗口快捷键应有效");
+            // 拆词默认不绑定，由用户按需设置。
+            let Some(binding) = shortcut.binding.as_ref() else {
+                assert_eq!(id, SessionShortcutId::SplitWords, "默认窗口快捷键应有绑定");
+                continue;
+            };
+            let hotkey = binding_to_hotkey(binding).expect("默认窗口快捷键应有效");
             assert!(!registered_ids.contains(&hotkey.id()), "默认快捷键不能重复");
             registered_ids.push(hotkey.id());
         }

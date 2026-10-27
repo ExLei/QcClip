@@ -76,9 +76,9 @@ mod metrics;
 
 pub(crate) use context_menu::confirm_remove_from_favorites;
 use context_menu::{
-    OPEN_ALL_LINKS_ACTION, OPEN_LINK_ACTION_PREFIX, OPEN_WITH_DEFAULT_ACTION,
-    favorite_item_context_menu, history_item_context_menu, parse_toggle_tag_action,
-    tag_color_value, truncate_link_label,
+    OPEN_ALL_LINKS_ACTION, OPEN_LINK_ACTION_PREFIX, OPEN_WITH_DEFAULT_ACTION, PIN_TO_SCREEN_ACTION,
+    SPLIT_WORDS_ACTION, favorite_item_context_menu, history_item_context_menu,
+    parse_toggle_tag_action, tag_color_value, truncate_link_label,
 };
 use metrics::*;
 
@@ -471,6 +471,8 @@ fn horizontal_header_enabled(display: &crate::config::ItemDisplayConfig) -> bool
     let action_enabled = display.actions_visibility != ItemRegionVisibility::Hidden
         && [
             ItemDisplayField::Edit,
+            ItemDisplayField::PinToScreen,
+            ItemDisplayField::SplitWords,
             ItemDisplayField::Note,
             ItemDisplayField::PastePlain,
             ItemDisplayField::OpenDefault,
@@ -1115,6 +1117,8 @@ fn hover_action_fields(
     use ItemDisplayField::*;
     [
         Edit,
+        PinToScreen,
+        SplitWords,
         Note,
         PastePlain,
         OpenDefault,
@@ -1126,7 +1130,7 @@ fn hover_action_fields(
     .into_iter()
     .filter(|field| display.enabled(*field))
     .filter(|field| match field {
-        Edit => has_editable_text(item),
+        Edit | SplitWords => has_editable_text(item),
         PastePlain => item.all_format_options.iter().any(|preview| {
             preview.role() == FormatRole::PlainText
                 && preview.is_restorable
@@ -1330,6 +1334,36 @@ fn render_hover_action_buttons(
         )
     });
 
+    let pin_to_screen_button = hover_action_button(
+        ("hover-action-pin-to-screen", row_id as u64),
+        "sticker",
+        translator.translate("main.menu.pin_to_screen"),
+        theme.muted_foreground,
+        theme,
+        move |_, _, cx| {
+            cx.stop_propagation();
+            PreviewWindowService::hide(cx);
+            MainWindowService::cancel_hover_preview(cx);
+            crate::windows::sticky::StickyService::open(item_id, cx);
+        },
+    );
+
+    let split_words_button = has_editable_text(item).then(|| {
+        hover_action_button(
+            ("hover-action-split-words", row_id as u64),
+            "blocks",
+            translator.translate("main.menu.split_words"),
+            theme.muted_foreground,
+            theme,
+            move |_, _, cx| {
+                cx.stop_propagation();
+                PreviewWindowService::hide(cx);
+                MainWindowService::cancel_hover_preview(cx);
+                crate::windows::sticky::StickyService::open_split(item_id, cx);
+            },
+        )
+    });
+
     let note_window = main_window.clone();
     let note_button = hover_action_button(
         ("hover-action-note", row_id as u64),
@@ -1427,6 +1461,8 @@ fn render_hover_action_buttons(
 
     let buttons = [
         (ItemDisplayField::Edit, edit_button),
+        (ItemDisplayField::PinToScreen, Some(pin_to_screen_button)),
+        (ItemDisplayField::SplitWords, split_words_button),
         (ItemDisplayField::Note, Some(note_button)),
         (ItemDisplayField::PastePlain, paste_plain_button),
         (ItemDisplayField::OpenDefault, default_open_button),
@@ -2918,6 +2954,14 @@ fn render_row(
                             }
                             return;
                         }
+                        if action.as_str() == PIN_TO_SCREEN_ACTION {
+                            crate::windows::sticky::StickyService::open(item_id, cx);
+                            return;
+                        }
+                        if action.as_str() == SPLIT_WORDS_ACTION {
+                            crate::windows::sticky::StickyService::open_split(item_id, cx);
+                            return;
+                        }
                         if action.as_str() == "remove-from-favorites" {
                             if let Some(favorite_id) = favorite_id {
                                 confirm_remove_from_favorites(
@@ -3001,6 +3045,14 @@ fn render_row(
                             for link in browser_links.iter() {
                                 cx.open_url(link);
                             }
+                            return;
+                        }
+                        if action.as_str() == PIN_TO_SCREEN_ACTION {
+                            crate::windows::sticky::StickyService::open(item_id, cx);
+                            return;
+                        }
+                        if action.as_str() == SPLIT_WORDS_ACTION {
+                            crate::windows::sticky::StickyService::open_split(item_id, cx);
                             return;
                         }
                         if action.as_str() == "remove-from-favorites" {

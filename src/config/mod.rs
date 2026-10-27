@@ -237,6 +237,8 @@ pub struct ShortcutsConfig {
     pub execute_paste: SessionShortcutConfig,
     pub toggle_favorite: SessionShortcutConfig,
     pub toggle_pinned: SessionShortcutConfig,
+    pub pin_to_screen: SessionShortcutConfig,
+    pub split_words: SessionShortcutConfig,
     pub delete_item: SessionShortcutConfig,
     pub hide_window: SessionShortcutConfig,
 }
@@ -264,6 +266,8 @@ impl Default for ShortcutsConfig {
             execute_paste: SessionShortcutConfig::new(Some("control"), "enter"),
             toggle_favorite: SessionShortcutConfig::new(Some("control"), "d"),
             toggle_pinned: SessionShortcutConfig::new(Some("control"), "t"),
+            pin_to_screen: SessionShortcutConfig::new(Some("alt"), "t"),
+            split_words: SessionShortcutConfig::default(),
             delete_item: SessionShortcutConfig::new(None, "delete"),
             hide_window: SessionShortcutConfig::new(None, "escape"),
         }
@@ -324,12 +328,14 @@ pub enum SessionShortcutId {
     ExecutePaste,
     ToggleFavorite,
     TogglePinned,
+    PinToScreen,
+    SplitWords,
     DeleteItem,
     HideWindow,
 }
 
 impl SessionShortcutId {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::SelectPreviousItem,
         Self::SelectNextItem,
         Self::SelectFirstItem,
@@ -341,6 +347,8 @@ impl SessionShortcutId {
         Self::ExecutePaste,
         Self::ToggleFavorite,
         Self::TogglePinned,
+        Self::PinToScreen,
+        Self::SplitWords,
         Self::DeleteItem,
         Self::HideWindow,
     ];
@@ -358,6 +366,8 @@ impl SessionShortcutId {
             Self::ExecutePaste => "executePaste",
             Self::ToggleFavorite => "toggleFavorite",
             Self::TogglePinned => "togglePinned",
+            Self::PinToScreen => "pinToScreen",
+            Self::SplitWords => "splitWords",
             Self::DeleteItem => "deleteItem",
             Self::HideWindow => "hideWindow",
         }
@@ -376,6 +386,8 @@ impl SessionShortcutId {
             Self::ExecutePaste => "settings.shortcuts.execute_paste",
             Self::ToggleFavorite => "settings.shortcuts.toggle_favorite",
             Self::TogglePinned => "settings.shortcuts.toggle_pinned",
+            Self::PinToScreen => "settings.shortcuts.pin_to_screen",
+            Self::SplitWords => "settings.shortcuts.split_words",
             Self::DeleteItem => "settings.shortcuts.delete_item",
             Self::HideWindow => "settings.shortcuts.hide_window",
         }
@@ -400,6 +412,8 @@ impl ShortcutsConfig {
             SessionShortcutId::ExecutePaste => &self.execute_paste,
             SessionShortcutId::ToggleFavorite => &self.toggle_favorite,
             SessionShortcutId::TogglePinned => &self.toggle_pinned,
+            SessionShortcutId::PinToScreen => &self.pin_to_screen,
+            SessionShortcutId::SplitWords => &self.split_words,
             SessionShortcutId::DeleteItem => &self.delete_item,
             SessionShortcutId::HideWindow => &self.hide_window,
         }
@@ -418,6 +432,8 @@ impl ShortcutsConfig {
             SessionShortcutId::ExecutePaste => &mut self.execute_paste,
             SessionShortcutId::ToggleFavorite => &mut self.toggle_favorite,
             SessionShortcutId::TogglePinned => &mut self.toggle_pinned,
+            SessionShortcutId::PinToScreen => &mut self.pin_to_screen,
+            SessionShortcutId::SplitWords => &mut self.split_words,
             SessionShortcutId::DeleteItem => &mut self.delete_item,
             SessionShortcutId::HideWindow => &mut self.hide_window,
         }

@@ -841,6 +841,18 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Shortcuts,
+            title_key: "settings.shortcuts.pin_to_screen",
+            description_key: None,
+            ratio: 0.965,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.split_words",
+            description_key: None,
+            ratio: 0.97,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
             title_key: "settings.shortcuts.delete_item",
             description_key: None,
             ratio: 0.98,

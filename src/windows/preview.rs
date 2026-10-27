@@ -206,7 +206,7 @@ impl PreviewFileEntry {
     }
 }
 
-fn render_file_icon(icon: Icon) -> Option<Arc<RenderImage>> {
+pub(crate) fn render_file_icon(icon: Icon) -> Option<Arc<RenderImage>> {
     let pixels = usize::try_from(icon.width)
         .ok()?
         .checked_mul(usize::try_from(icon.height).ok()?)?

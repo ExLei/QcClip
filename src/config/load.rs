@@ -929,6 +929,18 @@ fn read_shortcuts(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Sh
             &default,
             warnings,
         ),
+        pin_to_screen: read_session_shortcut(
+            object,
+            SessionShortcutId::PinToScreen,
+            &default,
+            warnings,
+        ),
+        split_words: read_session_shortcut(
+            object,
+            SessionShortcutId::SplitWords,
+            &default,
+            warnings,
+        ),
         delete_item: read_session_shortcut(
             object,
             SessionShortcutId::DeleteItem,

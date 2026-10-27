@@ -804,6 +804,8 @@ pub(crate) fn dispatch_session_shortcut(id: SessionShortcutId, cx: &mut App) {
             SessionShortcutId::ExecutePaste => main.paste_selected_item(cx),
             SessionShortcutId::ToggleFavorite => main.toggle_selected_favorite(cx),
             SessionShortcutId::TogglePinned => main.toggle_selected_pinned(cx),
+            SessionShortcutId::PinToScreen => main.pin_selected_to_screen(false, cx),
+            SessionShortcutId::SplitWords => main.pin_selected_to_screen(true, cx),
             SessionShortcutId::DeleteItem => main.delete_selected_item(cx),
             SessionShortcutId::HideWindow => {}
         });

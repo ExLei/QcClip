@@ -19,3 +19,4 @@ pub(crate) mod system;
 #[cfg(target_os = "windows")]
 pub mod tray;
 pub(crate) mod updates;
+pub(crate) mod word_split;

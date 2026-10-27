@@ -1868,6 +1868,12 @@ fn start_data_replacement(
                     let clipboard_write_suppressor =
                         crate::windows::main::MainWindowService::clipboard_write_suppressor(cx)
                             .unwrap_or_default();
+                    crate::windows::sticky::StickyService::replace_data_sources(
+                        database.clone(),
+                        blob_store.clone(),
+                        clipboard_write_suppressor.clone(),
+                        cx,
+                    );
                     crate::windows::quick_paste::QuickPasteWindowService::replace_data_sources(
                         database,
                         blob_store,
