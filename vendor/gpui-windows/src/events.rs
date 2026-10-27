@@ -2042,6 +2042,20 @@ fn is_non_activating_window(handle: HWND) -> bool {
 
 fn mouse_activate_result(handle: HWND) -> isize {
     if is_non_activating_window(handle) {
+        // MA_NOACTIVATE 不会调整 Z 序，多个置顶的不可激活窗口（如便签）点击后无法互相压过。
+        // 这里手动提到同层级（置顶窗口仍在置顶组内）最前，但不激活窗口。
+        unsafe {
+            SetWindowPos(
+                handle,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER,
+            )
+            .log_err();
+        }
         MA_NOACTIVATE as isize
     } else {
         MA_ACTIVATE as isize
