@@ -472,7 +472,9 @@ impl MainWindow {
                         cx.notify();
                     }
                     InputEvent::Blur => {
-                        if let Err(error) = crate::services::focus::restore_previous_focus() {
+                        if let Err(error) =
+                            crate::services::focus::restore_previous_focus_for(window)
+                        {
                             tracing::error!("标签搜索框失去焦点时恢复窗口焦点失败：{error}");
                         }
                         this.update_tags_panel_auto_close(window, cx);
@@ -542,7 +544,7 @@ impl MainWindow {
                     cx.notify();
                 }
                 InputEvent::Blur => {
-                    if let Err(error) = crate::services::focus::restore_previous_focus() {
+                    if let Err(error) = crate::services::focus::restore_previous_focus_for(window) {
                         tracing::error!("输入框失去焦点时恢复窗口焦点失败：{error}");
                     }
                     if this.search_expanded {
@@ -564,7 +566,7 @@ impl MainWindow {
         let activation_subscription = cx.observe_window_activation(window, |_, window, cx| {
             if !window.is_window_active() {
                 window.blur(cx);
-                if let Err(error) = crate::services::focus::clear_previous_focus() {
+                if let Err(error) = crate::services::focus::clear_previous_focus_for(window) {
                     tracing::error!("窗口失焦时清理窗口焦点失败：{error}");
                 }
             }
@@ -717,7 +719,9 @@ impl MainWindow {
                         cx.notify();
                     }
                     InputEvent::Blur => {
-                        if let Err(error) = crate::services::focus::restore_previous_focus() {
+                        if let Err(error) =
+                            crate::services::focus::restore_previous_focus_for(window)
+                        {
                             tracing::error!("符号搜索框失去焦点时恢复窗口焦点失败：{error}");
                         }
                         cx.notify();

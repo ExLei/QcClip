@@ -176,28 +176,30 @@ impl StickyNote {
                 .soft_wrap(true)
                 .context_menu(false)
         });
-        let text_subscription = cx.subscribe(&text_state, |this, state, event, cx| {
-            if matches!(event, InputEvent::Blur) {
-                // 输入框失焦表示不再键盘操作，把前台还给之前的窗口并恢复不抢焦点。
-                if let Err(error) = crate::services::focus::restore_previous_focus() {
-                    tracing::debug!(%error, "便签输入框失焦时恢复焦点失败");
+        let text_subscription =
+            cx.subscribe_in(&text_state, window, |this, state, event, window, cx| {
+                if matches!(event, InputEvent::Blur) {
+                    // 输入框失焦表示不再键盘操作，把前台还给之前的窗口并恢复不抢焦点。
+                    // 焦点已切到其他便签的输入框时会话已属于新窗口，这里不能把前台抢回来。
+                    if let Err(error) = crate::services::focus::restore_previous_focus_for(window) {
+                        tracing::debug!(%error, "便签输入框失焦时恢复焦点失败");
+                    }
+                    return;
                 }
-                return;
-            }
-            if !matches!(event, InputEvent::Change) {
-                return;
-            }
-            let dirty = {
-                let current = state.read(cx).text();
-                current.len() != this.text.len() || *current != this.text.as_str()
-            };
-            this.close_armed = false;
-            if dirty != this.dirty {
-                this.dirty = dirty;
-                this.save_error = false;
-                cx.notify();
-            }
-        });
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let dirty = {
+                    let current = state.read(cx).text();
+                    current.len() != this.text.len() || *current != this.text.as_str()
+                };
+                this.close_armed = false;
+                if dirty != this.dirty {
+                    this.dirty = dirty;
+                    this.save_error = false;
+                    cx.notify();
+                }
+            });
         let mut this = Self {
             item_id: data.item_id,
             modes: data.modes,
@@ -570,7 +572,7 @@ impl StickyNote {
             self.show_toast("sticky.unsaved_close", cx);
             return;
         }
-        let _ = crate::services::focus::restore_previous_focus();
+        let _ = crate::services::focus::restore_previous_focus_for(window);
         window.remove_window();
         cx.notify();
     }
@@ -654,11 +656,13 @@ impl StickyNote {
         self.finish_clipboard_task(task, "sticky.copied", cx);
     }
 
-    fn paste_content(&mut self, cx: &mut Context<Self>) {
+    fn paste_content(&mut self, window: &Window, cx: &mut Context<Self>) {
         let services = StickyService::services(cx);
         let item_id = self.item_id;
         let text = self.text_for_clipboard(cx);
-        let _ = crate::services::focus::restore_previous_focus();
+        // 只在本便签输入框持有焦点时交还给之前的窗口；其他便签或主窗口的输入框持有焦点时
+        // 前台就是粘贴目标，不能恢复那个窗口保存的旧目标。
+        let _ = crate::services::focus::restore_previous_focus_for(window);
         let task = cx.background_spawn(async move {
             match text {
                 Some(text) => services.paste_service.paste_text(&text),
@@ -668,7 +672,7 @@ impl StickyNote {
         self.finish_clipboard_task(task, "sticky.pasted", cx);
     }
 
-    fn copy_selected_tokens(&mut self, paste: bool, cx: &mut Context<Self>) {
+    fn copy_selected_tokens(&mut self, paste: bool, window: &Window, cx: &mut Context<Self>) {
         let Some(split) = self.split.as_ref() else {
             return;
         };
@@ -682,7 +686,7 @@ impl StickyNote {
         }
         let services = StickyService::services(cx);
         if paste {
-            let _ = crate::services::focus::restore_previous_focus();
+            let _ = crate::services::focus::restore_previous_focus_for(window);
         }
         let task = cx.background_spawn(async move {
             if paste {
@@ -802,7 +806,7 @@ impl StickyNote {
             .update(cx, |state, cx| state.set_value(text, window, cx));
         self.finish_editing(cx);
         // 取消表示不再编辑，把焦点还给之前的窗口；保存后保留焦点方便继续输入。
-        if let Err(error) = crate::services::focus::restore_previous_focus() {
+        if let Err(error) = crate::services::focus::restore_previous_focus_for(window) {
             tracing::debug!(%error, "取消便签编辑时恢复焦点失败");
         }
     }
@@ -1004,7 +1008,7 @@ impl StickyNote {
         let action = action.as_str();
         match action {
             "copy" => self.copy_content(cx),
-            "paste" => self.paste_content(cx),
+            "paste" => self.paste_content(window, cx),
             "split" => self.toggle_split(cx),
             "topmost" => self.toggle_topmost(window, cx),
             "collapse" => self.toggle_collapsed(window, cx),
@@ -1960,7 +1964,7 @@ impl StickyNote {
                     has_selection,
                     paper,
                     translator.translate("sticky.copy"),
-                    cx.listener(|this, _, _, cx| this.copy_selected_tokens(false, cx)),
+                    cx.listener(|this, _, window, cx| this.copy_selected_tokens(false, window, cx)),
                 ),
             ))
             .child(dimmed(
@@ -1971,7 +1975,7 @@ impl StickyNote {
                     false,
                     paper,
                     translator.translate("sticky.paste"),
-                    cx.listener(|this, _, _, cx| this.copy_selected_tokens(true, cx)),
+                    cx.listener(|this, _, window, cx| this.copy_selected_tokens(true, window, cx)),
                 ),
             ));
         let row = div()
