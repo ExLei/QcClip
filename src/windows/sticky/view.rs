@@ -5,10 +5,10 @@ use std::{collections::HashMap, ops::Range, path::PathBuf, rc::Rc, sync::Arc, ti
 use gpui::ColorExt as _;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Context, Entity, FontWeight, ListAlignment, ListState,
-    MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, Point, Render, RenderImage,
-    ScrollWheelEvent, SharedString, Stateful, Subscription, Task, UniformListScrollHandle, Window,
-    div, img, list, px, size, uniform_list,
+    AnyElement, App, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight, ListAlignment,
+    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, Point, Render,
+    RenderImage, ScrollWheelEvent, SharedString, Stateful, Subscription, Task,
+    UniformListScrollHandle, Window, div, img, list, px, size, uniform_list,
 };
 use gpui_component::{
     ActiveTheme as _,
@@ -121,6 +121,8 @@ pub(super) struct StickyNote {
     html_list: ListState,
     /// 文本始终可以直接编辑，内容与已保存文本不同时才显示保存栏。
     text_state: Entity<TextareaState>,
+    /// 根元素的焦点句柄，点击空白处时接管焦点使输入框失焦。
+    focus_handle: FocusHandle,
     dirty: bool,
     /// 有未保存修改时第一次关闭只提示，再次关闭才放弃修改。
     close_armed: bool,
@@ -175,6 +177,13 @@ impl StickyNote {
                 .context_menu(false)
         });
         let text_subscription = cx.subscribe(&text_state, |this, state, event, cx| {
+            if matches!(event, InputEvent::Blur) {
+                // 输入框失焦表示不再键盘操作，把前台还给之前的窗口并恢复不抢焦点。
+                if let Err(error) = crate::services::focus::restore_previous_focus() {
+                    tracing::debug!(%error, "便签输入框失焦时恢复焦点失败");
+                }
+                return;
+            }
             if !matches!(event, InputEvent::Change) {
                 return;
             }
@@ -212,6 +221,7 @@ impl StickyNote {
             html_images: None,
             html_list: ListState::new(0, ListAlignment::Top, px(1024.0)),
             text_state,
+            focus_handle: cx.focus_handle(),
             dirty: false,
             close_armed: false,
             saving: false,
@@ -1770,6 +1780,8 @@ impl StickyNote {
             };
             return Some(
                 footer_row(paper)
+                    // 保存栏点击不应让根元素抢走输入框焦点，保存后可以继续输入。
+                    .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
                     .child(
                         hint.min_w_0()
                             .flex_1()
@@ -2043,6 +2055,7 @@ impl Render for StickyNote {
             .children(toast);
         div()
             .id("sticky-note")
+            .track_focus(&self.focus_handle)
             .relative()
             .size_full()
             .overflow_hidden()
