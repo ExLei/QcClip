@@ -804,6 +804,8 @@ pub struct ClipboardConfig {
     pub filter_hover_delay_ms: u16,
     pub move_pasted_to_first_in_clipboard: bool,
     pub move_pasted_to_first_in_favorites: bool,
+    /// 全局格式粘贴；关闭后默认粘贴和合并粘贴优先只粘贴纯文本，没有纯文本时按原格式粘贴；指定格式粘贴不受影响。
+    pub formatted_paste: bool,
     pub auto_scroll_to_top: bool,
     pub auto_focus_search: bool,
     pub auto_clear_search: bool,
@@ -1062,6 +1064,7 @@ impl Default for ClipboardConfig {
             filter_hover_delay_ms: Self::TAB_BAR_HOVER_DELAY_DEFAULT_MS,
             move_pasted_to_first_in_clipboard: false,
             move_pasted_to_first_in_favorites: false,
+            formatted_paste: true,
             auto_scroll_to_top: false,
             auto_focus_search: false,
             auto_clear_search: false,

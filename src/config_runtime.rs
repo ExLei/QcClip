@@ -64,6 +64,7 @@ impl ConfigRuntime {
         crate::platform::clipboard::set_capture_format_config(
             config.clipboard.capture_formats.clone(),
         );
+        crate::services::paste::set_formatted_paste_enabled(config.clipboard.formatted_paste);
         cx.set_global(Self { config, path });
     }
 
@@ -73,6 +74,7 @@ impl ConfigRuntime {
         crate::platform::clipboard::set_capture_format_config(
             config.clipboard.capture_formats.clone(),
         );
+        crate::services::paste::set_formatted_paste_enabled(config.clipboard.formatted_paste);
         let previous = cx.update_global::<Self, _>(|runtime, _| {
             let previous = runtime.config.clone();
             runtime.config = config.clone();
@@ -699,6 +701,7 @@ pub(crate) fn set_clipboard_config(
     }
     next.clipboard = clipboard.clone();
     persist_config(&path, &next)?;
+    crate::services::paste::set_formatted_paste_enabled(clipboard.formatted_paste);
     crate::platform::clipboard::set_capture_format_config(clipboard.capture_formats);
 
     cx.update_global::<ConfigRuntime, _>(|runtime, _| {

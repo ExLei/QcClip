@@ -625,6 +625,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.move_pasted_to_first_in_favorites,
             warnings,
         ),
+        formatted_paste: read_field(
+            object,
+            "formattedPaste",
+            "clipboard.formattedPaste",
+            default.formatted_paste,
+            warnings,
+        ),
         auto_scroll_to_top: read_field(
             object,
             "autoScrollToTop",
@@ -1207,6 +1214,7 @@ mod tests {
         let loaded = from_str("{}").expect("空配置对象应当可以加载");
 
         assert!(!loaded.config.clipboard.clear_tags_on_tab_switch);
+        assert!(loaded.config.clipboard.formatted_paste);
         assert_eq!(loaded.config.general.language, InterfaceLanguage::ZhCn);
         assert!(loaded.config.general.global_notification_enabled);
         assert_eq!(

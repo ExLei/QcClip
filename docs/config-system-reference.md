@@ -28,6 +28,8 @@
 
 跨设备同步设置由独立的 [services/sync/config.rs](../src/services/sync/config.rs) 管理，不写入 `config.json` 或 `state.json`。Windows 上的设备身份、配对、发送序号、连接及设备策略和 WebDAV 凭据统一通过 DPAPI 保护，保存于 `%LOCALAPPDATA%/QcClipDevice/sync.bin`，不使用 Windows 凭据管理器，不随内容导入或数据目录迁移覆盖。清理日志 `sync-cache-*.json` 仅保存待回收对象的随机标识。配置语义见[同步使用说明](sync-guide.md)。
 
+托盘菜单中的“格式粘贴”保存为 `config.json` 的 `clipboard.formattedPaste`，默认开启。关闭后默认粘贴和合并粘贴都优先只粘贴纯文本，条目没有纯文本时按原格式粘贴；文件和图片合并保持原样。右键菜单指定格式粘贴和复制操作不受影响。
+
 标签面板中的“切换页面时清空选择”保存为 `config.json` 的 `clipboard.clearTagsOnTabSwitch`，默认关闭；开启后切换到历史或收藏页面时清空标签选择。
 
 ## 配置分组
