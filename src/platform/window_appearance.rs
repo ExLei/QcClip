@@ -83,8 +83,7 @@ mod native {
 
     const SUBCLASS_ID: usize = 1;
     /// 与 vendor/gpui-windows 渲染器约定的窗口属性，值为物理像素圆角半径。
-    const CORNER_RADIUS_PROP: windows::core::PCWSTR =
-        windows::core::w!("GpuiWindowCornerRadius");
+    const CORNER_RADIUS_PROP: windows::core::PCWSTR = windows::core::w!("GpuiWindowCornerRadius");
 
     fn physical_radius(dpi: u32) -> usize {
         (super::CORNER_RADIUS * dpi.max(96) as f32 / 96.0).round() as usize
@@ -278,8 +277,7 @@ mod native {
     mod tests {
         use super::*;
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DestroyWindow, GetPropW, SW_MAXIMIZE, SW_RESTORE, ShowWindow,
-            WS_POPUP,
+            CreateWindowExW, DestroyWindow, GetPropW, SW_MAXIMIZE, SW_RESTORE, ShowWindow, WS_POPUP,
         };
 
         struct TestWindow(HWND);
