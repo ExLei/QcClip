@@ -394,7 +394,7 @@ fn apply_to_window(window: &Window, cx: &mut App) {
         1.0
     };
     let system_material = matches!(material, WindowMaterial::Acrylic | WindowMaterial::Blur);
-    // 先移除旧系统的区域圆角，再启用系统材质，避免圆角外出现材质残留。
+    // 先移除旧系统的圆角遮罩，再启用系统材质，避免圆角外出现材质残留。
     if system_material
         && let Err(error) = crate::platform::window_appearance::apply(window, material)
     {
