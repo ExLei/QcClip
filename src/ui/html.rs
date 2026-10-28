@@ -11,7 +11,7 @@ use std::{
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Div, FontStyle, FontWeight, HighlightStyle, Hsla, ObjectFit, Pixels, RenderImage,
-    Rgba, StrikethroughStyle, StyledText, UnderlineStyle, div, img, px, rgba,
+    Rgba, Size, StrikethroughStyle, StyledText, UnderlineStyle, div, img, px, rgba,
 };
 use html5ever::tendril::TendrilSink;
 use html5ever::{ParseOpts, parse_document};
@@ -107,6 +107,127 @@ pub fn render_with_images_and_max_lines(
             .child(fallback_text);
     }
     root.into_any_element()
+}
+
+/// 用于估算自适应行高的 HTML 预览片段，按文档顺序排列。
+pub enum PreviewSegment {
+    /// 连续的文本流，块级元素和换行已转换为 `\n`。
+    Text(String),
+    /// 已加载图片的原始显示尺寸。
+    Image(Size<Pixels>),
+}
+
+/// 将 HTML 拆分为文本与已加载图片片段，供列表在布局前估算预览高度。
+///
+/// 尚未加载的图片不会出现在结果中，图片加载完成后需要重新估算。
+pub fn preview_segments(
+    source: &str,
+    images: &HashMap<PathBuf, Arc<RenderImage>>,
+) -> Vec<PreviewSegment> {
+    let source = crate::domain::html::fragment(source);
+    let parsed = parsed_html(source);
+    let mut collector = SegmentCollector {
+        images,
+        segments: Vec::new(),
+        text: String::new(),
+        visited_nodes: 0,
+    };
+    collector.collect(&parsed.dom.document, false, 0);
+    collector.flush_text();
+    collector.segments
+}
+
+struct SegmentCollector<'a> {
+    images: &'a HashMap<PathBuf, Arc<RenderImage>>,
+    segments: Vec<PreviewSegment>,
+    text: String,
+    visited_nodes: usize,
+}
+
+impl SegmentCollector<'_> {
+    fn collect(&mut self, node: &Handle, preserve_whitespace: bool, depth: usize) {
+        if depth > MAX_RENDER_DEPTH || self.visited_nodes >= MAX_LIST_RENDER_NODES {
+            return;
+        }
+        self.visited_nodes += 1;
+        match &node.data {
+            NodeData::Text { contents } => {
+                for character in contents.borrow().chars() {
+                    if self.text.len() >= MAX_RENDER_TEXT_BYTES {
+                        break;
+                    }
+                    if !preserve_whitespace && character.is_whitespace() {
+                        if !self.text.is_empty()
+                            && !self.text.ends_with(' ')
+                            && !self.text.ends_with('\n')
+                        {
+                            self.text.push(' ');
+                        }
+                    } else {
+                        self.text.push(character);
+                    }
+                }
+            }
+            NodeData::Element { .. } => {
+                let Some(tag) = element_tag(node) else {
+                    return;
+                };
+                if is_ignored_tag(&tag) {
+                    return;
+                }
+                match tag.as_str() {
+                    "br" => self.text.push('\n'),
+                    "img" => {
+                        let image = attr_value_from_node(node, "src")
+                            .and_then(|source| local_image_path(&source))
+                            .and_then(|path| self.images.get(&path));
+                        if let Some(image) = image {
+                            let size = image.size(0);
+                            self.flush_text();
+                            self.segments.push(PreviewSegment::Image(Size {
+                                width: px(size.width.0 as f32),
+                                height: px(size.height.0 as f32),
+                            }));
+                        }
+                    }
+                    _ => {
+                        let block = is_block_tag(&tag);
+                        if block {
+                            self.break_line();
+                        }
+                        let preserve_whitespace = preserve_whitespace || tag == "pre";
+                        for child in node.children.borrow().iter() {
+                            self.collect(child, preserve_whitespace, depth + 1);
+                        }
+                        if block {
+                            self.break_line();
+                        }
+                    }
+                }
+            }
+            _ => {
+                for child in node.children.borrow().iter() {
+                    self.collect(child, preserve_whitespace, depth + 1);
+                }
+            }
+        }
+    }
+
+    fn break_line(&mut self) {
+        let trimmed = self.text.trim_end_matches(' ').len();
+        self.text.truncate(trimmed);
+        if !self.text.is_empty() && !self.text.ends_with('\n') {
+            self.text.push('\n');
+        }
+    }
+
+    fn flush_text(&mut self) {
+        let text = mem::take(&mut self.text);
+        let text = text.trim();
+        if !text.is_empty() {
+            self.segments.push(PreviewSegment::Text(text.to_owned()));
+        }
+    }
 }
 
 /// 提取 HTML 中允许加载的本地图片路径。
@@ -1419,6 +1540,27 @@ fn table_border() -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_segments_keep_text_and_loaded_image_order() {
+        let path = PathBuf::from(r"C:\images\a.png");
+        let image = Arc::new(RenderImage::new(vec![image::Frame::new(
+            image::RgbaImage::new(40, 20),
+        )]));
+        let images = HashMap::from([(path, image)]);
+        let segments = preview_segments(
+            r#"<p>标题</p><p>第二段</p><img src="C:\images\a.png"><div>说明 <b>文字</b></div><img src="C:\images\missing.png">"#,
+            &images,
+        );
+
+        assert_eq!(segments.len(), 3);
+        assert!(matches!(&segments[0], PreviewSegment::Text(text) if text == "标题\n第二段"));
+        assert!(matches!(
+            &segments[1],
+            PreviewSegment::Image(size) if size.width == px(40.0) && size.height == px(20.0)
+        ));
+        assert!(matches!(&segments[2], PreviewSegment::Text(text) if text == "说明 文字"));
+    }
 
     #[test]
     fn document_splits_wrappers_lists_and_tables_into_items() {

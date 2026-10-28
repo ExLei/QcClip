@@ -278,6 +278,7 @@ pub fn render(
     total_item_count: usize,
     list_order_ids: &[HistoryItemId],
     loaded_items: &HashMap<HistoryItemId, ClipboardListItem>,
+    html_images: &HashMap<PathBuf, Arc<RenderImage>>,
     file_list_views: &HashMap<FileListKey, Entity<FileListView>>,
     toolbar_bottom: Pixels,
     toolbar_dragging: bool,
@@ -315,6 +316,7 @@ pub fn render(
             total_item_count,
             list_order_ids,
             loaded_items,
+            html_images,
             file_list_views,
             metrics,
             list_item_style,
@@ -501,6 +503,7 @@ fn render_rows(
     total_item_count: usize,
     list_order_ids: &[HistoryItemId],
     loaded_items: &HashMap<HistoryItemId, ClipboardListItem>,
+    html_images: &HashMap<PathBuf, Arc<RenderImage>>,
     file_list_views: &HashMap<FileListKey, Entity<FileListView>>,
     metrics: ListItemMetrics,
     list_item_style: ListItemStyle,
@@ -598,7 +601,14 @@ fn render_rows(
                             file_list_view_for_item(item, display_priority, file_list_views)
                                 .map(|view| view.read(cx).path_count());
                         metrics
-                            .for_item(item, display_priority, file_count, preview_width, window)
+                            .for_item(
+                                item,
+                                display_priority,
+                                html_images,
+                                file_count,
+                                preview_width,
+                                window,
+                            )
                             .row_height
                     });
                 let row_height = resolve_row_height(
@@ -689,6 +699,7 @@ fn render_rows(
                             let row_metrics = metrics.for_item(
                                 &item,
                                 display_priority,
+                                &this.loaded_html_images,
                                 file_count,
                                 available_preview_width(
                                     list_width,
@@ -1943,7 +1954,12 @@ fn render_item_surface<T>(
                     metrics.preview_line_height,
                     translator.translate("main.format.image_html"),
                     html_images,
-                    content_metrics.preview_line_count,
+                    // 自适应行高按固定的图片上限估算高度，渲染时必须使用同一上限。
+                    if metrics.height == ListItemHeight::Adaptive {
+                        ADAPTIVE_IMAGE_PREVIEW_LINES
+                    } else {
+                        content_metrics.preview_line_count
+                    },
                 ));
     } else {
         preview = preview

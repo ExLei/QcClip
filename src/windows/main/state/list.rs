@@ -498,6 +498,8 @@ impl MainWindow {
                         match result {
                             Ok(image) if this.html_image_cache_paths.contains(&path) => {
                                 this.loaded_html_images.insert(path, image);
+                                // 图文混排的自适应行高依赖图片尺寸，加载完成后需重新估算。
+                                this.invalidate_list_layout_cache();
                                 cx.notify();
                             }
                             Ok(_) => {}
