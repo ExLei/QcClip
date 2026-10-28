@@ -751,6 +751,12 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Shortcuts,
+            title_key: "settings.shortcuts.toggle_formatted_paste",
+            description_key: None,
+            ratio: 0.15,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
             title_key: "settings.shortcuts.upload_latest",
             description_key: None,
             ratio: 0.16,
@@ -1176,6 +1182,7 @@ struct SettingsWindowView {
     recording_shortcut: bool,
     recording_open_settings: bool,
     recording_toggle_clipboard_monitor: bool,
+    recording_toggle_formatted_paste: bool,
     recording_upload_latest: bool,
     recording_pull_latest: bool,
     recording_plain_text_paste: bool,
@@ -1654,6 +1661,7 @@ impl SettingsWindowView {
                 view.recording_shortcut = false;
                 view.recording_open_settings = false;
                 view.recording_toggle_clipboard_monitor = false;
+                view.recording_toggle_formatted_paste = false;
                 view.recording_upload_latest = false;
                 view.recording_pull_latest = false;
                 view.recording_plain_text_paste = false;
@@ -1713,6 +1721,7 @@ impl SettingsWindowView {
             recording_shortcut: false,
             recording_open_settings: false,
             recording_toggle_clipboard_monitor: false,
+            recording_toggle_formatted_paste: false,
             recording_upload_latest: false,
             recording_pull_latest: false,
             recording_plain_text_paste: false,

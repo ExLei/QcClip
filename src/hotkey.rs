@@ -38,6 +38,7 @@ pub(crate) struct HotkeyRuntime {
     main_hotkey: Option<HotKey>,
     settings_hotkey: Option<HotKey>,
     clipboard_monitor_hotkey: Option<HotKey>,
+    formatted_paste_hotkey: Option<HotKey>,
     upload_latest_hotkey: Option<HotKey>,
     pull_latest_hotkey: Option<HotKey>,
     plain_text_paste_hotkey: Option<HotKey>,
@@ -55,6 +56,7 @@ pub(crate) struct HotkeyRuntime {
     suspended_main_status: Option<RegistrationStatus>,
     suspended_settings_status: Option<RegistrationStatus>,
     suspended_clipboard_monitor_status: Option<RegistrationStatus>,
+    suspended_formatted_paste_status: Option<RegistrationStatus>,
     suspended_upload_latest_status: Option<RegistrationStatus>,
     suspended_pull_latest_status: Option<RegistrationStatus>,
     suspended_plain_text_paste_status: Option<RegistrationStatus>,
@@ -66,6 +68,7 @@ pub(crate) struct HotkeyRuntime {
     status: RegistrationStatus,
     settings_status: RegistrationStatus,
     clipboard_monitor_status: RegistrationStatus,
+    formatted_paste_status: RegistrationStatus,
     upload_latest_status: RegistrationStatus,
     pull_latest_status: RegistrationStatus,
     plain_text_paste_status: RegistrationStatus,
@@ -81,6 +84,7 @@ enum HotkeyCommand {
     ToggleMainWindow,
     OpenSettings,
     ToggleClipboardMonitor,
+    ToggleFormattedPaste,
     UploadLatest,
     PullLatest,
     PlainTextPaste,
@@ -187,6 +191,7 @@ impl HotkeyRuntime {
             main_hotkey: None,
             settings_hotkey: None,
             clipboard_monitor_hotkey: None,
+            formatted_paste_hotkey: None,
             upload_latest_hotkey: None,
             pull_latest_hotkey: None,
             plain_text_paste_hotkey: None,
@@ -204,6 +209,7 @@ impl HotkeyRuntime {
             suspended_main_status: None,
             suspended_settings_status: None,
             suspended_clipboard_monitor_status: None,
+            suspended_formatted_paste_status: None,
             suspended_upload_latest_status: None,
             suspended_pull_latest_status: None,
             suspended_plain_text_paste_status: None,
@@ -215,6 +221,7 @@ impl HotkeyRuntime {
             status: RegistrationStatus::Disabled,
             settings_status: RegistrationStatus::Disabled,
             clipboard_monitor_status: RegistrationStatus::Disabled,
+            formatted_paste_status: RegistrationStatus::Disabled,
             upload_latest_status: RegistrationStatus::Disabled,
             pull_latest_status: RegistrationStatus::Disabled,
             plain_text_paste_status: RegistrationStatus::Disabled,
@@ -235,6 +242,10 @@ impl HotkeyRuntime {
             runtime.apply_clipboard_monitor(shortcuts.toggle_clipboard_monitor.as_ref())
         {
             tracing::error!("注册切换剪贴板监听快捷键失败：{error}");
+        }
+        if let Err(error) = runtime.apply_formatted_paste(shortcuts.toggle_formatted_paste.as_ref())
+        {
+            tracing::error!("注册切换格式粘贴快捷键失败：{error}");
         }
         if let Err(error) = runtime.apply_upload_latest(shortcuts.upload_latest.as_ref()) {
             tracing::error!("注册上传最新内容快捷键失败：{error}");
@@ -294,6 +305,11 @@ impl HotkeyRuntime {
                             if is_hotkey_event_active(event, cx) =>
                         {
                             crate::windows::main::MainWindowService::toggle_clipboard_listener(cx)
+                        }
+                        (HotkeyCommand::ToggleFormattedPaste, HotKeyState::Pressed)
+                            if is_hotkey_event_active(event, cx) =>
+                        {
+                            crate::services::tray::toggle_formatted_paste(cx)
                         }
                         (HotkeyCommand::UploadLatest, HotKeyState::Pressed)
                             if is_hotkey_event_active(event, cx) =>
@@ -583,6 +599,51 @@ impl HotkeyRuntime {
         self.clipboard_monitor_hotkey = Some(next);
         self.set_active_command(next.id(), Some(HotkeyCommand::ToggleClipboardMonitor));
         self.clipboard_monitor_status = RegistrationStatus::Registered;
+        Ok(())
+    }
+
+    fn apply_formatted_paste(&mut self, binding: Option<&ShortcutBinding>) -> Result<(), String> {
+        let next = binding.map(binding_to_hotkey).transpose()?;
+
+        if self.formatted_paste_hotkey == next {
+            self.formatted_paste_status = if next.is_some() {
+                RegistrationStatus::Registered
+            } else {
+                RegistrationStatus::Disabled
+            };
+            return Ok(());
+        }
+
+        if self.manager.is_none() && next.is_some() {
+            self.formatted_paste_status = RegistrationStatus::Failed;
+            return Err("全局快捷键管理器不可用".to_owned());
+        }
+
+        if let Some(current) = self.formatted_paste_hotkey {
+            self.remove_active_command(current.id());
+            self.unregister(current)?;
+            self.formatted_paste_hotkey = None;
+        }
+
+        let Some(next) = next else {
+            self.formatted_paste_status = RegistrationStatus::Disabled;
+            return Ok(());
+        };
+        if self.has_active_command(next.id()) {
+            self.formatted_paste_status = RegistrationStatus::Failed;
+            return Err("快捷键与另一条快捷键重复".to_owned());
+        }
+        let Some(manager) = self.manager.as_ref() else {
+            self.formatted_paste_status = RegistrationStatus::Failed;
+            return Err("全局快捷键管理器不可用".to_owned());
+        };
+        manager
+            .register(next)
+            .map_err(|error| format!("系统拒绝注册快捷键：{error}"))?;
+
+        self.formatted_paste_hotkey = Some(next);
+        self.set_active_command(next.id(), Some(HotkeyCommand::ToggleFormattedPaste));
+        self.formatted_paste_status = RegistrationStatus::Registered;
         Ok(())
     }
 
@@ -1051,6 +1112,12 @@ impl HotkeyRuntime {
                 first_error.get_or_insert(error);
             }
         }
+        if let Some(current) = self.formatted_paste_hotkey.take() {
+            self.remove_active_command(current.id());
+            if let Err(error) = self.unregister(current) {
+                first_error.get_or_insert(error);
+            }
+        }
         if let Some(current) = self.upload_latest_hotkey.take() {
             self.remove_active_command(current.id());
             if let Err(error) = self.unregister(current) {
@@ -1101,6 +1168,8 @@ impl HotkeyRuntime {
         let settings_result = self.apply_settings(shortcuts.open_settings.as_ref());
         let clipboard_monitor_result =
             self.apply_clipboard_monitor(shortcuts.toggle_clipboard_monitor.as_ref());
+        let formatted_paste_result =
+            self.apply_formatted_paste(shortcuts.toggle_formatted_paste.as_ref());
         let upload_latest_result = self.apply_upload_latest(shortcuts.upload_latest.as_ref());
         let pull_latest_result = self.apply_pull_latest(shortcuts.pull_latest.as_ref());
         let plain_text_paste_result =
@@ -1111,6 +1180,7 @@ impl HotkeyRuntime {
         main_result
             .and(settings_result)
             .and(clipboard_monitor_result)
+            .and(formatted_paste_result)
             .and(upload_latest_result)
             .and(pull_latest_result)
             .and(plain_text_paste_result)
@@ -1148,6 +1218,7 @@ impl HotkeyRuntime {
         self.suspended_main_status = Some(self.status);
         self.suspended_settings_status = Some(self.settings_status);
         self.suspended_clipboard_monitor_status = Some(self.clipboard_monitor_status);
+        self.suspended_formatted_paste_status = Some(self.formatted_paste_status);
         self.suspended_upload_latest_status = Some(self.upload_latest_status);
         self.suspended_pull_latest_status = Some(self.pull_latest_status);
         self.suspended_plain_text_paste_status = Some(self.plain_text_paste_status);
@@ -1180,6 +1251,7 @@ impl HotkeyRuntime {
         self.suspended_main_status = None;
         self.suspended_settings_status = None;
         self.suspended_clipboard_monitor_status = None;
+        self.suspended_formatted_paste_status = None;
         self.suspended_upload_latest_status = None;
         self.suspended_pull_latest_status = None;
         self.suspended_plain_text_paste_status = None;
@@ -1687,6 +1759,20 @@ pub(crate) fn clipboard_monitor_registration_status(cx: &App) -> RegistrationSta
     })
 }
 
+pub(crate) fn formatted_paste_registration_status(cx: &App) -> RegistrationStatus {
+    cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
+        if !runtime.global_enabled {
+            RegistrationStatus::Disabled
+        } else if runtime.suspended {
+            runtime
+                .suspended_formatted_paste_status
+                .unwrap_or(runtime.formatted_paste_status)
+        } else {
+            runtime.formatted_paste_status
+        }
+    })
+}
+
 pub(crate) fn upload_latest_registration_status(cx: &App) -> RegistrationStatus {
     cx.read_global::<HotkeyRuntime, _>(|runtime, _| {
         if !runtime.global_enabled {
@@ -1963,6 +2049,20 @@ pub(crate) fn set_toggle_clipboard_monitor_shortcut(
     Ok(())
 }
 
+pub(crate) fn set_toggle_formatted_paste_shortcut(
+    binding: Option<ShortcutBinding>,
+    cx: &mut App,
+) -> Result<(), String> {
+    let mut shortcuts = crate::config_runtime::shortcuts_config(cx);
+    shortcuts.toggle_formatted_paste = binding;
+    validate_shortcuts_config(&shortcuts)?;
+    crate::config_runtime::set_shortcuts_config(shortcuts, cx)
+        .map_err(|error| error.to_string())?;
+    synchronize_shortcuts(cx)?;
+    cx.refresh_windows();
+    Ok(())
+}
+
 pub(crate) fn set_upload_latest_shortcut(
     binding: Option<ShortcutBinding>,
     cx: &mut App,
@@ -2082,12 +2182,16 @@ pub(crate) fn set_all_session_shortcuts_only_in_window(
 
 fn validate_shortcuts_config(shortcuts: &ShortcutsConfig) -> Result<(), String> {
     let mut registered = HashMap::new();
-    let mut bindings = Vec::with_capacity(SessionShortcutId::ALL.len() + 7);
+    let mut bindings = Vec::with_capacity(SessionShortcutId::ALL.len() + 8);
     bindings.push(("全局显示/隐藏窗口", shortcuts.toggle_main_window.as_ref()));
     bindings.push(("全局打开设置", shortcuts.open_settings.as_ref()));
     bindings.push((
         "全局切换剪贴板监听",
         shortcuts.toggle_clipboard_monitor.as_ref(),
+    ));
+    bindings.push((
+        "全局切换格式粘贴",
+        shortcuts.toggle_formatted_paste.as_ref(),
     ));
     bindings.push(("全局上传最新内容", shortcuts.upload_latest.as_ref()));
     bindings.push(("全局拉取最新内容", shortcuts.pull_latest.as_ref()));
@@ -2130,6 +2234,10 @@ pub(crate) fn reset_open_settings_shortcut(cx: &mut App) -> Result<(), String> {
 
 pub(crate) fn reset_toggle_clipboard_monitor_shortcut(cx: &mut App) -> Result<(), String> {
     set_toggle_clipboard_monitor_shortcut(None, cx)
+}
+
+pub(crate) fn reset_toggle_formatted_paste_shortcut(cx: &mut App) -> Result<(), String> {
+    set_toggle_formatted_paste_shortcut(None, cx)
 }
 
 pub(crate) fn reset_upload_latest_shortcut(cx: &mut App) -> Result<(), String> {
@@ -2212,6 +2320,16 @@ pub(crate) fn reject_toggle_clipboard_monitor_recording(cx: &mut App) {
     }
     cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
         runtime.clipboard_monitor_status = RegistrationStatus::Failed
+    });
+    cx.refresh_windows();
+}
+
+pub(crate) fn reject_toggle_formatted_paste_recording(cx: &mut App) {
+    if let Err(error) = cancel_toggle_main_window_recording(cx) {
+        tracing::warn!(%error, "拒绝新快捷键后恢复原快捷键失败");
+    }
+    cx.update_global::<HotkeyRuntime, _>(|runtime, _| {
+        runtime.formatted_paste_status = RegistrationStatus::Failed
     });
     cx.refresh_windows();
 }

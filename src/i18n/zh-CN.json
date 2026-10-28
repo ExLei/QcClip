@@ -380,6 +380,7 @@
   "settings.shortcuts.middle_mouse.description": "按住达到阈值时显示/隐藏窗口（10～1000 ms）",
   "settings.shortcuts.open_settings": "打开设置",
   "settings.shortcuts.toggle_clipboard_monitor": "切换剪贴板监听",
+  "settings.shortcuts.toggle_formatted_paste": "切换格式粘贴",
   "settings.shortcuts.upload_latest": "上传最新内容",
   "settings.shortcuts.pull_latest": "拉取最新内容",
   "settings.shortcuts.plain_text_paste": "纯文本粘贴",

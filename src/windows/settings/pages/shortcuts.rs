@@ -42,6 +42,7 @@ impl SettingsWindowView {
         let binding = shortcuts.toggle_main_window.clone();
         let settings_binding = shortcuts.open_settings.clone();
         let clipboard_monitor_binding = shortcuts.toggle_clipboard_monitor.clone();
+        let formatted_paste_binding = shortcuts.toggle_formatted_paste.clone();
         let upload_latest_binding = shortcuts.upload_latest.clone();
         let pull_latest_binding = shortcuts.pull_latest.clone();
         let plain_text_paste_binding = shortcuts.plain_text_paste.clone();
@@ -50,6 +51,7 @@ impl SettingsWindowView {
         let recording = self.recording_shortcut;
         let recording_open_settings = self.recording_open_settings;
         let recording_toggle_clipboard_monitor = self.recording_toggle_clipboard_monitor;
+        let recording_toggle_formatted_paste = self.recording_toggle_formatted_paste;
         let recording_upload_latest = self.recording_upload_latest;
         let recording_pull_latest = self.recording_pull_latest;
         let recording_plain_text_paste = self.recording_plain_text_paste;
@@ -74,6 +76,7 @@ impl SettingsWindowView {
                     view.recording_shortcut = false;
                     view.recording_open_settings = false;
                     view.recording_toggle_clipboard_monitor = false;
+                    view.recording_toggle_formatted_paste = false;
                     view.recording_upload_latest = false;
                     view.recording_pull_latest = false;
                     view.recording_plain_text_paste = false;
@@ -97,6 +100,7 @@ impl SettingsWindowView {
         let global_recording = recording
             && !recording_open_settings
             && !recording_toggle_clipboard_monitor
+            && !recording_toggle_formatted_paste
             && !recording_upload_latest
             && !recording_pull_latest
             && !recording_plain_text_paste
@@ -104,6 +108,7 @@ impl SettingsWindowView {
             && recording_session_shortcut.is_none();
         let settings_recording = recording && recording_open_settings;
         let clipboard_monitor_recording = recording && recording_toggle_clipboard_monitor;
+        let formatted_paste_recording = recording && recording_toggle_formatted_paste;
         let upload_latest_recording = recording && recording_upload_latest;
         let pull_latest_recording = recording && recording_pull_latest;
         let plain_text_paste_recording = recording && recording_plain_text_paste;
@@ -179,6 +184,7 @@ impl SettingsWindowView {
                         view.recording_shortcut = false;
                         view.recording_open_settings = false;
                         view.recording_toggle_clipboard_monitor = false;
+                        view.recording_toggle_formatted_paste = false;
                         view.recording_upload_latest = false;
                         view.recording_pull_latest = false;
                         view.recording_plain_text_paste = false;
@@ -197,6 +203,8 @@ impl SettingsWindowView {
                             hotkey::reject_open_settings_recording(cx);
                         } else if target.recording_toggle_clipboard_monitor {
                             hotkey::reject_toggle_clipboard_monitor_recording(cx);
+                        } else if target.recording_toggle_formatted_paste {
+                            hotkey::reject_toggle_formatted_paste_recording(cx);
                         } else if target.recording_upload_latest {
                             hotkey::reject_upload_latest_recording(cx);
                         } else if target.recording_pull_latest {
@@ -216,6 +224,7 @@ impl SettingsWindowView {
                             view.recording_shortcut = false;
                             view.recording_open_settings = false;
                             view.recording_toggle_clipboard_monitor = false;
+                            view.recording_toggle_formatted_paste = false;
                             view.recording_upload_latest = false;
                             view.recording_pull_latest = false;
                             view.recording_plain_text_paste = false;
@@ -232,6 +241,7 @@ impl SettingsWindowView {
                 if recording_session_shortcut.is_none()
                     && !shortcut_id.read(cx).recording_open_settings
                     && !shortcut_id.read(cx).recording_toggle_clipboard_monitor
+                    && !shortcut_id.read(cx).recording_toggle_formatted_paste
                     && !shortcut_id.read(cx).recording_upload_latest
                     && !shortcut_id.read(cx).recording_pull_latest
                     && !shortcut_id.read(cx).recording_plain_text_paste
@@ -276,6 +286,7 @@ impl SettingsWindowView {
                                     view.recording_shortcut = false;
                                     view.recording_open_settings = false;
                                     view.recording_toggle_clipboard_monitor = false;
+                                    view.recording_toggle_formatted_paste = false;
                                     view.recording_upload_latest = false;
                                     view.recording_pull_latest = false;
                                     view.recording_plain_text_paste = false;
@@ -315,6 +326,7 @@ impl SettingsWindowView {
                                 view.recording_shortcut = false;
                                 view.recording_open_settings = false;
                                 view.recording_toggle_clipboard_monitor = false;
+                                view.recording_toggle_formatted_paste = false;
                                 view.recording_upload_latest = false;
                                 view.recording_pull_latest = false;
                                 view.recording_plain_text_paste = false;
@@ -334,6 +346,9 @@ impl SettingsWindowView {
                     }
                     None if shortcut_id.read(cx).recording_toggle_clipboard_monitor => {
                         hotkey::set_toggle_clipboard_monitor_shortcut(Some(binding), cx)
+                    }
+                    None if shortcut_id.read(cx).recording_toggle_formatted_paste => {
+                        hotkey::set_toggle_formatted_paste_shortcut(Some(binding), cx)
                     }
                     None if shortcut_id.read(cx).recording_upload_latest => {
                         hotkey::set_upload_latest_shortcut(Some(binding), cx)
@@ -356,6 +371,8 @@ impl SettingsWindowView {
                         hotkey::reject_open_settings_recording(cx);
                     } else if target.recording_toggle_clipboard_monitor {
                         hotkey::reject_toggle_clipboard_monitor_recording(cx);
+                    } else if target.recording_toggle_formatted_paste {
+                        hotkey::reject_toggle_formatted_paste_recording(cx);
                     } else if target.recording_upload_latest {
                         hotkey::reject_upload_latest_recording(cx);
                     } else if target.recording_pull_latest {
@@ -377,6 +394,7 @@ impl SettingsWindowView {
                     view.recording_shortcut = false;
                     view.recording_open_settings = false;
                     view.recording_toggle_clipboard_monitor = false;
+                    view.recording_toggle_formatted_paste = false;
                     view.recording_upload_latest = false;
                     view.recording_pull_latest = false;
                     view.recording_plain_text_paste = false;
@@ -450,6 +468,7 @@ impl SettingsWindowView {
                             false,
                             false,
                             false,
+                            false,
                             None,
                         ),
                     ))
@@ -471,6 +490,7 @@ impl SettingsWindowView {
                             translator.clone(),
                             theme,
                             true,
+                            false,
                             false,
                             false,
                             false,
@@ -501,6 +521,33 @@ impl SettingsWindowView {
                             false,
                             false,
                             false,
+                            false,
+                            None,
+                        ),
+                    ))
+                    .child(self.compact_setting_row(
+                        theme,
+                        translator.translate("settings.shortcuts.toggle_formatted_paste"),
+                        shortcut_recorder(
+                            formatted_paste_binding,
+                            if formatted_paste_recording {
+                                hotkey::RegistrationStatus::Suspended
+                            } else {
+                                hotkey::formatted_paste_registration_status(cx)
+                            },
+                            formatted_paste_recording,
+                            view.clone(),
+                            self.recording_focus_handle.clone(),
+                            save_error.clone(),
+                            translator.clone(),
+                            theme,
+                            false,
+                            false,
+                            true,
+                            false,
+                            false,
+                            false,
+                            false,
                             None,
                         ),
                     ))
@@ -520,6 +567,7 @@ impl SettingsWindowView {
                             save_error.clone(),
                             translator.clone(),
                             theme,
+                            false,
                             false,
                             false,
                             true,
@@ -545,6 +593,7 @@ impl SettingsWindowView {
                             save_error.clone(),
                             translator.clone(),
                             theme,
+                            false,
                             false,
                             false,
                             false,
@@ -574,6 +623,7 @@ impl SettingsWindowView {
                             false,
                             false,
                             false,
+                            false,
                             true,
                             false,
                             None,
@@ -595,6 +645,7 @@ impl SettingsWindowView {
                             save_error.clone(),
                             translator.clone(),
                             theme,
+                            false,
                             false,
                             false,
                             false,
@@ -1150,6 +1201,7 @@ fn shortcut_recorder(
     theme: gpui_component::ThemeColor,
     open_settings: bool,
     toggle_clipboard_monitor: bool,
+    toggle_formatted_paste: bool,
     upload_latest: bool,
     pull_latest: bool,
     plain_text_paste: bool,
@@ -1162,6 +1214,8 @@ fn shortcut_recorder(
         ShortcutsConfig::default().open_settings
     } else if toggle_clipboard_monitor {
         ShortcutsConfig::default().toggle_clipboard_monitor
+    } else if toggle_formatted_paste {
+        ShortcutsConfig::default().toggle_formatted_paste
     } else if upload_latest {
         ShortcutsConfig::default().upload_latest
     } else if pull_latest {
@@ -1231,6 +1285,8 @@ fn shortcut_recorder(
         "openSettings"
     } else if toggle_clipboard_monitor {
         "toggleClipboardMonitor"
+    } else if toggle_formatted_paste {
+        "toggleFormattedPaste"
     } else if upload_latest {
         "uploadLatest"
     } else if pull_latest {
@@ -1260,6 +1316,9 @@ fn shortcut_recorder(
                         None if open_settings => hotkey::set_open_settings_shortcut(None, cx),
                         None if toggle_clipboard_monitor => {
                             hotkey::set_toggle_clipboard_monitor_shortcut(None, cx)
+                        }
+                        None if toggle_formatted_paste => {
+                            hotkey::set_toggle_formatted_paste_shortcut(None, cx)
                         }
                         None if upload_latest => hotkey::set_upload_latest_shortcut(None, cx),
                         None if pull_latest => hotkey::set_pull_latest_shortcut(None, cx),
@@ -1297,6 +1356,7 @@ fn shortcut_recorder(
                 None if toggle_clipboard_monitor => {
                     hotkey::reset_toggle_clipboard_monitor_shortcut(cx)
                 }
+                None if toggle_formatted_paste => hotkey::reset_toggle_formatted_paste_shortcut(cx),
                 None if upload_latest => hotkey::reset_upload_latest_shortcut(cx),
                 None if pull_latest => hotkey::reset_pull_latest_shortcut(cx),
                 None if plain_text_paste => hotkey::reset_plain_text_paste_shortcut(cx),
@@ -1312,6 +1372,7 @@ fn shortcut_recorder(
                 view.recording_shortcut = false;
                 view.recording_open_settings = false;
                 view.recording_toggle_clipboard_monitor = false;
+                view.recording_toggle_formatted_paste = false;
                 view.recording_upload_latest = false;
                 view.recording_pull_latest = false;
                 view.recording_plain_text_paste = false;
@@ -1380,6 +1441,7 @@ fn shortcut_recorder(
                 view.recording_shortcut = true;
                 view.recording_open_settings = open_settings;
                 view.recording_toggle_clipboard_monitor = toggle_clipboard_monitor;
+                view.recording_toggle_formatted_paste = toggle_formatted_paste;
                 view.recording_upload_latest = upload_latest;
                 view.recording_pull_latest = pull_latest;
                 view.recording_plain_text_paste = plain_text_paste;
@@ -1396,6 +1458,7 @@ fn shortcut_recorder(
     if id.is_none()
         && !open_settings
         && !toggle_clipboard_monitor
+        && !toggle_formatted_paste
         && !upload_latest
         && !pull_latest
         && !plain_text_paste
@@ -1585,6 +1648,7 @@ fn common_shortcut_presets(
                                     view.recording_shortcut = false;
                                     view.recording_open_settings = false;
                                     view.recording_toggle_clipboard_monitor = false;
+                                    view.recording_toggle_formatted_paste = false;
                                     view.recording_upload_latest = false;
                                     view.recording_pull_latest = false;
                                     view.recording_plain_text_paste = false;
@@ -1666,6 +1730,7 @@ fn restore_system_win_v_button(
                         view.recording_shortcut = false;
                         view.recording_open_settings = false;
                         view.recording_toggle_clipboard_monitor = false;
+                        view.recording_toggle_formatted_paste = false;
                         view.recording_upload_latest = false;
                         view.recording_pull_latest = false;
                         view.recording_plain_text_paste = false;
@@ -1730,6 +1795,7 @@ fn session_shortcut_row(
             save_error,
             translator,
             theme,
+            false,
             false,
             false,
             false,

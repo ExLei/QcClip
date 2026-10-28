@@ -380,6 +380,7 @@
   "settings.shortcuts.middle_mouse.description": "Show/hide when held for the threshold (10–1000 ms)",
   "settings.shortcuts.open_settings": "Open settings",
   "settings.shortcuts.toggle_clipboard_monitor": "Toggle clipboard monitoring",
+  "settings.shortcuts.toggle_formatted_paste": "Toggle formatted paste",
   "settings.shortcuts.upload_latest": "Upload latest content",
   "settings.shortcuts.pull_latest": "Fetch latest content",
   "settings.shortcuts.plain_text_paste": "Paste as plain text",

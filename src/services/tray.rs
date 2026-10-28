@@ -300,7 +300,7 @@ fn handle_menu_action(action: MenuActionId, cx: &mut App) {
     }
 }
 
-fn toggle_formatted_paste(cx: &mut App) {
+pub(crate) fn toggle_formatted_paste(cx: &mut App) {
     use crate::windows::notification::{NotificationLevel, NotificationService};
     let mut clipboard = crate::config_runtime::clipboard_config(cx);
     let enabled = !clipboard.formatted_paste;
