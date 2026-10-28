@@ -799,6 +799,28 @@ impl MainWindow {
         self.paste_service.load_payloads_for_item(item_id)
     }
 
+    /// 多选拖拽：按选择顺序合并所选条目，失败原因直接用于提示。
+    #[cfg(target_os = "windows")]
+    pub(crate) fn load_multi_drag_payloads(
+        &self,
+    ) -> Result<
+        (
+            Vec<crate::platform::clipboard::ClipboardPayload>,
+            Vec<crate::platform::image_temp_file::ImageTempFile>,
+        ),
+        String,
+    > {
+        let item_ids = resolve_multi_selection_item_ids(
+            self.active_tab,
+            &self.multi_selected_item_ids,
+            &self.history_repository,
+            &self.favorite_repository,
+        )?;
+        self.paste_service
+            .load_merged_drag_payloads(&item_ids)
+            .map_err(|error| error.to_string())
+    }
+
     /// 读取条目首个纯文本格式的完整内容，用于右键菜单“在浏览器中打开”解析链接。
     pub(crate) fn item_plain_text(
         &self,

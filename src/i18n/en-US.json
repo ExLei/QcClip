@@ -168,6 +168,8 @@
   "main.multi_selection.copy_success": "Selected items copied as combined content",
   "main.multi_selection.paste_success": "Selected items pasted as combined content",
   "main.multi_selection.copy_failed": "Failed to copy combined content",
+  "main.multi_selection.drag": "Drag Selected",
+  "main.multi_selection.drag_failed": "Cannot drag the selected items together",
   "main.multi_selection.paste_failed": "Failed to paste combined content",
   "main.multi_selection.delete": "Delete selected",
   "main.multi_selection.remove_favorites": "Remove selected favorites",

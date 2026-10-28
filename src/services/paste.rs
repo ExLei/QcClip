@@ -355,6 +355,18 @@ impl PasteService {
             .map(|()| item_id)
     }
 
+    /// 按多选顺序合并多个条目，供外部拖拽使用；返回的临时图片文件需在拖拽期间保持存活。
+    pub(crate) fn load_merged_drag_payloads(
+        &self,
+        item_ids: &[i64],
+    ) -> Result<(Vec<ClipboardPayload>, Vec<ImageTempFile>), PasteError> {
+        let MergedPayload {
+            payloads,
+            image_files,
+        } = self.load_merged_payloads(item_ids)?;
+        Ok((payloads, image_files))
+    }
+
     pub fn load_payloads_for_item(
         &self,
         item_id: i64,
