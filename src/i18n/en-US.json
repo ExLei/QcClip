@@ -781,6 +781,8 @@
   "settings.personalization.gallery_gif_autoplay": "Autoplay GIFs in gallery",
   "settings.personalization.gallery_gif_autoplay_description": "Loop GIFs in the visible gallery area automatically. When disabled, GIFs play only on hover.",
   "settings.personalization.preview_information": "Preview information",
+  "settings.personalization.preview_scale": "Preview window scale",
+  "settings.personalization.preview_scale_description": "Resize text, hints, and file details in the hover preview on top of the interface scale. Image size still follows the zoom gesture in the preview.",
   "settings.personalization.preview_information.enable_all": "Enable all",
   "settings.personalization.preview_information.disable_all": "Disable all",
   "settings.personalization.preview_information_description": "Choose the information and hints shown beside previews. Turn off all options to hide the information strip.",

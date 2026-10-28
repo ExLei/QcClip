@@ -617,6 +617,12 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: ListPreview,
+            title_key: "settings.personalization.preview_scale",
+            description_key: Some("settings.personalization.preview_scale_description"),
+            ratio: 0.80,
+        },
+        SearchTargetSpec {
+            page: ListPreview,
             title_key: "settings.clipboard.preview_types",
             description_key: Some("settings.clipboard.preview_types_description"),
             ratio: 0.82,

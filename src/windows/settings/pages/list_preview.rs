@@ -289,6 +289,43 @@ impl SettingsWindowView {
                     );
                 }
             });
+        let mut preview_scale_presets = crate::config::UI_SCALE_PRESETS.to_vec();
+        if !preview_scale_presets.contains(&appearance.preview_scale_percent) {
+            preview_scale_presets.push(appearance.preview_scale_percent);
+            preview_scale_presets.sort_unstable();
+        }
+        let preview_scale_items = preview_scale_presets
+            .into_iter()
+            .map(|percent| {
+                DropdownItem::option(
+                    DropdownItemId::new(percent.to_string()),
+                    format!("{percent}%"),
+                )
+                .selected(percent == appearance.preview_scale_percent)
+            })
+            .collect::<Vec<_>>();
+        let preview_scale_selector = settings_dropdown(
+            "settings-preview-scale-select",
+            appearance.preview_scale_percent.to_string(),
+            preview_scale_items,
+            {
+                let view = view.clone();
+                let save_error = appearance_save_error.clone();
+                move |id, cx| {
+                    let Ok(percent) = id.as_str().parse::<u16>() else {
+                        return;
+                    };
+                    persist_appearance_change(
+                        view.clone(),
+                        "预览窗口缩放",
+                        move |appearance| appearance.preview_scale_percent = percent,
+                        save_error.clone(),
+                        cx,
+                    );
+                }
+            },
+            cx,
+        );
         let hover_preview_delay_selector = h_flex()
             .w(ui_rem(SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH))
             .gap_3()
@@ -491,6 +528,18 @@ impl SettingsWindowView {
                 ),
             )
             .child(
+                self.setting_row(
+                    theme,
+                    translator.translate("settings.personalization.preview_scale"),
+                    Some(
+                        translator
+                            .translate("settings.personalization.preview_scale_description")
+                            .into(),
+                    ),
+                    preview_scale_selector,
+                ),
+            )
+            .child(
                 self.highlight_element(
                     theme,
                     translator.translate("settings.clipboard.preview_types"),
@@ -572,6 +621,7 @@ fn reset_list_preview_appearance_fields(appearance: &mut AppearanceConfig) {
     appearance.pasted_item_border = default.pasted_item_border;
     appearance.gallery_gif_autoplay = default.gallery_gif_autoplay;
     appearance.preview_information = default.preview_information;
+    appearance.preview_scale_percent = default.preview_scale_percent;
 }
 
 fn open_preview_types_sheet(

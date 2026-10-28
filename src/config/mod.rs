@@ -1543,6 +1543,8 @@ pub struct AppearanceConfig {
     pub pasted_item_border: bool,
     pub item_display: ItemDisplayConfig,
     pub preview_information: PreviewInformationConfig,
+    /// 悬停预览窗口在界面缩放基础上的额外缩放百分比。
+    pub preview_scale_percent: u16,
 }
 
 impl Default for AppearanceConfig {
@@ -1571,6 +1573,7 @@ impl Default for AppearanceConfig {
             pasted_item_border: true,
             item_display: ItemDisplayConfig::default(),
             preview_information: PreviewInformationConfig::default(),
+            preview_scale_percent: 100,
         }
     }
 }
@@ -1823,11 +1826,24 @@ impl AppearanceConfig {
         ) / 100.0
     }
 
+    /// 悬停预览窗口的最终缩放，叠加在界面缩放之上。
+    pub fn preview_scale(&self) -> f32 {
+        self.ui_scale()
+            * f32::from(
+                self.preview_scale_percent
+                    .clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX),
+            )
+            / 100.0
+    }
+
     pub(crate) fn normalized(mut self) -> Self {
         let default = Self::default();
         self.tab_bar.normalize();
         self.ui_scale_percent = self
             .ui_scale_percent
+            .clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX);
+        self.preview_scale_percent = self
+            .preview_scale_percent
             .clamp(UI_SCALE_PERCENT_MIN, UI_SCALE_PERCENT_MAX);
         self.app_font_family = self.app_font_family.and_then(|family| {
             let family = family.trim();

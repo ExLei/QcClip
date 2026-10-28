@@ -641,7 +641,9 @@ fn apply_appearance_change(previous: &AppearanceConfig, current: &AppearanceConf
         if background_image_needs_refresh(previous, current) {
             crate::window_material::refresh_background_image(cx);
         }
-    } else if previous.preview_information != current.preview_information {
+    } else if previous.preview_information != current.preview_information
+        || previous.preview_scale_percent != current.preview_scale_percent
+    {
         cx.refresh_windows();
     } else {
         // 调用方会更新设置窗口，这里只额外让主窗口视图失效。

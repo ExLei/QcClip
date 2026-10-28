@@ -1740,7 +1740,7 @@ impl Drop for PreviewWindow {
 
 impl Render for PreviewWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let rem_size = crate::ui::scale::standalone_rem_size(16.0, cx);
+        let rem_size = crate::ui::scale::preview_rem_size(16.0, cx);
         if window.rem_size() != rem_size {
             self.text_wrap_width = None;
             self.content_size = None;

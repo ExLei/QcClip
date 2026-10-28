@@ -781,6 +781,8 @@
   "settings.personalization.gallery_gif_autoplay": "图库 GIF 自动播放",
   "settings.personalization.gallery_gif_autoplay_description": "自动循环播放图库可见区域内的 GIF；关闭后仅在鼠标悬停时播放。",
   "settings.personalization.preview_information": "预览信息展示",
+  "settings.personalization.preview_scale": "预览窗口缩放",
+  "settings.personalization.preview_scale_description": "在界面缩放的基础上，额外调整悬停预览中文字、提示和文件信息的大小；图片大小仍按预览中的缩放操作调整。",
   "settings.personalization.preview_information.enable_all": "全部启用",
   "settings.personalization.preview_information.disable_all": "全部关闭",
   "settings.personalization.preview_information_description": "自定义预览窗旁显示的信息与操作提示，关闭全部选项可隐藏信息条。",

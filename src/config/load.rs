@@ -473,6 +473,13 @@ fn read_appearance(object: &Map<String, Value>, warnings: &mut Vec<String>) -> A
             default.preview_information,
             warnings,
         ),
+        preview_scale_percent: read_field(
+            object,
+            "previewScalePercent",
+            "appearance.previewScalePercent",
+            default.preview_scale_percent,
+            warnings,
+        ),
         item_display: read_group(object, "itemDisplay", warnings, |object, warnings| {
             let default = super::ItemDisplayConfig::default();
             super::ItemDisplayConfig {
@@ -1319,6 +1326,29 @@ mod tests {
             from_str(&json).expect("无法重新加载缩放配置").config,
             default.config
         );
+    }
+
+    #[test]
+    fn preview_scale_defaults_loads_and_stacks_on_ui_scale() {
+        let default = from_str(r#"{"appearance":{"mode":"dark"}}"#).expect("无法加载旧配置");
+        assert_eq!(default.config.appearance.preview_scale_percent, 100);
+        for (input, expected) in [(0, 80), (150, 150), (65535, 200)] {
+            let loaded = from_str(&format!(
+                r#"{{"appearance":{{"previewScalePercent":{input}}}}}"#
+            ))
+            .expect("无法加载预览缩放配置");
+            assert_eq!(loaded.config.appearance.preview_scale_percent, expected);
+        }
+        let stacked =
+            from_str(r#"{"appearance":{"uiScalePercent":150,"previewScalePercent":120}}"#)
+                .expect("无法加载叠加缩放配置");
+        assert!((stacked.config.appearance.preview_scale() - 1.8).abs() < 0.001);
+        let invalid =
+            from_str(r#"{"appearance":{"previewScalePercent":"大","uiScalePercent":125}}"#)
+                .expect("无法加载字段级容错配置");
+        assert_eq!(invalid.config.appearance.preview_scale_percent, 100);
+        assert_eq!(invalid.config.appearance.ui_scale_percent, 125);
+        assert_eq!(invalid.warnings.len(), 1);
     }
 
     #[test]
