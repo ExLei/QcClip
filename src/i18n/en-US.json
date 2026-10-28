@@ -363,7 +363,7 @@
   "settings.shortcuts.description": "View and customize shortcuts.",
   "settings.shortcuts.global_section": "Global shortcuts",
   "settings.shortcuts.global_description": "Available in any application.",
-  "settings.shortcuts.session_section": "In-window shortcuts",
+  "settings.shortcuts.session_section": "Temporary shortcuts",
   "settings.shortcuts.session_description": "Active only while the main window is shown. When “Only inside window” is enabled, the pointer must remain inside the window.",
   "settings.shortcuts.only_in_window": "Only inside window",
   "settings.shortcuts.select_all": "Select all",

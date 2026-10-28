@@ -363,7 +363,7 @@
   "settings.shortcuts.description": "查看与自定义快捷键。",
   "settings.shortcuts.global_section": "全局快捷键",
   "settings.shortcuts.global_description": "可在任意程序中生效。",
-  "settings.shortcuts.session_section": "窗口内快捷键",
+  "settings.shortcuts.session_section": "临时快捷键",
   "settings.shortcuts.session_description": "仅在主窗口显示时生效，勾选“仅在窗口内生效”后，需要鼠标位于窗口内才生效",
   "settings.shortcuts.only_in_window": "仅在窗口内生效",
   "settings.shortcuts.select_all": "全选",
