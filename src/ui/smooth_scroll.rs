@@ -1,15 +1,22 @@
 use std::time::Instant;
 
-use gpui::{Along as _, Axis, IsZero, Pixels, Point, ScrollHandle, ScrollWheelEvent, Window, px};
+use gpui::{
+    Along as _, Axis, Bounds, IsZero, Pixels, Point, ScrollHandle, ScrollWheelEvent, TouchPhase,
+    Window, px,
+};
 use gpui_component::VirtualListScrollHandle;
 
 const SMOOTHING_SECONDS: f32 = 0.11;
 const SETTLE_DISTANCE: f32 = 0.5;
 const MAX_FRAME_SECONDS: f32 = 0.1;
+/// 单次滚轮最多滚动可视区一页，并保留部分重叠，与平台层及 Chromium 的翻页步长一致。
+const PAGE_MIN_FRACTION: f32 = 0.875;
+const PAGE_MAX_OVERLAP: f32 = 40.0;
 
 pub(crate) trait SmoothScrollTarget {
     fn offset(&self) -> Point<Pixels>;
     fn max_offset(&self) -> Point<Pixels>;
+    fn bounds(&self) -> Bounds<Pixels>;
     fn set_offset(&self, offset: Point<Pixels>);
 }
 
@@ -20,6 +27,10 @@ impl SmoothScrollTarget for ScrollHandle {
 
     fn max_offset(&self) -> Point<Pixels> {
         self.max_offset()
+    }
+
+    fn bounds(&self) -> Bounds<Pixels> {
+        self.bounds()
     }
 
     fn set_offset(&self, offset: Point<Pixels>) {
@@ -34,6 +45,10 @@ impl SmoothScrollTarget for VirtualListScrollHandle {
 
     fn max_offset(&self) -> Point<Pixels> {
         self.as_ref().max_offset()
+    }
+
+    fn bounds(&self) -> Bounds<Pixels> {
+        self.as_ref().bounds()
     }
 
     fn set_offset(&self, offset: Point<Pixels>) {
@@ -53,6 +68,7 @@ pub(crate) struct SmoothScroll {
     animation: Option<ScrollAnimation>,
     frame_scheduled: bool,
     axis: Axis,
+    touch_gesture_active: bool,
 }
 
 impl SmoothScroll {
@@ -62,6 +78,7 @@ impl SmoothScroll {
             animation: None,
             frame_scheduled: false,
             axis: Axis::Vertical,
+            touch_gesture_active: false,
         }
     }
 
@@ -84,15 +101,21 @@ impl SmoothScroll {
         window: &Window,
         animations_enabled: bool,
     ) -> bool {
-        let delta = wheel_delta(event.delta.pixel_delta(window.line_height()), self.axis);
+        self.track_touch_phase(event.touch_phase);
+        let mut delta = wheel_delta(event.delta.pixel_delta(window.line_height()), self.axis);
         if delta.is_zero() {
             return false;
+        }
+        let touch_gesture = event.delta.precise() && self.touch_gesture_active;
+        if !touch_gesture {
+            let page = page_step(scroll_handle.bounds().size.along(self.axis));
+            delta = delta.clamp(-page, page);
         }
 
         let current_offset = scroll_handle.offset();
         let current = current_offset.along(self.axis);
         let max_offset = scroll_handle.max_offset().along(self.axis);
-        let should_smooth = self.enabled && animations_enabled && !event.delta.precise();
+        let should_smooth = self.enabled && animations_enabled && !touch_gesture;
         let target = if should_smooth {
             let target = self
                 .animation
@@ -122,6 +145,15 @@ impl SmoothScroll {
         }
 
         true
+    }
+
+    // 触控板手势以 Started 开始、Ended 结束；Windows 滚轮也给出像素增量，但不处于手势序列中。
+    fn track_touch_phase(&mut self, touch_phase: TouchPhase) {
+        match touch_phase {
+            TouchPhase::Started => self.touch_gesture_active = true,
+            TouchPhase::Ended | TouchPhase::Cancelled => self.touch_gesture_active = false,
+            TouchPhase::Moved => {}
+        }
     }
 
     pub(crate) fn advance<T: SmoothScrollTarget>(&mut self, scroll_handle: &T, window: &Window) {
@@ -169,6 +201,12 @@ impl SmoothScroll {
     }
 }
 
+fn page_step(extent: Pixels) -> Pixels {
+    (extent * PAGE_MIN_FRACTION)
+        .max(extent - px(PAGE_MAX_OVERLAP))
+        .max(Pixels::ZERO)
+}
+
 fn wheel_delta(delta: Point<Pixels>, axis: Axis) -> Pixels {
     match axis {
         Axis::Vertical => delta.y,
@@ -189,6 +227,27 @@ mod tests {
             assert_eq!(wheel_delta(delta, Axis::Horizontal), px(expected));
             assert_eq!(wheel_delta(delta, Axis::Vertical), px(y));
         }
+    }
+
+    #[test]
+    fn only_touch_gestures_skip_smoothing() {
+        let mut scroll = SmoothScroll::default();
+        for (touch_phase, active) in [
+            (TouchPhase::Moved, false),
+            (TouchPhase::Started, true),
+            (TouchPhase::Moved, true),
+            (TouchPhase::Ended, false),
+        ] {
+            scroll.track_touch_phase(touch_phase);
+            assert_eq!(scroll.touch_gesture_active, active);
+        }
+    }
+
+    #[test]
+    fn page_step_keeps_overlap() {
+        assert_eq!(page_step(px(200.0)), px(175.0));
+        assert_eq!(page_step(px(800.0)), px(760.0));
+        assert_eq!(page_step(px(0.0)), px(0.0));
     }
 
     #[test]
