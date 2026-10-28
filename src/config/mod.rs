@@ -796,6 +796,7 @@ pub struct ClipboardConfig {
     pub preview_priority: ClipboardPreviewPriority,
     pub preview_types: Vec<ClipboardPreviewType>,
     pub hover_preview_enabled: bool,
+    pub hover_preview_delay_ms: u16,
     pub heat_scrollbar_enabled: bool,
     pub page_hover_switch: bool,
     pub filter_hover_switch: bool,
@@ -1053,6 +1054,7 @@ impl Default for ClipboardConfig {
             preview_priority: ClipboardPreviewPriority::default(),
             preview_types: ClipboardPreviewType::ALL.to_vec(),
             hover_preview_enabled: true,
+            hover_preview_delay_ms: Self::HOVER_PREVIEW_DELAY_DEFAULT_MS,
             heat_scrollbar_enabled: true,
             page_hover_switch: false,
             filter_hover_switch: false,
@@ -1078,6 +1080,9 @@ impl ClipboardConfig {
     pub const TAB_BAR_HOVER_DELAY_MIN_MS: u16 = 0;
     pub const TAB_BAR_HOVER_DELAY_MAX_MS: u16 = 1000;
     pub const TAB_BAR_HOVER_DELAY_DEFAULT_MS: u16 = 40;
+    pub const HOVER_PREVIEW_DELAY_MIN_MS: u16 = 0;
+    pub const HOVER_PREVIEW_DELAY_MAX_MS: u16 = 2000;
+    pub const HOVER_PREVIEW_DELAY_DEFAULT_MS: u16 = 200;
 
     pub(crate) fn normalized(mut self) -> Self {
         self.capture_formats = self.capture_formats.normalized();
@@ -1094,6 +1099,10 @@ impl ClipboardConfig {
         self.filter_hover_delay_ms = self.filter_hover_delay_ms.clamp(
             Self::TAB_BAR_HOVER_DELAY_MIN_MS,
             Self::TAB_BAR_HOVER_DELAY_MAX_MS,
+        );
+        self.hover_preview_delay_ms = self.hover_preview_delay_ms.clamp(
+            Self::HOVER_PREVIEW_DELAY_MIN_MS,
+            Self::HOVER_PREVIEW_DELAY_MAX_MS,
         );
         self
     }
@@ -1968,6 +1977,7 @@ mod tests {
         );
         assert_eq!(value["clipboard"]["pageHoverDelayMs"], 40);
         assert_eq!(value["clipboard"]["filterHoverDelayMs"], 40);
+        assert_eq!(value["clipboard"]["hoverPreviewDelayMs"], 200);
         assert_eq!(value["clipboard"]["edgeHide"], false);
         assert_eq!(value["quickPaste"]["visibleItems"], 7);
         assert_eq!(value["sound"]["enabled"], true);

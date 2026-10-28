@@ -562,6 +562,13 @@ fn read_clipboard(object: &Map<String, Value>, warnings: &mut Vec<String>) -> Cl
             default.hover_preview_enabled,
             warnings,
         ),
+        hover_preview_delay_ms: read_field(
+            object,
+            "hoverPreviewDelayMs",
+            "clipboard.hoverPreviewDelayMs",
+            default.hover_preview_delay_ms,
+            warnings,
+        ),
         heat_scrollbar_enabled: read_field(
             object,
             "heatScrollbarEnabled",

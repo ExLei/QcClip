@@ -694,6 +694,8 @@
   "settings.clipboard.hover_delay_description": "How long the pointer must stay on a button before hover switching triggers; 0 ms triggers immediately.",
   "settings.clipboard.hover_preview": "Hover preview",
   "settings.clipboard.hover_preview_description": "Show a content preview when hovering over a clipboard item.",
+  "settings.clipboard.hover_preview_delay": "Hover preview delay",
+  "settings.clipboard.hover_preview_delay_description": "How long the pointer must stay on a list item before the preview appears; 0 ms shows it immediately.",
   "settings.clipboard.heat_scrollbar": "Heat scrollbar",
   "settings.clipboard.heat_scrollbar_description": "Show paste activity on the scrollbar. Turn off to use the native scrollbar.",
   "settings.clipboard.move_pasted_to_first_in_clipboard": "Move pasted item to the top (Clipboard)",

@@ -314,6 +314,10 @@ pub(crate) fn hover_preview_enabled(cx: &App) -> bool {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.clipboard.hover_preview_enabled)
 }
 
+pub(crate) fn hover_preview_delay_ms(cx: &App) -> u16 {
+    cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.clipboard.hover_preview_delay_ms)
+}
+
 pub(crate) fn sound_config(cx: &App) -> SoundConfig {
     cx.read_global::<ConfigRuntime, _>(|runtime, _| runtime.config.sound.clone())
 }

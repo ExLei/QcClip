@@ -694,6 +694,8 @@
   "settings.clipboard.hover_delay_description": "鼠标在按钮上停留多久后触发悬停切换；0 毫秒表示立即触发。",
   "settings.clipboard.hover_preview": "悬停预览",
   "settings.clipboard.hover_preview_description": "鼠标悬停在列表条目上时显示内容预览。",
+  "settings.clipboard.hover_preview_delay": "悬停预览延迟",
+  "settings.clipboard.hover_preview_delay_description": "鼠标在列表条目上停留多久后显示预览；0 毫秒表示立即显示。",
   "settings.clipboard.heat_scrollbar": "热度滚动条",
   "settings.clipboard.heat_scrollbar_description": "显示带有粘贴热度的滚动条；关闭后使用原生滚动条。",
   "settings.clipboard.move_pasted_to_first_in_clipboard": "粘贴后移到第一位（剪贴板）",
