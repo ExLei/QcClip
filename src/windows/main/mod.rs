@@ -21,6 +21,7 @@ use gpui::{
 use crate::{
     config::SessionShortcutId,
     config_runtime,
+    domain::clipboard::{ClipboardItemId, HistoryItemId},
     platform::{input, window as platform_window},
 };
 
@@ -165,6 +166,27 @@ impl MainWindowService {
             .and_then(|service| service.main_view.clone());
         if let Some(main_view) = main_view {
             main_view.update(cx, |view, cx| view.refresh_history(cx));
+        }
+    }
+
+    /// 保存复用列表增量更新，按数据库顺序同步内容和收藏关系。
+    pub(crate) fn refresh_saved_item(cx: &mut App, item_id: ClipboardItemId) {
+        let main_view = cx
+            .try_global::<Self>()
+            .and_then(|service| service.main_view.clone());
+        if let Some(main_view) = main_view {
+            main_view.update(cx, |view, cx| view.refresh_saved_item(item_id, cx));
+        }
+    }
+
+    pub(crate) fn refresh_captured_history_item(cx: &mut App, history_id: HistoryItemId) {
+        let main_view = cx
+            .try_global::<Self>()
+            .and_then(|service| service.main_view.clone());
+        if let Some(main_view) = main_view {
+            main_view.update(cx, |view, cx| {
+                view.refresh_captured_history_item(history_id, cx)
+            });
         }
     }
 

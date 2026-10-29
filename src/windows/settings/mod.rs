@@ -38,6 +38,20 @@ const SETTINGS_LINE_HEIGHT_SELECTOR_WIDTH: f32 = 360.0;
 const SETTINGS_SOUND_SLIDER_WIDTH: f32 = 220.0;
 const SETTINGS_SEARCH_HIGHLIGHT_DURATION_MS: u64 = 2600;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShortcutRecordingTarget {
+    ToggleMainWindow,
+    OpenSettings,
+    ToggleClipboardMonitor,
+    ToggleFormattedPaste,
+    UploadLatest,
+    PullLatest,
+    PlainTextPaste,
+    QuickPaste,
+    AddFavorite,
+    Session(crate::config::SessionShortcutId),
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum DataStatsScope {
     #[default]
@@ -781,6 +795,18 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Shortcuts,
+            title_key: "settings.shortcuts.add_favorite",
+            description_key: None,
+            ratio: 0.30,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
+            title_key: "settings.shortcuts.add_favorite_open_editor_on_empty",
+            description_key: None,
+            ratio: 0.32,
+        },
+        SearchTargetSpec {
+            page: Shortcuts,
             title_key: "settings.shortcuts.quick_paste_1_to_9",
             description_key: None,
             ratio: 0.34,
@@ -1179,15 +1205,7 @@ struct SettingsWindowView {
     application_filter_error: Option<String>,
     selected_shortcut_category: ShortcutCategory,
     shortcut_scroll_handle: gpui::ScrollHandle,
-    recording_shortcut: bool,
-    recording_open_settings: bool,
-    recording_toggle_clipboard_monitor: bool,
-    recording_toggle_formatted_paste: bool,
-    recording_upload_latest: bool,
-    recording_pull_latest: bool,
-    recording_plain_text_paste: bool,
-    recording_quick_paste: bool,
-    recording_session_shortcut: Option<crate::config::SessionShortcutId>,
+    recording_target: Option<ShortcutRecordingTarget>,
     recording_focus_handle: FocusHandle,
     adaptive_max_lines_slider: Entity<SliderState>,
     middle_mouse_threshold_slider: Entity<SliderState>,
@@ -1647,7 +1665,7 @@ impl SettingsWindowView {
         });
         let shortcut_recording_blur_subscription =
             cx.on_blur(&recording_focus_handle, window, |view, _, cx| {
-                if !view.recording_shortcut {
+                if view.recording_target.is_none() {
                     return;
                 }
                 if let Err(error) = hotkey::cancel_toggle_main_window_recording(cx) {
@@ -1658,15 +1676,7 @@ impl SettingsWindowView {
                         cx,
                     );
                 }
-                view.recording_shortcut = false;
-                view.recording_open_settings = false;
-                view.recording_toggle_clipboard_monitor = false;
-                view.recording_toggle_formatted_paste = false;
-                view.recording_upload_latest = false;
-                view.recording_pull_latest = false;
-                view.recording_plain_text_paste = false;
-                view.recording_quick_paste = false;
-                view.recording_session_shortcut = None;
+                view.recording_target = None;
                 cx.notify();
             });
         let sync_form = pages::sync::SyncForm::new(window, cx);
@@ -1718,15 +1728,7 @@ impl SettingsWindowView {
             application_filter_error: None,
             selected_shortcut_category: ShortcutCategory::Global,
             shortcut_scroll_handle,
-            recording_shortcut: false,
-            recording_open_settings: false,
-            recording_toggle_clipboard_monitor: false,
-            recording_toggle_formatted_paste: false,
-            recording_upload_latest: false,
-            recording_pull_latest: false,
-            recording_plain_text_paste: false,
-            recording_quick_paste: false,
-            recording_session_shortcut: None,
+            recording_target: None,
             recording_focus_handle,
             adaptive_max_lines_slider,
             middle_mouse_threshold_slider,
