@@ -1,5 +1,22 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "list_tests.rs"]
+mod tests;
+
+fn saved_item_row_id(
+    item_id: ClipboardItemId,
+    tab: TabId,
+    history: &HistoryRepository,
+    favorites: &FavoriteRepository,
+) -> Result<Option<HistoryItemId>, HistoryQueryError> {
+    match tab {
+        TabId::Clipboard => history.history_id_for_item(item_id),
+        TabId::Favorites => favorites.favorite_id_for_item(item_id),
+        TabId::Emoji => Ok(None),
+    }
+}
+
 impl MainWindow {
     pub(super) fn rebuild_list_order_positions(&mut self) {
         self.list_order_positions.clear();
@@ -1219,6 +1236,54 @@ impl MainWindow {
         self.has_more_items = self.loaded_items.len() < self.total_item_count;
         self.list_status = ListStatus::Ready;
         true
+    }
+
+    pub(crate) fn refresh_captured_history_item(
+        &mut self,
+        history_id: HistoryItemId,
+        cx: &mut Context<Self>,
+    ) {
+        match self.active_tab {
+            TabId::Emoji => {}
+            TabId::Favorites => self.refresh_history(cx),
+            TabId::Clipboard => {
+                let policy = crate::config_runtime::history_config(cx);
+                if policy.retention_days.is_some() || policy.max_items.is_some() {
+                    self.refresh_list_item(history_id, cx);
+                } else {
+                    self.refresh_new_list_item(history_id, cx);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn refresh_saved_item(&mut self, item_id: ClipboardItemId, cx: &mut Context<Self>) {
+        if self.active_tab == TabId::Emoji {
+            return;
+        }
+        let generation = self.query_generation;
+        let active_tab = self.active_tab;
+        let history = self.history_repository.clone();
+        let favorites = self.favorite_repository.clone();
+        let query_task = cx.background_spawn(async move {
+            saved_item_row_id(item_id, active_tab, &history, &favorites)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = query_task.await;
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if generation != this.query_generation || active_tab != this.active_tab {
+                        return;
+                    }
+                    match result {
+                        Ok(Some(row_id)) => this.refresh_list_item(row_id, cx),
+                        Ok(None) => this.refresh_history(cx),
+                        Err(error) => tracing::error!("保存条目行 ID 查询失败：{error}"),
+                    }
+                });
+            }
+        })
+        .detach();
     }
 
     pub(super) fn refresh_list_item(
