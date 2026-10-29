@@ -801,12 +801,6 @@ fn search_target_specs() -> &'static [SearchTargetSpec] {
         },
         SearchTargetSpec {
             page: Shortcuts,
-            title_key: "settings.shortcuts.add_favorite_open_editor_on_empty",
-            description_key: None,
-            ratio: 0.32,
-        },
-        SearchTargetSpec {
-            page: Shortcuts,
             title_key: "settings.shortcuts.quick_paste_1_to_9",
             description_key: None,
             ratio: 0.34,

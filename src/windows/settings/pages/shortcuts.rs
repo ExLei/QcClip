@@ -561,26 +561,25 @@ impl SettingsWindowView {
                     .child(self.compact_setting_row(
                         theme,
                         translator.translate("settings.shortcuts.add_favorite"),
-                        shortcut_recorder(
-                            add_favorite_binding,
-                            if add_favorite_recording {
-                                hotkey::RegistrationStatus::Suspended
-                            } else {
-                                hotkey::add_favorite_registration_status(cx)
-                            },
-                            add_favorite_recording,
-                            view.clone(),
-                            self.recording_focus_handle.clone(),
-                            save_error.clone(),
-                            translator.clone(),
-                            theme,
-                            ShortcutRecordingTarget::AddFavorite,
-                        ),
-                    ))
-                    .child(self.compact_setting_row(
-                        theme,
-                        translator.translate("settings.shortcuts.add_favorite_open_editor_on_empty"),
-                        Checkbox::new("settings-shortcut-add-favorite-open-editor-on-empty")
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(shortcut_recorder(
+                                add_favorite_binding,
+                                if add_favorite_recording {
+                                    hotkey::RegistrationStatus::Suspended
+                                } else {
+                                    hotkey::add_favorite_registration_status(cx)
+                                },
+                                add_favorite_recording,
+                                view.clone(),
+                                self.recording_focus_handle.clone(),
+                                save_error.clone(),
+                                translator.clone(),
+                                theme,
+                                ShortcutRecordingTarget::AddFavorite,
+                            ))
+                            .child(Checkbox::new("settings-shortcut-add-favorite-open-editor-on-empty")
                             .checked(add_favorite_open_editor_on_empty)
                             .accessibility_label(
                                 translator.translate("settings.shortcuts.add_favorite_open_editor_on_empty"),
@@ -612,7 +611,7 @@ impl SettingsWindowView {
                                         cx.notify();
                                     });
                                 }
-                            }),
+                            })),
                     ))
                     .child(self.highlight_element(
                         theme,

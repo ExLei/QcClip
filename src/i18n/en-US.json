@@ -387,7 +387,7 @@
   "settings.shortcuts.quick_paste": "Quick paste",
   "settings.shortcuts.add_favorite": "Quick favorite",
   "settings.shortcuts.add_favorite_open_editor_on_empty": "Open blank editor when nothing is selected",
-  "settings.shortcuts.add_favorite_open_editor_on_empty.tooltip": "When off, the shortcut does not open an editor if nothing was captured.",
+  "settings.shortcuts.add_favorite_open_editor_on_empty.tooltip": "Choose whether quick favorite opens a blank editor when nothing is selected.",
   "settings.shortcuts.quick_paste_1_to_9": "Paste by number 1~9",
   "settings.shortcuts.quick_paste_1_to_9.enabled": "Enable paste by number 1~9",
   "settings.shortcuts.quick_paste_1_to_9.enabled.tooltip": "Enable or disable paste by number 1~9.",
