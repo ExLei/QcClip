@@ -464,17 +464,28 @@ impl MainWindow {
                 let result = cx.update(|cx| {
                     crate::windows::preview::PreviewWindowService::hide(cx);
                     crate::windows::main::MainWindowService::cancel_hover_preview(cx);
-                    crate::windows::note_editor::open(
-                        item_id,
-                        text,
-                        repository,
-                        move |cx| {
-                            main_window.update(cx, |this, cx| {
-                                this.refresh_list_item_for_tab(source_tab, history_id, cx);
-                            })
-                        },
-                        cx,
-                    )
+                    // 主窗口不可激活，active_window 常为空，需显式传入主窗口作为模态调用方。
+                    let Some(owner) = crate::windows::main::MainWindowService::window_handle(cx)
+                    else {
+                        return Err("未找到主窗口".to_owned());
+                    };
+                    owner
+                        .update(cx, |_, window, cx| {
+                            crate::windows::note_editor::open(
+                                Some(window),
+                                item_id,
+                                text,
+                                repository,
+                                move |cx| {
+                                    main_window.update(cx, |this, cx| {
+                                        this.refresh_list_item_for_tab(source_tab, history_id, cx);
+                                    })
+                                },
+                                cx,
+                            )
+                        })
+                        .map_err(|error| error.to_string())
+                        .flatten()
                 });
                 if let Err(error) = result {
                     tracing::error!("打开备注编辑窗口失败：{error}");
