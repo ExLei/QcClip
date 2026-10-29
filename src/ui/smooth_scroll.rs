@@ -102,7 +102,11 @@ impl SmoothScroll {
         animations_enabled: bool,
     ) -> bool {
         self.track_touch_phase(event.touch_phase);
-        let mut delta = wheel_delta(event.delta.pixel_delta(window.line_height()), self.axis);
+        let mut delta = wheel_delta(
+            event.delta.pixel_delta(window.line_height()),
+            self.axis,
+            event.modifiers.shift,
+        );
         if delta.is_zero() {
             return false;
         }
@@ -207,9 +211,18 @@ fn page_step(extent: Pixels) -> Pixels {
         .max(Pixels::ZERO)
 }
 
-fn wheel_delta(delta: Point<Pixels>, axis: Axis) -> Pixels {
+/// 平台层在按住 Shift 时会把纵向滚轮转换为横向增量，纵向列表需要换回纵轴。
+pub(crate) fn vertical_wheel_delta(delta: Point<Pixels>, shift: bool) -> Pixels {
+    if shift && delta.y.is_zero() {
+        delta.x
+    } else {
+        delta.y
+    }
+}
+
+fn wheel_delta(delta: Point<Pixels>, axis: Axis, shift: bool) -> Pixels {
     match axis {
-        Axis::Vertical => delta.y,
+        Axis::Vertical => vertical_wheel_delta(delta, shift),
         // 横向触控板使用横轴，普通滚轮和以纵轴为主的手势映射到横轴。
         Axis::Horizontal if delta.x.abs() > delta.y.abs() => delta.x,
         Axis::Horizontal => delta.y,
@@ -224,9 +237,20 @@ mod tests {
     fn horizontal_scrolling_handles_mouse_wheel_and_trackpad_without_double_counting() {
         for (x, y, expected) in [(0.0, -40.0, -40.0), (-30.0, -2.0, -30.0), (2.0, 30.0, 30.0)] {
             let delta = Point { x: px(x), y: px(y) };
-            assert_eq!(wheel_delta(delta, Axis::Horizontal), px(expected));
-            assert_eq!(wheel_delta(delta, Axis::Vertical), px(y));
+            assert_eq!(wheel_delta(delta, Axis::Horizontal, false), px(expected));
+            assert_eq!(wheel_delta(delta, Axis::Vertical, false), px(y));
         }
+    }
+
+    #[test]
+    fn vertical_scrolling_accepts_shift_converted_wheel() {
+        let shifted = Point {
+            x: px(-40.0),
+            y: px(0.0),
+        };
+        assert_eq!(wheel_delta(shifted, Axis::Vertical, true), px(-40.0));
+        assert_eq!(wheel_delta(shifted, Axis::Horizontal, true), px(-40.0));
+        assert_eq!(wheel_delta(shifted, Axis::Vertical, false), px(0.0));
     }
 
     #[test]

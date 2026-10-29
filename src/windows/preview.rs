@@ -3065,7 +3065,10 @@ trait ScrollWheelDelta {
 
 impl ScrollWheelDelta for ScrollWheelEvent {
     fn delta_y(&self, line_height: Pixels) -> f32 {
-        f32::from(self.delta.pixel_delta(line_height).y)
+        f32::from(crate::ui::smooth_scroll::vertical_wheel_delta(
+            self.delta.pixel_delta(line_height),
+            self.modifiers.shift,
+        ))
     }
 }
 
