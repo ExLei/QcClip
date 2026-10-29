@@ -2766,13 +2766,12 @@ fn render_row(
                     let html_images = drag_window.read(cx).loaded_html_images.clone();
                     // 从多选集合中的一项开始拖拽时，整组作为一次外部拖拽，不做列表内重排。
                     let multi_selected = &drag_window.read(cx).multi_selected_item_ids;
-                    let stack_count = if multi_selected.len() > 1
-                        && multi_selected.contains(&drag.history_id)
-                    {
-                        multi_selected.len()
-                    } else {
-                        1
-                    };
+                    let stack_count =
+                        if multi_selected.len() > 1 && multi_selected.contains(&drag.history_id) {
+                            multi_selected.len()
+                        } else {
+                            1
+                        };
                     drag.stack_count.set(stack_count);
                     if !drag.is_multi() {
                         drag_window.update(cx, |this, cx| {
@@ -2860,7 +2859,8 @@ fn render_row(
                                         translator.translate("main.multi_selection.drag"),
                                         format!(
                                             "{}：{error}",
-                                            translator.translate("main.multi_selection.drag_failed")
+                                            translator
+                                                .translate("main.multi_selection.drag_failed")
                                         ),
                                         crate::windows::notification::NotificationLevel::Error,
                                         cx,
