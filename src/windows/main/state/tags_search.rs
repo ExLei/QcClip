@@ -617,8 +617,8 @@ impl MainWindow {
     pub(crate) fn prepare_window_shown(&mut self, cx: &mut Context<Self>) {
         let clipboard = crate::config_runtime::clipboard_config(cx);
         if clipboard.auto_scroll_to_top && self.active_tab != TabId::Emoji {
-            self.list_scroll_handle
-                .scroll_to_item(0, gpui::ScrollStrategy::Top);
+            // 显示动画首帧时窗口仍是折叠高度，延迟的 scroll_to_item 会按过小的视口对齐首项底部，
+            // 动画结束后再回到顶部时产生可见滚动；直接设置偏移不依赖视口尺寸。
             self.list_scroll_handle
                 .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
             self.list_smooth_scroll.reset();

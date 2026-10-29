@@ -973,8 +973,10 @@ impl MainWindow {
                                     && crate::config_runtime::clipboard_config(cx)
                                         .auto_scroll_to_top
                                 {
+                                    // 窗口隐藏时新增条目，延迟滚动会在显示动画的折叠视口中执行，
+                                    // 直接设置偏移避免首项被按视口底部对齐。
                                     this.list_scroll_handle
-                                        .scroll_to_item(0, gpui::ScrollStrategy::Top);
+                                        .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
                                     this.list_smooth_scroll.reset();
                                 }
                                 cx.notify();
