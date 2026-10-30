@@ -59,6 +59,7 @@
   "main.gallery.sort.type": "类型",
   "main.gallery.sort.modified_date": "修改日期",
   "main.gallery.sort.created_date": "创建日期",
+  "main.gallery.sort.usage_frequency": "使用频率",
   "main.gallery.sort.ascending": "正序",
   "main.gallery.sort.descending": "倒序",
   "main.gallery.edit_current_group": "编辑当前组",
