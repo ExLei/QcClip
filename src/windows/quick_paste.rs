@@ -110,17 +110,19 @@ impl QuickPasteWindowService {
             blob_store,
             clipboard_write_suppressor,
         );
-        cx.update_global::<Self, _>(|service, cx| {
+        // 关闭窗口会同步触发 on_window_closed 回调并再次访问本全局，必须在 update_global 之外执行。
+        let window = cx.update_global::<Self, _>(|service, _| {
             service.active = false;
             service.closing = false;
-            service.window.take().inspect(|window| {
-                let _ = window.update(cx, |_, window, _| window.remove_window());
-            });
             service.history_repository = Some(history_repository);
             service.favorite_repository = Some(favorite_repository);
             service.paste_service = Some(paste_service);
             service.image_preview_service = Some(image_preview_service);
+            service.window.take()
         });
+        if let Some(window) = window {
+            let _ = window.update(cx, |_, window, _| window.remove_window());
+        }
     }
 
     pub(crate) fn show(cx: &mut App) {
@@ -484,13 +486,15 @@ impl QuickPasteWindowService {
 
     pub(crate) fn cancel(cx: &mut App) {
         crate::hotkey::deactivate_quick_paste_navigation(cx);
-        cx.update_global::<Self, _>(|service, cx| {
+        // 关闭窗口会同步触发 on_window_closed 回调并再次访问本全局，必须在 update_global 之外执行。
+        let window = cx.update_global::<Self, _>(|service, _| {
             service.active = false;
             service.closing = false;
-            if let Some(window) = service.window.take() {
-                let _ = window.update(cx, |_, window, _| window.remove_window());
-            }
+            service.window.take()
         });
+        if let Some(window) = window {
+            let _ = window.update(cx, |_, window, _| window.remove_window());
+        }
     }
 
     pub(crate) fn navigate(navigation: crate::hotkey::QuickPasteNavigation, cx: &mut App) {
