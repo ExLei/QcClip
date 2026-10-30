@@ -59,6 +59,7 @@
   "main.gallery.sort.type": "Type",
   "main.gallery.sort.modified_date": "Modified date",
   "main.gallery.sort.created_date": "Created date",
+  "main.gallery.sort.usage_frequency": "Usage frequency",
   "main.gallery.sort.ascending": "Ascending",
   "main.gallery.sort.descending": "Descending",
   "main.gallery.edit_current_group": "Edit current group",
