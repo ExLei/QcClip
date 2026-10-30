@@ -2,6 +2,8 @@ name: 每夜构建发行版
 
 # 计划任务只会运行默认分支（dev）上的工作流。
 # 因此工作流放在 dev：先强制同步 fork 的 main 到上游 main，再构建并发布。
+# 同步 main 用仓库 secret MAIN_SYNC_DEPLOY_KEY（写权限 deploy key）：GITHUB_TOKEN
+# 是 GitHub App 令牌，没有 workflows 权限，推不动含 .github/workflows 变动的提交。
 on:
   schedule:
     # 每天 03:00（Asia/Shanghai），即 19:00 UTC。
