@@ -40,39 +40,61 @@ jobs:
     permissions:
       contents: write
     outputs:
-      sha: ${{ steps.upstream.outputs.sha }}
+      sha: ${{ steps.sync.outputs.sha }}
+      upstream: ${{ steps.sync.outputs.upstream }}
     steps:
-      - name: 读取上游 main 最新提交
-        id: upstream
-        shell: bash
-        run: |
-          set -euo pipefail
-          sha="$(git ls-remote "https://github.com/${UPSTREAM_REPOSITORY}.git" refs/heads/main | cut -f1)"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "无效的上游提交：$sha" >&2; exit 1; }
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "上游 main：$sha"
-
-      - name: 强制同步 fork main
+      - name: 同步 fork main 到上游 main
+        id: sync
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
         run: |
           set -euo pipefail
-          # refs 接口只接受 repo 里已有的提交；上游新提交直接拿来更新 main 会被拒绝
-          # （403 Resource not accessible by integration）。先用 merge-upstream 让服务端
-          # 把上游提交取进 fork，再强制对齐到该提交。
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/merge-upstream" \
-            -f branch=main >/dev/null \
-            || { echo "merge-upstream 失败：无法从 ${UPSTREAM_REPOSITORY} 同步 main" >&2; exit 1; }
-          actual="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
-          if [[ "$actual" != "$UPSTREAM_SHA" ]]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/main" \
-              -f sha="$UPSTREAM_SHA" -F force=true >/dev/null
-            actual="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          upstream="$(git ls-remote "https://github.com/${UPSTREAM_REPOSITORY}.git" refs/heads/main | cut -f1)"
+          [[ "$upstream" =~ ^[0-9a-f]{40}$ ]] || { echo "无效的上游提交：$upstream" >&2; exit 1; }
+          echo "上游 main：$upstream"
+
+          # 首选服务端 merge-upstream：它会把上游提交取进 fork 并把 main 快进过去。
+          synced=""
+          if gh api --method POST "repos/${GITHUB_REPOSITORY}/merge-upstream" -f branch=main >/dev/null 2>&1; then
+            synced="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
           fi
-          [[ "$actual" == "$UPSTREAM_SHA" ]] || { echo "fork main 同步失败：$actual" >&2; exit 1; }
-          echo "fork main -> $actual"
+
+          if [[ "$synced" == "$upstream" ]]; then
+            echo "fork main 已与上游一致：$synced"
+          else
+            # 上游改动 .github/workflows 时，GITHUB_TOKEN 没有 workflows 权限，
+            # merge-upstream 和直接推送都会被 422 拒绝。这里构造一个镜像提交：
+            # 父提交取当前 main，树用上游内容，但 .github/workflows 保留本仓库
+            # 自己的版本，推送差异里不含工作流改动才能通过权限校验。
+            echo "merge-upstream 未生效，改用保留 .github/workflows 的镜像提交"
+            work="$(mktemp -d)"
+            git -C "$work" init -q
+            git -C "$work" remote add fork "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git -C "$work" remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+            git -C "$work" fetch -q --no-tags --depth=1 fork main
+            base="$(git -C "$work" rev-parse FETCH_HEAD)"
+            git -C "$work" fetch -q --no-tags --depth=1 upstream main
+            upstream="$(git -C "$work" rev-parse FETCH_HEAD)"
+            git -C "$work" read-tree "$upstream"
+            git -C "$work" rm -rq --cached .github/workflows 2>/dev/null || true
+            git -C "$work" read-tree --prefix=.github/workflows/ "${base}:.github/workflows" 2>/dev/null || true
+            tree="$(git -C "$work" write-tree)"
+            synced="$(git -C "$work" -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit-tree "$tree" -p "$base" -m "chore: 镜像上游 ${upstream}（保留本仓库 .github/workflows）")"
+            git -C "$work" push -q --force fork "${synced}:refs/heads/main"
+            rm -rf "$work"
+            echo "镜像提交：$synced（上游 $upstream，基于 $base）"
+          fi
+
+          actual="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "$actual" == "$synced" ]] || { echo "fork main 同步失败：$actual" >&2; exit 1; }
+          {
+            echo "sha=$synced"
+            echo "upstream=$upstream"
+          } >> "$GITHUB_OUTPUT"
+          echo "fork main -> $synced"
 
   build:
     name: 构建 Windows ${{ matrix.arch }}
@@ -209,7 +231,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          UPSTREAM_SHA: ${{ needs.sync.outputs.sha }}
+          UPSTREAM_SHA: ${{ needs.sync.outputs.upstream }}
+          TAG_SHA: ${{ needs.sync.outputs.sha }}
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
@@ -242,7 +265,7 @@ jobs:
           fi
 
           gh api --method POST "repos/$repo/git/refs" \
-            -f ref="refs/tags/$tag" -f sha="$UPSTREAM_SHA" >/dev/null
+            -f ref="refs/tags/$tag" -f sha="$TAG_SHA" >/dev/null
 
           notes="$(cat <<EOF
           QcClip 自动构建（main）
@@ -255,6 +278,10 @@ jobs:
           本发行版由定时构建自动生成，未经人工测试。
           EOF
           )"
+
+          if [[ "$TAG_SHA" != "$UPSTREAM_SHA" ]]; then
+            notes+=$(printf '\n\n- 镜像提交：https://github.com/%s/commit/%s\n- 说明：上游改动了 .github/workflows，镜像提交保留了本仓库的工作流文件。' "$repo" "$TAG_SHA")
+          fi
 
           gh release create "$tag" --repo "$repo" --verify-tag --prerelease=false \
             --title "$title" --notes "$notes" "${assets[@]}"
