@@ -59,9 +59,18 @@ jobs:
           UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
         run: |
           set -euo pipefail
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/main" \
-            -f sha="$UPSTREAM_SHA" -F force=true >/dev/null
+          # refs 接口只接受 repo 里已有的提交；上游新提交直接拿来更新 main 会被拒绝
+          # （403 Resource not accessible by integration）。先用 merge-upstream 让服务端
+          # 把上游提交取进 fork，再强制对齐到该提交。
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/merge-upstream" \
+            -f branch=main >/dev/null \
+            || { echo "merge-upstream 失败：无法从 ${UPSTREAM_REPOSITORY} 同步 main" >&2; exit 1; }
           actual="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [[ "$actual" != "$UPSTREAM_SHA" ]]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/main" \
+              -f sha="$UPSTREAM_SHA" -F force=true >/dev/null
+            actual="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          fi
           [[ "$actual" == "$UPSTREAM_SHA" ]] || { echo "fork main 同步失败：$actual" >&2; exit 1; }
           echo "fork main -> $actual"
 
