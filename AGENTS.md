@@ -27,3 +27,17 @@
 3.git提交前规范
 - 提交前在项目根目录运行 `cargo fmt`
 - 仅格式化改动使用 `style` 前缀单独提交
+
+## Agent skills
+
+### Issue tracker
+
+议题与规格说明都放在 GitHub 议题里，仓库是 `ExLei/QcClip`（本仓库 origin，Issues 已开启）；`gh` 默认解析到上游，所以每条命令显式带 `-R ExLei/QcClip`。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+分诊用五个规范标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`，已在 `ExLei/QcClip` 建好。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+单上下文布局：仓库根目录一份 `GLOSSARY.md` 加 `docs/adr/`。See `docs/agents/domain.md`.
