@@ -23,6 +23,7 @@ use crate::{
     config_runtime,
     domain::clipboard::{ClipboardItemId, HistoryItemId},
     platform::{input, window as platform_window},
+    services::database::HistoryRepository,
 };
 
 pub use state::MainWindow;
@@ -36,7 +37,10 @@ pub(crate) fn uses_sidebar_layout(logical_width: f32) -> bool {
 pub(crate) struct MainWindowService {
     window: Option<AnyWindowHandle>,
     main_view: Option<Entity<MainWindow>>,
+    history_repository: Option<HistoryRepository>,
     history_cleanup_pending: bool,
+    missing_scan_pending: bool,
+    missing_scan_generation: u64,
     blocking_operation: Option<&'static str>,
     mouse_event_listener_id: Option<u64>,
     #[cfg(target_os = "windows")]
@@ -134,10 +138,138 @@ impl MainWindowService {
     }
 
     pub(crate) fn set_main_view(main_view: Entity<MainWindow>, cx: &mut App) {
-        cx.update_global::<Self, _>(|service, _| service.main_view = Some(main_view));
+        let history_repository = main_view.read(cx).history_repository.clone();
+        cx.update_global::<Self, _>(|service, _| {
+            service.main_view = Some(main_view);
+            service.history_repository = Some(history_repository);
+        });
+        Self::request_missing_scan(cx);
+    }
+
+    pub(crate) fn missing_file_setting_changed(enabled: bool, cx: &mut App) {
+        cx.update_global::<Self, _>(|service, _| {
+            service.missing_scan_generation = service.missing_scan_generation.wrapping_add(1);
+        });
+        if enabled {
+            Self::request_missing_scan(cx);
+            return;
+        }
+        let changed = Self::missing_files_repository(cx).is_some_and(|repository| {
+            match repository.clear_missing_files() {
+                Ok(changed) => changed,
+                Err(error) => {
+                    // The filter is already disabled; clearing only makes the
+                    // persisted state match. Report the failure and refresh.
+                    tracing::warn!(%error, "清除失效文件隐藏状态失败");
+                    true
+                }
+            }
+        });
+        Self::refresh_missing_ui(cx, changed);
+    }
+
+    pub(crate) fn request_missing_scan(cx: &mut App) {
+        if !config_runtime::history_config(cx).auto_hide_missing_files {
+            Self::refresh_missing_ui(cx, false);
+            return;
+        }
+        let Some(repository) = Self::missing_files_repository(cx) else {
+            return;
+        };
+        if !repository.supports_missing_files() {
+            tracing::debug!("数据库未提供失效文件隐藏表，跳过扫描");
+            return;
+        }
+        let generation = cx.update_global::<Self, _>(|service, _| {
+            service.missing_scan_generation = service.missing_scan_generation.wrapping_add(1);
+            if service.missing_scan_pending {
+                None
+            } else {
+                service.missing_scan_pending = true;
+                Some(service.missing_scan_generation)
+            }
+        });
+        let Some(generation) = generation else { return };
+        cx.spawn(async move |cx| {
+            let scan = cx
+                .background_executor()
+                .spawn({
+                    let repository = repository.clone();
+                    async move { repository.scan_missing_files() }
+                })
+                .await;
+            let move_recovered = cx.update(|cx| {
+                if !Self::missing_scan_is_current(cx, generation) {
+                    Self::finish_missing_scan(cx);
+                    Self::request_missing_scan(cx);
+                    return None;
+                }
+                Some(config_runtime::history_config(cx).move_recovered_missing_files_to_top)
+            });
+            let Some(move_recovered) = move_recovered else {
+                return;
+            };
+            // The scan and the hidden-set replacement run off the UI thread. A
+            // failed scan never replaces the previous table contents.
+            let result = cx
+                .background_executor()
+                .spawn({
+                    let repository = repository.clone();
+                    async move {
+                        let update = repository.apply_missing_scan(scan?)?;
+                        if move_recovered && !update.recovered.is_empty() {
+                            repository.move_recovered_missing_files_to_top(&update.recovered);
+                        }
+                        Ok::<_, crate::services::database::missing_files::MissingFilesError>(update)
+                    }
+                })
+                .await;
+            cx.update(|cx| {
+                Self::finish_missing_scan(cx);
+                if !Self::missing_scan_is_current(cx, generation) {
+                    Self::request_missing_scan(cx);
+                    return;
+                }
+                match result {
+                    Ok(update) => Self::refresh_missing_ui(cx, update.changed),
+                    Err(crate::services::database::missing_files::MissingFilesError::Database(
+                        crate::services::database::DatabaseError::DataSwitching,
+                    )) => {
+                        tracing::debug!("失效文件扫描等待数据切换完成");
+                    }
+                    Err(error) => tracing::warn!(%error, "失效文件扫描失败"),
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn missing_files_repository(cx: &App) -> Option<HistoryRepository> {
+        cx.read_global::<Self, _>(|service, _| service.history_repository.clone())
+            .or_else(|| {
+                cx.global::<Self>()
+                    .main_view
+                    .as_ref()
+                    .map(|main_view| main_view.read(cx).history_repository.clone())
+            })
+    }
+
+    fn missing_scan_is_current(cx: &App, generation: u64) -> bool {
+        config_runtime::history_config(cx).auto_hide_missing_files
+            && cx.read_global::<Self, _>(|service, _| service.missing_scan_generation == generation)
+    }
+
+    fn finish_missing_scan(cx: &mut App) {
+        cx.update_global::<Self, _>(|service, _| service.missing_scan_pending = false);
+    }
+
+    fn refresh_missing_ui(cx: &mut App, changed: bool) {
+        Self::refresh_missing_visibility(cx, changed);
+        crate::windows::quick_paste::QuickPasteWindowService::refresh_missing_files(cx, changed);
     }
 
     pub(crate) fn handle_window_shown(window: &mut Window, cx: &mut App) {
+        Self::request_missing_scan(cx);
         let main_view = cx
             .try_global::<Self>()
             .and_then(|service| service.main_view.clone());
@@ -172,6 +304,21 @@ impl MainWindowService {
             .and_then(|service| service.main_view.clone());
         if let Some(main_view) = main_view {
             main_view.update(cx, |view, cx| view.refresh_history(cx));
+        }
+    }
+
+    fn refresh_missing_visibility(cx: &mut App, changed: bool) {
+        let main_view = cx
+            .try_global::<Self>()
+            .and_then(|service| service.main_view.clone());
+        if let Some(main_view) = main_view {
+            main_view.update(cx, |view, cx| {
+                if changed {
+                    view.refresh_missing_visibility(cx);
+                } else {
+                    view.retry_missing_visibility(cx);
+                }
+            });
         }
     }
 
@@ -319,6 +466,7 @@ impl MainWindowService {
                 let (detail, level) = match result {
                     Ok(report) => {
                         Self::refresh_history(cx);
+                        Self::request_missing_scan(cx);
                         (
                             translator.translate_with_args(
                                 "settings.data_management.clear_all_history_success",
@@ -346,12 +494,30 @@ impl MainWindowService {
 
     pub(crate) fn reload_after_data_import(cx: &mut App) {
         window_visibility::apply_imported_window_state(cx);
+        let repository = cx
+            .read_global::<Self, _>(|service, _| service.history_repository.clone())
+            .or_else(|| {
+                cx.try_global::<Self>()
+                    .and_then(|service| service.main_view.clone())
+                    .map(|main_view| main_view.read(cx).history_repository.clone())
+            });
+        if let Some(repository) = repository {
+            let changed = match repository.clear_missing_files() {
+                Ok(changed) => changed,
+                Err(error) => {
+                    tracing::warn!(%error, "清除导入数据的失效文件隐藏状态失败");
+                    true
+                }
+            };
+            Self::refresh_missing_ui(cx, changed);
+        }
         let main_view = cx
             .try_global::<Self>()
             .and_then(|service| service.main_view.clone());
         if let Some(main_view) = main_view {
             main_view.update(cx, |view, cx| view.reload_after_data_import(cx));
         }
+        Self::request_missing_scan(cx);
     }
 
     pub(crate) fn replace_data_sources(
@@ -361,6 +527,10 @@ impl MainWindowService {
         cx: &mut App,
     ) {
         window_visibility::apply_imported_window_state(cx);
+        let history_repository = HistoryRepository::new(database.clone(), blob_store.clone());
+        cx.update_global::<Self, _>(|service, _| {
+            service.history_repository = Some(history_repository);
+        });
         let main_view = cx
             .try_global::<Self>()
             .and_then(|service| service.main_view.clone());
@@ -369,6 +539,7 @@ impl MainWindowService {
                 view.replace_data_sources(database, blob_store, data_root, cx);
             });
         }
+        Self::request_missing_scan(cx);
     }
 
     pub(crate) fn stop_clipboard_listener(cx: &mut App) {
@@ -905,5 +1076,138 @@ pub(crate) fn dispatch_session_shortcut(id: SessionShortcutId, cx: &mut App) {
         });
     }) {
         tracing::debug!(%error, "执行窗口快捷键失败");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::database::Database;
+    use crate::services::storage::RawBlobStore;
+    use std::fs;
+
+    #[test]
+    fn disabling_hidden_files_clears_snapshot_without_main_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("data");
+        fs::create_dir_all(&root).unwrap();
+        let database = Database::open(root.join("qcclip.sqlite3")).unwrap();
+        let blobs = RawBlobStore::new(&root).unwrap();
+        let history_id =
+            crate::services::custom_text::CustomTextService::new(database.clone(), blobs.clone())
+                .create_manual_text("hidden item")
+                .unwrap();
+        let repository = HistoryRepository::new(database, blobs);
+        let item_id = repository.item_ids_for_history_ids(&[history_id]).unwrap()[&history_id];
+        repository.seed_missing_files(vec![item_id]);
+        let repository_check = repository.clone();
+
+        gpui_platform::application().run(move |cx| {
+            cx.set_global(MainWindowService::default());
+            cx.update_global::<MainWindowService, _>(|service, _| {
+                service.history_repository = Some(repository);
+            });
+            MainWindowService::missing_file_setting_changed(false, cx);
+            assert_eq!(repository_check.hidden_missing_files_len(), 0);
+            assert!(
+                !repository_check.clear_missing_files().unwrap(),
+                "clearing an already empty hidden set reports no change"
+            );
+            cx.quit();
+        });
+    }
+
+    #[test]
+    fn data_import_clears_hidden_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.json"), b"{}").unwrap();
+        fs::write(root.join("state.json"), b"{}").unwrap();
+        let database = Database::open(root.join("qcclip.sqlite3")).unwrap();
+        let blobs = RawBlobStore::new(&root).unwrap();
+        let history_id =
+            crate::services::custom_text::CustomTextService::new(database.clone(), blobs.clone())
+                .create_manual_text("hidden item")
+                .unwrap();
+        let repository = HistoryRepository::new(database, blobs);
+        let item_id = repository.item_ids_for_history_ids(&[history_id]).unwrap()[&history_id];
+        repository.seed_missing_files(vec![item_id]);
+        let repository_check = repository.clone();
+
+        gpui_platform::application().run(move |cx| {
+            gpui_component::init(cx);
+            crate::config_runtime::ConfigRuntime::install(root.join("config.json"), cx);
+            crate::state_runtime::StateRuntime::install(root.join("state.json"), cx);
+            cx.set_global(MainWindowService::default());
+            cx.update_global::<MainWindowService, _>(|service, _| {
+                service.history_repository = Some(repository);
+            });
+            MainWindowService::reload_after_data_import(cx);
+            assert_eq!(repository_check.hidden_missing_files_len(), 0);
+            cx.quit();
+        });
+    }
+
+    #[test]
+    fn missing_scan_runs_without_main_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.json"),
+            r#"{"history":{"autoHideMissingFiles":true}}"#,
+        )
+        .unwrap();
+        let database = Database::open(root.join("qcclip.sqlite3")).unwrap();
+        let blobs = RawBlobStore::new(&root).unwrap();
+        let missing = root.join("missing-without-window.txt");
+        let mut bytes = missing.to_string_lossy().as_bytes().to_vec();
+        bytes.extend_from_slice(&[0, 0]);
+        let format = crate::domain::capture::RawFormat::captured(
+            "windows",
+            "CF_HDROP",
+            "CF_HDROP",
+            crate::domain::capture::FormatKind::FileList,
+            bytes,
+            0,
+            true,
+        );
+        let capture =
+            crate::services::capture::CaptureService::new(database.clone(), blobs.clone());
+        capture
+            .store_captured_clipboard(&crate::domain::capture::CapturedClipboard {
+                primary_format_identity: Some(("windows".to_owned(), "CF_HDROP".to_owned())),
+                formats: vec![format],
+                preview_candidate: Some("missing".to_owned()),
+                source_application: crate::domain::capture::SourceApplication::default(),
+            })
+            .unwrap();
+        let repository = HistoryRepository::new(database, blobs);
+        let repository_check = repository.clone();
+
+        gpui_platform::application().run(move |cx| {
+            gpui_component::init(cx);
+            crate::config_runtime::ConfigRuntime::install(root.join("config.json"), cx);
+            cx.set_global(MainWindowService::default());
+            cx.update_global::<MainWindowService, _>(|service, _| {
+                service.history_repository = Some(repository);
+            });
+            MainWindowService::request_missing_scan(cx);
+            cx.spawn(async move |cx| {
+                for _ in 0..100 {
+                    if !cx.update(|cx| cx.global::<MainWindowService>().missing_scan_pending) {
+                        break;
+                    }
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(10))
+                        .await;
+                }
+                assert!(!cx.update(|cx| cx.global::<MainWindowService>().missing_scan_pending));
+                assert_eq!(repository_check.hidden_missing_files_len(), 1);
+                cx.update(|cx| cx.quit());
+            })
+            .detach();
+        });
     }
 }
