@@ -2,8 +2,10 @@ name: 构建 Windows 并上传草稿发布
 
 on:
   push:
+    # 只响应版本标签，避免归档/备份标签（如 archive/、backup/）触发发布构建。
     tags:
-      - '**'
+      - 'v[0-9]*'
+      - '[0-9]*'
 
 permissions:
   contents: read
